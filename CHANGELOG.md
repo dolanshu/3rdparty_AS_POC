@@ -22,6 +22,53 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 - Documentation aligned with M2: milestone status, M2 evidence figures, sample references,
   demo script and readiness notes no longer describe the call demo as unavailable.
 
+## [0.4.0] - 2026-09-16 — M3 Console
+
+### Added
+
+- Internal API rewritten from `http.server` scaffolding to a FastAPI application served by
+  uvicorn on a daemon thread (ADR-0002, `AGENT.md` §6). The app factory
+  (`create_internal_api_app`) closes over the existing registries so every route handler is
+  a thin read of a lock-guarded snapshot. New endpoints: `GET /api/v1/rules` (read-only
+  active rule set), `GET /api/v1/traces/{call_id}` (one call), `WS /ws/events` (live event
+  feed that polls the `TraceRecorder` and pushes new call traces as JSON batches).
+- Console process (`src/console/main.py`): full telecom-operations UI per `AGENT.md` §4.4 —
+  dark theme, top status bar (peer state, version, uptime, call counters, WebSocket
+  indicator), left navigation (Call Trace / Rules / Configuration / Statistics / About),
+  live message flow with direction colour coding and rule-hit highlighting, Call-ID filter,
+  expandable payload viewer, inline SVG topology (S-SBC <-> AS <-> Next-Hop), statistics
+  dashboard with stat cards and bar charts, rules table, configuration view. All CSS and JS
+  inline — no third-party front-end libraries (REQ-NF-010). The page injects the AS API URL
+  at request time. Fixed a missing `if __name__ == "__main__"` guard.
+- `tests/integration/test_console.py`: 5 new tests covering ACC-M3-001 (no third-party libs,
+  all four §4.4 UI surfaces, AS API URL injection) and ACC-M3-002 (internal API serves
+  health/metrics/rules/traces; console runs as a separate process).
+- `AGENT.md` §14: added rule 9 (delegate execution to subagents) and §14.1 (how to delegate
+  via team mode).
+- `pyproject.toml`: `fastapi` + `uvicorn[standard]` added to the `as` optional-dependency
+  group (the internal API imports them at runtime).
+
+### Verified
+
+- Console page served by a real process contains dark theme (`#0d1117`), status bar labels,
+  five navigation items, direction colours, rule-hit highlighting, SVG topology with S-SBC
+  and AS nodes, and no external `<script src>` or `<link href>` references.
+- Internal API serves `GET /healthz` -> `{"status":"ok",...}`, `GET /api/v1/metrics` ->
+  counters, `GET /api/v1/rules` -> active rule set, `GET /api/v1/traces` -> call list, `GET
+  /api/v1/traces/{call_id}` -> single trace (empty for unknown Call-ID).
+- Console runs as a separate process that reaches the AS only through the internal API
+  (ADR-0002); the served page has the AS API URL injected and no external references.
+- Gates: `ruff format --check .` (66 files), `ruff check .`, `mypy` (20 source files) and
+  `pytest` (118 passed, 0 skipped) are green.
+
+### Notes
+
+- Version node: `0.4.0` because the project gained a user-visible capability — the
+  operations console and the full internal API. This is a feature addition (ADR-0002 naming
+  FastAPI + uvicorn; `AGENT.md` §6 pinning it).
+- The M1 `InternalApiServer` was documented as "scaffolding for the FastAPI application of
+  M3"; M3 replaced it, not refactored it. The payload builder functions are unchanged.
+
 ## [0.3.0] - 2026-09-16 — M2 Number translation
 
 ### Added

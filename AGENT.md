@@ -411,6 +411,42 @@ Non-negotiable for AI agents (and a good default for humans):
    `docs/production-gaps.md` (§3), not into silence.
 8. **Presentation is part of the task.** Naming, layout, documentation and evidence are
    deliverables, not afterthoughts (§4).
+9. **Delegate execution to subagents.** The main agent must not perform coding, testing,
+   or file editing itself. It plans, splits the work, and delegates each milestone (or
+   work-stream within a milestone) to a subagent. The main agent reviews the subagent's
+   output and reports back to the maintainer; it does not write the code.
+
+### 14.1 How to delegate (writing subagents via team mode)
+
+The `Task` tool has two execution modes. Knowing the difference is mandatory, because a
+wrong choice silently makes the subagent read-only and blocks the milestone:
+
+- **Synchronous subagent** (no `name` argument, e.g. `code-explorer`): read-only. It has
+  only search/read tools. Use it for exploration and investigation, **never** for code
+  changes. This is the "read-only subagent" trap M0 hit.
+- **Team mode** (`name` argument supplied): the spawned member runs detached in the
+  background and **can edit files**. This is the only correct way to delegate milestone
+  execution.
+
+To spawn a writing subagent for a milestone:
+
+1. Call the `Task` tool with:
+   - `name`: a short role label, e.g. `m3-dev` (supplying `name` turns on team mode).
+   - `prompt`: the milestone brief. State the scope, the opening ritual (§15 handover
+     protocol), the DoD (§16), and that the subagent is responsible for the code, tests,
+     docs, commit and tag.
+   - `mode`: `"acceptEdits"`. This auto-accepts the subagent's file edits so execution
+     does not stall waiting for per-edit approval. (Use `"bypassPermissions"` only when
+     shell commands need auto-approval too; otherwise prefer the narrower
+     `"acceptEdits"`.)
+   - `max_turns`: set high enough to finish the milestone, or omit.
+2. Review the subagent's final message: verify DoD evidence, ask it to fix gaps, do **not**
+   redo its work in the main agent.
+3. (Optional) `team_delete` once the milestone is committed and tagged.
+
+Rule of thumb: **read-only work -> synchronous subagent; any file change -> team mode with
+`mode = "acceptEdits"`.** If a subagent reports it "cannot edit" or "is read-only", you
+spawned it in the wrong mode — respawn it in team mode.
 
 ## 15. Roadmap
 

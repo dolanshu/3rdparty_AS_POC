@@ -1,6 +1,6 @@
 [project]
 name = "third-party-as-poc"
-version = "0.3.0"
+version = "0.4.0"
 description = "Proof of concept of a third-party IMS/SIP Application Server (B2BUA) reached over a SIP trunk from the operator's S-SBC"
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
@@ -20,7 +20,15 @@ classifiers = [
 dependencies = ["sippy==2.4.2"]
 
 [project.optional-dependencies]
-as = ["pydantic>=2.0", "pydantic-settings>=2.3", "pyyaml>=6.0"]
+# fastapi + uvicorn are now runtime dependencies of the AS: the internal API (M3,
+# ADR-0002) is a FastAPI application served by uvicorn on a daemon thread.
+as = [
+  "pydantic>=2.0",
+  "pydantic-settings>=2.3",
+  "pyyaml>=6.0",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+]
 console = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
 
 [dependency-groups]
@@ -87,6 +95,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D104"]
 "src/as_app/observability/logging.py" = ["A001", "A005"]
+# The console page template is inline HTML/CSS/JS with intentionally long lines.
+"src/console/main.py" = ["E501"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

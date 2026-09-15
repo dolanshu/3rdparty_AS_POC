@@ -18,20 +18,31 @@ The AS and the console are separate processes: sippy's ``ED2.loop()`` blocks, so
 never share a thread or an asyncio loop with a web server (ADR-0002). The console talks
 to the AS only through this API, never by importing AS modules.
 
-M0 defines the payload shapes; the FastAPI application behind them is built in M3.
+The AS serves the API from a daemon thread via uvicorn; it only reads snapshots (counters
+and traces are lock-guarded), so it never blocks the sippy event loop (ADR-0002,
+``AGENT.md`` section 6). CORS is open because the console runs on a different port and
+the API is a loopback-only demo surface (ADR-0002, gaps accepted).
 
-Until then the AS serves the same payloads from a minimal standard-library HTTP server
-that runs on its own thread. It is deliberately not a web framework: ``ED2.loop()`` owns
-the main thread (ADR-0002), so nothing here may block the sippy event loop.
+Endpoints (ADR-0002)::
+
+    GET /healthz                   — liveness and readiness
+    GET /api/v1/metrics            — counters, dispositions, rule hits, peer status
+    GET /api/v1/rules              — active rule set, read-only
+    GET /api/v1/traces             — most recent calls with their trace events
+    GET /api/v1/traces/{call_id}   — one call, Call-ID keyed
+    WS  /ws/events                 — live event feed for the console
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from as_app.observability.metrics import MetricsRegistry
 from as_app.observability.tracing import CallTrace, TraceEvent, TraceRecorder
@@ -40,10 +51,12 @@ from as_app.routing.rules import RuleSet, RuleSetStore
 __all__ = [
     "INTERNAL_API_ROUTES",
     "InternalApiServer",
+    "create_internal_api_app",
     "health_payload",
     "metrics_payload",
     "rules_payload",
     "trace_payload",
+    "traces_payload",
 ]
 
 #: Endpoints the console may use. Address and port come from ``INTERNAL_API_*``
@@ -56,6 +69,14 @@ INTERNAL_API_ROUTES: dict[str, str] = {
     "GET /api/v1/traces/{call_id}": "one call, Call-ID keyed",
     "WS /ws/events": "live event feed for the console",
 }
+
+#: Polling interval, in seconds, of the WebSocket event feed. The TraceRecorder is a
+#: passive store (not a pub/sub), so the feed polls it for new calls and pushes the
+#: delta. This is a POC simplification — see ``docs/production-gaps.md``.
+_WS_POLL_SECONDS = 1.0
+
+#: Maximum number of traces the WebSocket feed sends in one batch.
+_WS_MAX_TRACES = 50
 
 
 def health_payload(*, version: str, uptime_seconds: float, rule_set_loaded: bool) -> dict[str, Any]:
@@ -167,13 +188,135 @@ def traces_payload(recorder: TraceRecorder, limit: int = 20) -> dict[str, Any]:
     return {"calls": [trace_payload(trace) for trace in recorder.recent(limit)]}
 
 
-class InternalApiServer:
-    """Minimal internal API server for the health endpoint and the counters.
+def create_internal_api_app(
+    *,
+    version: str,
+    rule_set_store: RuleSetStore,
+    metrics: MetricsRegistry,
+    tracer: TraceRecorder,
+    started_at: float,
+) -> FastAPI:
+    """Create the FastAPI application for the internal API.
 
-    M1 needs a live health endpoint and readable counters, but the console itself is M3.
-    This server therefore uses the standard library only, runs on its own daemon thread
-    and serves the very payloads the FastAPI application will serve in M3. It never
-    touches sippy and it never blocks ``ED2.loop()`` (ADR-0002).
+    The app factory is the seam between the pure payload builders and the AS process
+    state. It closes over the registries so every route handler is a thin read of a
+    lock-guarded snapshot (ADR-0002).
+
+    Args:
+        version: Version reported by the health endpoint.
+        rule_set_store: Source of the active rule set, reported as readiness.
+        metrics: Counter registry exposed on ``/api/v1/metrics``.
+        tracer: Trace recorder exposed on ``/api/v1/traces``.
+        started_at: ``time.monotonic()`` value at server creation, for uptime.
+
+    Returns:
+        A FastAPI application with the internal API routes.
+    """
+    app = FastAPI(title="3rd-party AS internal API", version=version)
+
+    # The console is a separate process on a different port; the API is loopback-only
+    # (ADR-0002, gaps accepted). Open CORS lets the browser fetch directly.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/healthz")
+    def health() -> dict[str, Any]:
+        """Liveness and readiness of the AS process.
+
+        Returns:
+            The health document with status, version, uptime and rule-set state.
+        """
+        return health_payload(
+            version=version,
+            uptime_seconds=time.monotonic() - started_at,
+            rule_set_loaded=rule_set_store.current is not None,
+        )
+
+    @app.get("/api/v1/metrics")
+    def get_metrics() -> dict[str, Any]:
+        """Counters, dispositions, rule hits and peer status.
+
+        Returns:
+            The metrics snapshot document.
+        """
+        return metrics_payload(metrics)
+
+    @app.get("/api/v1/rules")
+    def get_rules() -> dict[str, Any]:
+        """The active rule set, read-only.
+
+        Returns:
+            The rules document, or a 503 when no rule set is loaded.
+        """
+        rule_set = rule_set_store.current
+        if rule_set is None:
+            return JSONResponse({"error": "no rule set loaded"}, status_code=503)
+        return rules_payload(rule_set)
+
+    @app.get("/api/v1/traces")
+    def get_traces() -> dict[str, Any]:
+        """Most recent calls with their trace events.
+
+        Returns:
+            The traces list document.
+        """
+        return traces_payload(tracer)
+
+    @app.get("/api/v1/traces/{call_id}")
+    def get_trace(call_id: str) -> dict[str, Any]:
+        """One call, Call-ID keyed.
+
+        Args:
+            call_id: SIP Call-ID of the call.
+
+        Returns:
+            The trace document for the call (empty events when unknown).
+        """
+        return trace_payload(tracer.trace_for(call_id))
+
+    @app.websocket("/ws/events")
+    async def ws_events(websocket: WebSocket) -> None:
+        """Live event feed for the console.
+
+        Polls the trace recorder for new calls and pushes them as JSON batches. The
+        recorder is a passive store, so the feed is pull-based at a fixed interval — a
+        POC simplification documented in ``docs/production-gaps.md``.
+
+        Args:
+            websocket: The WebSocket connection from the console.
+        """
+        await websocket.accept()
+        seen_call_ids: set[str] = set(tracer.known_call_ids())
+        try:
+            while True:
+                await asyncio.sleep(_WS_POLL_SECONDS)
+                current_ids = set(tracer.known_call_ids())
+                new_ids = current_ids - seen_call_ids
+                if new_ids:
+                    recent = tracer.recent(limit=_WS_MAX_TRACES)
+                    payload = {
+                        "type": "traces",
+                        "traces": [trace_payload(t) for t in recent if t.call_id in new_ids],
+                    }
+                    await websocket.send_json(payload)
+                    seen_call_ids = current_ids
+        except WebSocketDisconnect:
+            pass
+
+    return app
+
+
+class InternalApiServer:
+    """FastAPI/uvicorn internal API server running on a daemon thread.
+
+    The AS process serves its internal API from this server. It runs on a daemon thread
+    with its own asyncio event loop (uvicorn installs no signal handlers on non-main
+    threads), so it never blocks the sippy event loop (ADR-0002). Every route handler
+    only reads lock-guarded snapshots.
 
     Attributes:
         address: Local address the server binds.
@@ -211,7 +354,7 @@ class InternalApiServer:
         self.metrics = metrics
         self.tracer = tracer
         self.started_at = time.monotonic()
-        self._httpd: ThreadingHTTPServer | None = None
+        self._server: Any = None
         self._thread: threading.Thread | None = None
 
     @property
@@ -220,85 +363,36 @@ class InternalApiServer:
         return time.monotonic() - self.started_at
 
     def start(self) -> None:
-        """Bind the port and serve in the background.
+        """Bind the port and serve in the background on a daemon thread.
 
         Raises:
             OSError: When the address and port cannot be bound.
         """
-        self._httpd = ThreadingHTTPServer((self.address, self.port), self._make_handler())
-        self._thread = threading.Thread(
-            target=self._httpd.serve_forever, name="internal-api", daemon=True
+        import uvicorn  # imported lazily: only the AS process runs the server
+
+        app = create_internal_api_app(
+            version=self.version,
+            rule_set_store=self.rule_set_store,
+            metrics=self.metrics,
+            tracer=self.tracer,
+            started_at=self.started_at,
         )
+        config = uvicorn.Config(
+            app,
+            host=self.address,
+            port=self.port,
+            log_level="error",
+            access_log=False,
+        )
+        self._server = uvicorn.Server(config)
+        self._thread = threading.Thread(target=self._server.run, name="internal-api", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
         """Stop serving and release the port."""
-        if self._httpd is not None:
-            self._httpd.shutdown()
-            self._httpd.server_close()
-            self._httpd = None
+        if self._server is not None:
+            self._server.should_exit = True
         if self._thread is not None:
-            self._thread.join(timeout=2.0)
+            self._thread.join(timeout=3.0)
             self._thread = None
-
-    def _make_handler(self) -> type[BaseHTTPRequestHandler]:
-        """Build the request handler class bound to this server instance.
-
-        Returns:
-            A ``BaseHTTPRequestHandler`` subclass serving the internal API routes.
-        """
-        server = self
-
-        class InternalApiHandler(BaseHTTPRequestHandler):
-            """Serves the internal API routes from the enclosing server instance."""
-
-            server_version = "as-internal-api/1.0"
-
-            def do_GET(self) -> None:  # noqa: N802 - stdlib naming
-                """Answer a ``GET`` request.
-
-                Returns:
-                    ``None``; the response is written to the socket.
-                """
-                payload, status = server._response_for(self.path)
-                body = json.dumps(payload).encode()
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-            def log_message(self, fmt: str, *args: Any) -> None:
-                """Keep the internal API out of the structured application log.
-
-                Args:
-                    fmt: Unused stdlib format string.
-                    *args: Unused stdlib format arguments.
-                """
-
-        return InternalApiHandler
-
-    def _response_for(self, path: str) -> tuple[dict[str, Any], int]:
-        """Build the payload and status code for a request path.
-
-        Args:
-            path: Request path, without query string handling.
-
-        Returns:
-            The payload and the HTTP status code.
-        """
-        route = path.split("?", 1)[0]
-        if route in ("/healthz", "/health"):
-            return (
-                health_payload(
-                    version=self.version,
-                    uptime_seconds=self.uptime_seconds,
-                    rule_set_loaded=self.rule_set_store.current is not None,
-                ),
-                200,
-            )
-        if route == "/api/v1/metrics":
-            return (metrics_payload(self.metrics), 200)
-        if route == "/api/v1/traces":
-            return (traces_payload(self.tracer), 200)
-        return ({"error": "not found", "path": route}, 404)
+        self._server = None

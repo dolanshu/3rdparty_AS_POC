@@ -600,7 +600,7 @@ wheels = [
 
 [[package]]
 name = "third-party-as-poc"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "sippy" },
@@ -608,9 +608,11 @@ dependencies = [
 
 [package.optional-dependencies]
 as = [
+    { name = "fastapi" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "uvicorn", extra = ["standard"] },
 ]
 console = [
     { name = "fastapi" },
@@ -633,11 +635,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", marker = "extra == 'as'", specifier = ">=0.110" },
     { name = "fastapi", marker = "extra == 'console'", specifier = ">=0.110" },
     { name = "pydantic", marker = "extra == 'as'", specifier = ">=2.0" },
     { name = "pydantic-settings", marker = "extra == 'as'", specifier = ">=2.3" },
     { name = "pyyaml", marker = "extra == 'as'", specifier = ">=6.0" },
     { name = "sippy", specifier = "==2.4.2" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'as'", specifier = ">=0.27" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'console'", specifier = ">=0.27" },
 ]
 provides-extras = ["as", "console"]

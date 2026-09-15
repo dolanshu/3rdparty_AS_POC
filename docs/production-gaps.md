@@ -39,9 +39,18 @@ POC behaviour | production requirement | why it differs.
 | Data retention | Traces kept in memory, bounded to a few hundred calls | Durable trace store with retention policy and privacy controls |
 | Testing | Tests run against the mock only | Interoperability testing against real S-SBC implementations |
 
+## Additional gaps registered while building M3
+
+| Area | POC behaviour | Production requirement |
+| --- | --- | --- |
+| Console event feed | `WS /ws/events` polls the `TraceRecorder` at a fixed 1-second interval and pushes new call traces as JSON batches | Event-driven pub/sub: the recorder pushes events as they are recorded, with backpressure handling and per-client filtering |
+| Console browser verification | The console page is fetched by an integration test but never driven by a real browser | Automated browser testing (e.g. Playwright) against a live call to verify real-time rendering, WebSocket connection and UI behaviour |
+| Console versioning | The console process reports `version: "0.1.0"` on its own health endpoint, independent of the AS version | Consistent version reporting across all three services, or a shared version source |
+
 ## Notes
 
 - Gaps are never "forgotten features": each one is a decision with an ADR or a row in this
-  table. `ADR-0003` (UDP only) and `ADR-0006` (signalling only) are the two largest.
+  table. `ADR-0003` (UDP only), `ADR-0006` (signalling only) and the M3 console gaps
+  (poll-based event feed, no browser verification) are the largest.
 - When a milestone closes a gap, move the row out of this table into `CHANGELOG.md` and
   record which acceptance item covers the new behaviour.

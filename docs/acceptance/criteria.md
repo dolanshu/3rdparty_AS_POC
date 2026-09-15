@@ -45,7 +45,7 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | ACC-M2-004 | YAML hot reload: a changed rules file activates at runtime; a broken one keeps the previous rule set | `uv run pytest tests/integration -q -k reload` | both reload tests pass (ADR-0004) | REQ-F-005 |
 | ACC-M2-005 | Translated-call message samples captured, not hand-written | `uv run python tools/capture_call.py` | 14 files in `docs/specs/message-samples/`; `01-in-invite-trunk.txt` carries `+8613800138000`, `03-out-invite-core.txt` carries `013800138000`, same Call-ID | REQ-NF-007 |
 
-## M3 — Console (planned)
+## M3 — Console (executed 2026-09-16)
 
 | ID | Criterion | Verification command | Expected result | Requirement |
 | --- | --- | --- | --- | --- |

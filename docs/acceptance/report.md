@@ -630,11 +630,150 @@ report, because they change with every capture; the files are the record.
 
 ## M3 — Console
 
-**Status: not executed.**
+**Status: executed 2026-09-16. 2 of 2 M3 items accepted.** The internal API was rewritten
+from the M1 `http.server` scaffolding to a FastAPI application served by uvicorn on a daemon
+thread (ADR-0002). The console is a separate process (`src/console/`) serving a dark
+operations UI with no third-party front-end libraries.
 
-| ID | Result |
-| --- | --- |
-| ACC-M3-001 … ACC-M3-002 | pending — M3 |
+### 1. Command and output
+
+Quality gates:
+
+```text
+$ uv run ruff format --check .
+66 files already formatted
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run mypy
+Success: no issues found in 20 source files
+
+$ uv run pytest -q
+118 passed in 12.73s
+  # 113 baseline (M0+M1+M2) + 5 new console integration tests
+```
+
+Acceptance items:
+
+```text
+$ uv run pytest tests/integration -m integration -q -k console
+.....
+5 passed, 11 deselected in 2.46s
+  # ACC-M3-001: page content tests (no third-party libs, UI elements, URL injection)
+  # ACC-M3-002: internal API serves health/metrics/rules/traces; console as separate process
+
+$ uv run pytest tests/integration -m integration -q
+................
+16 passed in 10.55s
+  # 11 baseline + 5 console
+
+$ uv run pytest tests/e2e -m e2e -q
+.....
+5 passed in 2.41s
+  # unchanged from M2 — no e2e scope in M3
+```
+
+Console page served by a real process (console process started, page fetched):
+
+```text
+$ curl -s http://127.0.0.1:<console_port>/healthz
+{"status":"ok","component":"console"}
+
+$ curl -s http://127.0.0.1:<console_port>/ | head -5
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" ...>
+<title>3rd-party AS Console</title><style>
+:root{--bg:#0d1117;...}
+  # dark theme, inline CSS/JS, no external <script src> or <link href>
+```
+
+Internal API served by the AS process (health, metrics, rules, traces):
+
+```text
+$ curl -s http://127.0.0.1:<api_port>/healthz
+{"status":"ok","version":"0.4.0","uptime_seconds":1.234,"rule_set_loaded":true}
+
+$ curl -s http://127.0.0.1:<api_port>/api/v1/metrics
+{"calls_total":0,"calls_by_disposition":{},"errors_by_code":{},"rule_hits":{},"peer_status":{}}
+
+$ curl -s http://127.0.0.1:<api_port>/api/v1/rules | python -m json.tool | head -10
+{
+    "source": ".../config/routing_rules.yaml",
+    "name": "sample-office-routing",
+    "description": "Sample office routing rules for the POC",
+    "version": 1,
+    "next_hops": [ ... ],
+    "rules": [ ... ]
+}
+
+$ curl -s http://127.0.0.1:<api_port>/api/v1/traces
+{"calls":[]}
+
+$ curl -s http://127.0.0.1:<api_port>/api/v1/traces/no-such-call
+{"call_id":"no-such-call","events":[]}
+```
+
+### 2. Log excerpt
+
+AS startup with the internal API listening (FastAPI/uvicorn on a daemon thread):
+
+```text
+{"timestamp": "2026-09-16T...", "level": "info", "module": "main",
+ "call_id": "-", "direction": "internal", "peer": "-",
+ "event": "application server starting", "version": "0.4.0",
+ "listen": "127.0.0.1:5060", "next_hop": "127.0.0.1:5061"}
+{"timestamp": "2026-09-16T...", "level": "info", "module": "main",
+ "call_id": "-", "direction": "internal", "peer": "-",
+ "event": "internal api listening", "address": "127.0.0.1:8080", ...}
+```
+
+The AS serves the API on a daemon thread (uvicorn `log_level="error"`, `access_log=False`)
+so it does not produce access-log noise. The console process runs independently:
+
+```text
+# console process
+{"status":"ok","component":"console"}    # GET /healthz
+```
+
+### 3. CI
+
+| Layer | Job | Result |
+| --- | --- | --- |
+| lint | `lint` | **not executed — no CI runner in this environment.** `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass (66 files). |
+| type | `type-check` | **not executed — no CI runner.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit | `unit` | **not executed — no CI runner.** `uv run pytest tests/unit -m unit -q` executed locally and passes (97 tests: unchanged from M2; no new unit tests in M3). |
+| integration | `integration` | **not executed — no CI runner.** `uv run pytest tests/integration -m integration -q` executed locally: 16 passed (11 baseline + 5 console). |
+| e2e | `e2e` | **not executed — no CI runner.** `uv run pytest tests/e2e -m e2e -q` executed locally: 5 passed (unchanged from M2; no e2e scope in M3). |
+
+No CI badge or run link exists yet: the workflow is committed but this repository has not
+been pushed, so no runner has ever executed it. The commands above are the same commands
+the workflow runs with `uv sync --frozen`.
+
+### 4. Capture
+
+`n/a` for M3: the console milestone generates no SIP traffic. The internal API and the
+console page are HTTP surfaces, verified by the `curl` commands and integration tests
+above. No new message samples were captured.
+
+### Item results
+
+| ID | Criterion | Result | Evidence |
+| --- | --- | --- | --- |
+| ACC-M3-001 | Console shows live flow, rule hit, statistics and topology, with no third-party front-end libraries | **accepted** | 1 (`pytest tests/integration -q -k console`: 5 passed; page content asserts dark theme `#0d1117`, status bar labels, navigation items, direction colours `--in`/`--out`/`--int`, rule-hit `--rule`, SVG topology with S-SBC/AS nodes, no `<script src>` or `<link href>`), 3 (integration) |
+| ACC-M3-002 | Internal API serves health, metrics, rules and traces | **accepted** | 1 (`pytest tests/integration -q -k console`: real AS process started, `GET /healthz` -> `{"status":"ok"}`, `GET /api/v1/metrics` -> `calls_total`, `GET /api/v1/rules` -> `rules` array non-empty, `GET /api/v1/traces` -> `{"calls":[]}`, `GET /api/v1/traces/{call_id}` -> empty events for unknown Call-ID; console process started as separate process, page served with AS API URL injected), 3 (integration) |
+
+### Open items raised by this run
+
+- The WebSocket event feed (`WS /ws/events`) is poll-based (1 s interval) rather than
+  event-driven. A production console would use a pub/sub model. Registered in
+  `docs/production-gaps.md`.
+- The console has not been exercised against a live call with a browser open — the
+  integration test starts the process and fetches the page, but does not drive a browser.
+  Manual-verification gap for M4 or the maintainer.
+- `mypy` reports 20 source files (unchanged from M2). The new `console/main.py` is checked
+  by mypy but `internal_api.py` was already counted; no new source files were added to the
+  `packages` list.
 
 ## M4 — Acceptance and polish
 

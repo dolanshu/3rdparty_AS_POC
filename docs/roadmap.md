@@ -132,11 +132,15 @@ context now lives in `AGENT.md` §1 and in the ADRs.)
   - `global_config['_sip_logger']` must be set (`SipLogger('as')`); `None` raises
     `AttributeError` on the first inbound message.
 - **The `logging` shadowing issue is still open for M1** (see open items below).
-- **`make demo` is a stub** in M0: it prints the rule set and the decisions. It is still a
-  stub after M1 (see the M1 open items). **Updated 2026-09-16 (M1):** the four e2e cases
-  are no longer in `tests/e2e/test_call_flows_pending.py`; that file became
-  `tests/e2e/test_call_flows.py`, where the complete call and the caller-abandonment case
-  pass and the `404` / `603` branches stay skipped for M2.
+- **`make demo` is a stub in M0** (it prints the rule set and the decisions).
+  **Updated 2026-09-16 (M1):** the four e2e cases are no longer in
+  `tests/e2e/test_call_flows_pending.py`; that file became `tests/e2e/test_call_flows.py`,
+  where the complete call and the caller-abandonment case pass and the `404` / `603`
+  branches stay skipped for M2.
+  **Updated 2026-09-16 (post-M2 audit):** `make demo` now places a real call and narrates
+  it (`tools/demo_call.py`); the rule table moved to `make rules`. `tools/capture_call.py`
+  also gained a settle window, so a capture now always records the closing 200 OK instead
+  of sometimes stopping at 13 samples.
 - The default catch-all rule `R-DEFAULT-99` is present but **disabled** so that the
   no-match `404` branch stays demonstrable. Enable it to route every remaining number.
 
@@ -259,7 +263,9 @@ connected.
     `P-Charging-Vector` leaves the AS as `P-charging-vector`.
   - `SipTransactionManager.shutdown()` releases the UDP sockets; call it before a test
     ends or the next run cannot bind the same port.
-- **`make demo` is still a stub.** It prints the rule set; the call demo is M2/M4 work.
+- **`make demo` was still a stub at M1** (it printed the rule set). Resolved in the
+  post-M2 audit: `make demo` now places a real call (`tools/demo_call.py`) and the rule
+  table moved to `make rules`.
   `tools/capture_call.py` is the closest thing to a demonstrable call today.
 
 **Open items:**

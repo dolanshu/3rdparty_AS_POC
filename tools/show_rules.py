@@ -15,8 +15,9 @@
 
 """Print the active routing rule set, or evaluate numbers against it.
 
-This is the tool behind ``make demo`` until the call demo lands in M1: it shows that the
-rule set is data, that it is validated on load, and what the AS would do with a number.
+This is the tool behind ``make rules``: it shows that the rule set is data, that it is
+validated on load, and what the AS would do with a number. ``make demo`` no longer uses it
+— the demo places a real call through ``tools/demo_call.py``.
 
 Usage:
     python tools/show_rules.py --rules-file config/routing_rules.yaml

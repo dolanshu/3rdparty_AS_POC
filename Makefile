@@ -10,8 +10,8 @@ PYTHONPATH_LOCAL := $(CURDIR)/src
 export PYTHONPATH := $(PYTHONPATH_LOCAL)
 
 .DEFAULT_GOAL := help
-.PHONY: help sync dev as mock console lint format type test unit integration e2e demo \
-        capture docker-up docker-down clean
+.PHONY: help sync dev as mock console lint format type test unit integration e2e demo rules \
+        capture probe docker-up docker-down clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -54,7 +54,10 @@ integration: sync ## Integration layer: localhost UDP
 e2e: sync ## E2E layer: complete call flows
 	$(RUN) pytest tests/e2e -m e2e
 
-demo: sync ## Show the active rule set (the call demo lands in M1)
+demo: sync ## Place one real trunk call and narrate the translation on the wire
+	$(RUN) python tools/demo_call.py --rules-file config/routing_rules.yaml
+
+rules: sync ## Show the active rule set and the decision for the sample numbers
 	$(RUN) python tools/show_rules.py --rules-file config/routing_rules.yaml
 
 capture: sync ## Complete one call and capture its messages as samples

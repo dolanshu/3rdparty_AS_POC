@@ -46,8 +46,8 @@ INVITE is originated.
 | Called party (out) | `013800138000` (national format, translated) |
 | Rule set | `config/routing_rules.yaml`, `sample-office-routing` (17 rules, 6 next hops) |
 | Matched rule | `R-MOB-CM-40` (China Mobile, E.164 in, national out) |
-| Ports of this capture | AS `127.0.0.1:48077`, mock core side `127.0.0.1:46884`, mock trunk side `127.0.0.1:46677` |
-| Call-ID | `73c506a40bf78bd3fcec6207ed0d7f11` |
+| Ports | allocated per capture (dynamic, never 5060) |
+| Call-ID | generated per capture by the SIP stack |
 
 Ports differ on every capture because they are allocated dynamically; the Call-ID differs
 too, because the stack generates it. What must not differ across the two legs is the

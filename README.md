@@ -42,7 +42,7 @@ uv sync                 # creates .venv from the committed uv.lock
 
 make lint               # ruff format --check + ruff check + mypy
 make test               # unit + integration + e2e
-make demo               # M0: shows the active rule set (see below)
+make demo               # places a real call and narrates it (see below)
 ```
 
 Fallback without `uv` (maintainer-approved): `python3 -m venv .venv`, activate it, then
@@ -55,17 +55,29 @@ committed `uv.lock` always references the public PyPI.
 
 ### Demo
 
-**`make demo` is still a stub in M0.** It runs `tools/show_rules.py`, which prints the
-rule set, the next hops and the decision for sample numbers:
+**`make demo` places a real call and narrates it.** It starts the AS and the emulated
+S-SBC on loopback, dials `+86216180001` → `+8613800138000`, and prints the routing
+decision, the Request-URI before and after number translation, every message on the wire
+and the outcome:
 
 ```text
-  +8613800138000     route    R-MOB-CM-40   +8613800138000 -> 013800138000   s-sbc-primary -> s-sbc-failover
-  6123               route    R-PBX-30      6123 -> +86216186123             office-pbx-primary -> office-pbx-secondary
-  +861681234567      reject   R-BLOCK-90    603 AS-ROUTE-002
+[2/5] routing decision
+rule        : R-MOB-CM-40
+disposition : route
+translation : called number -> 013800138000
+next hops   : s-sbc-primary -> s-sbc-failover
+served by   : s-sbc-primary
+
+[3/5] next-hop side (after translation)
+core INVITE : INVITE sip:013800138000@127.0.0.1:45644 SIP/2.0
 ```
 
-Placing a real call and showing the translated INVITE is the M1/M2 demo; the narration is
-in `docs/demo-script.md`.
+It writes nothing, so it is safe to run repeatedly; `make capture` is the variant that
+stores the messages as samples in `docs/specs/message-samples/`. Dial another number with
+`uv run python tools/demo_call.py --called <number>`; a rejected call exits non-zero
+because the tool reports whether the call was answered. The narrated run-through for
+reviewers is `docs/demo-script.md`, and the rule table is still available with
+`make rules`.
 
 To verify that the SIP stack really runs:
 

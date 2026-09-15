@@ -8,6 +8,20 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+### Changed
+
+- `make demo` now places a real trunk call and narrates it (`tools/demo_call.py`): the
+  routing decision, the Request-URI before and after number translation, every message on
+  the wire and the outcome. It writes nothing to the repository, so the demo is repeatable
+  and read-only. The previous rule-table view moved to `make rules`.
+- Capture determinism: `tools/capture_call.py` keeps the event loop alive for a settle
+  window (0.3 s) after the call is released, so the final `200 OK` answering the relayed
+  `BYE` is always recorded. Three consecutive captures now produce the same 14 samples; a
+  run could previously stop at 13, leaving the `14-in-200-trunk.txt` that the acceptance
+  report and the sample README reference missing.
+- Documentation aligned with M2: milestone status, M2 evidence figures, sample references,
+  demo script and readiness notes no longer describe the call demo as unavailable.
+
 ## [0.3.0] - 2026-09-16 — M2 Number translation
 
 ### Added
@@ -54,15 +68,12 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ### Notes
 
-- No version bump: the public surface did not change and M2 is still an unreleased
-  milestone of the same `0.1.0` node. **Recommendation: bump to `0.3.0`** when the
-  maintainer tags M2, because the AS gained a user-visible capability — it now translates
-  numbers and handles error branches — which reads as a feature addition. Maintainer
-  decision.
+- Version node: the maintainer tagged this milestone `0.3.0`, because the AS gained a
+  user-visible capability — it now translates numbers and handles error branches — which
+  reads as a feature addition. M1 was retroactively assigned `0.2.0` so the version chain
+  is continuous (`0.1.0` M0, `0.2.0` M1, `0.3.0` M2).
 
-## [Unreleased] — M1 Signalling path (2026-09-16)
-
-Recorded under M0's version node: no version bump was made, see the note below.
+## [0.2.0] - 2026-09-16 — M1 Signalling path
 
 ### Added
 
@@ -113,16 +124,14 @@ Recorded under M0's version node: no version bump was made, see the note below.
 
 ### Notes
 
-- No version bump: the public surface did not change and M1 is still an unreleased
-  milestone of the same `0.1.0` node. Bump to `0.2.0` when the maintainer tags M1, or
-  leave `0.1.0` and tag `v0.1.0-m1` if the current scheme of one version node per
-  milestone is meant to carry several milestones. **Recommendation: bump to `0.2.0`**,
-  because the AS gained a user-visible capability — it now completes calls — which reads
-  as a feature addition rather than as a fix. Maintainer decision.
-- Two e2e cases stay skipped: `404` and `603` need the routing decision of
-  M2 — Number translation (`AGENT.md` section 15).
+- Version node: the maintainer assigned `0.2.0` (retroactively, at the post-M2 audit) so
+  the version chain matches the one-version-node-per-milestone rule, because the AS gained
+  a user-visible capability — it now completes calls — which reads as a feature addition
+  rather than as a fix.
+- Two e2e cases were declared and skipped in M1 (`404` and `603`); M2 — Number translation
+  un-skipped and passed them.
 
-## [0.1.0] — 2026-09-15 — M0 Foundation
+## [0.1.0] - 2026-09-15 — M0 Foundation
 
 ### Added
 

@@ -257,9 +257,9 @@ Content-Length: 0
 as exit code: 0
 ```
 
-Header and SDP pass-through, taken from the captured samples of the same call
-(`01-in-invite-trunk.txt` → `03-out-invite-core.txt`, Call-ID
-`66214a32501ea3d6a9aaf48db78f1a6c`):
+Header and SDP pass-through, taken from the captured samples of one call
+(`01-in-invite-trunk.txt` → `03-out-invite-core.txt`; each sample carries the Call-ID of
+the run that produced it):
 
 ```text
 P-Asserted-Identity: <sip:+86216180001@ims.example.invalid>       (identical on both legs)
@@ -368,15 +368,18 @@ Message samples of the complete call, captured with `uv run python tools/capture
 on 2026-09-16 and stored verbatim in `docs/specs/message-samples/`:
 
 - `01-in-invite-trunk.txt` — the INVITE that arrives on the trunk.
-- `03-out-invite-core.txt` — the INVITE the AS originates; same Call-ID
-  `66214a32501ea3d6a9aaf48db78f1a6c`, same pass-through headers, same SDP.
+- `03-out-invite-core.txt` — the INVITE the AS originates; same Call-ID, same
+  pass-through headers, same SDP.
 - `05-in-180-core.txt` / `06-out-180-trunk.txt` — the 180 on both legs.
 - `07-in-200-core.txt` / `09-out-200-trunk.txt` — the 200 OK on both legs.
 - `08-out-ack-core.txt` / `10-in-ack-trunk.txt` — the ACK on both legs.
 - `11-in-bye-core.txt` / `13-out-bye-trunk.txt` — the BYE on both legs.
+- `14-in-200-trunk.txt` — the 200 OK that answers the relayed BYE.
 
-The scenario, the rule set and the ports of the capture are recorded in
-`docs/specs/message-samples/README.md`. A pcap of the same exchange can be produced with
+The scenario and the rule set of the capture are recorded in
+`docs/specs/message-samples/README.md`. Ports and Call-ID are allocated per run, so they
+change with every capture and are not quoted here; the files themselves are the record.
+A pcap of the same exchange can be produced with
 `tools/capture.sh`, but a pcap is deliberately not committed: `AGENT.md` section 13
 forbids committing traffic captures, so the message samples are the committed artefact.
 
@@ -489,15 +492,12 @@ Structured application log of a translated call (Call-ID
  "rule_id": "R-MOB-CM-40"}
 ```
 
-The translated INVITE before/after (captured, Call-ID `73c506a40bf78bd3fcec6207ed0d7f11`):
-
-```text
---- 01-in-invite-trunk.txt (inbound, Request-URI) ---
-INVITE sip:+8613800138000@127.0.0.1:48077 SIP/2.0
-
---- 03-out-invite-core.txt (outbound, Request-URI) ---
-INVITE sip:013800138000@127.0.0.1:46884 SIP/2.0
-```
+The translated INVITE before/after is visible in the captured samples:
+`01-in-invite-trunk.txt` carries the called number as it arrived (`+8613800138000` in the
+Request-URI user part), `03-out-invite-core.txt` carries the translated number
+(`013800138000`). Request-URI ports and the Call-ID belong to the run that produced the
+samples and change with every capture, so they are not quoted here —
+`head -1 docs/specs/message-samples/0{1,3}-*.txt` shows the pair for the current capture.
 
 The pass-through headers (`P-Asserted-Identity`, `P-Charging-Vector`, `Subject`,
 `Organization`, `Priority`, `Privacy`, `P-Visited-Network-ID`) and the SDP body are
@@ -511,7 +511,7 @@ byte-identical across the two legs; only the Request-URI, `Via`, `Contact`, `To`
 | lint | `lint` | **not executed — no CI runner in this environment.** `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass (64 files). |
 | type | `type-check` | **not executed — no CI runner.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
 | unit | `unit` | **not executed — no CI runner.** `uv run pytest tests/unit -m unit -q` executed locally and passes. |
-| integration | `integration` | **not executed — no CI runner.** `uv run pytest tests/integration -m integration -q` executed locally: 7 passed (including failover, hot reload, 480, 500). |
+| integration | `integration` | **not executed — no CI runner.** `uv run pytest tests/integration -m integration -q` executed locally: 11 passed (including failover, hot reload, 480, 500). |
 | e2e | `e2e` | **not executed — no CI runner.** `uv run pytest tests/e2e -m e2e -q` executed locally: 5 passed, 0 skipped (the 404 and 603 cases are now un-skipped). |
 
 No CI badge or run link exists yet: the workflow is committed but this repository has not
@@ -523,15 +523,15 @@ the workflow runs with `uv sync --frozen`.
 Message samples of the translated call, captured with `uv run python tools/capture_call.py`
 on 2026-09-16 and stored verbatim in `docs/specs/message-samples/`:
 
-- `01-in-invite-trunk.txt` — INVITE from the emulated S-CSCF, Request-URI
-  `sip:+8613800138000@127.0.0.1:48077`.
-- `03-out-invite-core.txt` — INVITE the AS originates, Request-URI
-  `sip:013800138000@127.0.0.1:46884` (translated), same Call-ID
-  `73c506a40bf78bd3fcec6207ed0d7f11`, same pass-through headers, same SDP.
+- `01-in-invite-trunk.txt` — INVITE from the emulated S-CSCF, Request-URI carrying the
+  called number as received (`+8613800138000`).
+- `03-out-invite-core.txt` — INVITE the AS originates, Request-URI carrying the translated
+  number (`013800138000`), same Call-ID, same pass-through headers, same SDP.
 - `05-in-180-core.txt` / `06-out-180-trunk.txt` — the 180 on both legs.
 - `07-in-200-core.txt` / `09-out-200-trunk.txt` — the 200 OK on both legs.
 - `08-out-ack-core.txt` / `10-in-ack-trunk.txt` — the ACK on both legs.
 - `11-in-bye-core.txt` / `13-out-bye-trunk.txt` — the BYE on both legs.
+- `14-in-200-trunk.txt` — the 200 OK that answers the relayed BYE.
 
 ### Item results
 
@@ -553,6 +553,80 @@ on 2026-09-16 and stored verbatim in `docs/specs/message-samples/`:
   but the engine rejects at decision time.
 - The `_DEFAULT_NEXT_HOP_EXPIRE = 3.0` no-answer timeout is a loopback POC value; a real
   deployment should make it per-next-hop or configuration-driven.
+
+## Post-M2 maintenance (2026-09-16)
+
+A directory audit after M2 found the gap register, the status board and parts of the
+evidence set drifting. The fixes below were made and verified; they change no product
+behaviour that an acceptance item covers, so no M2 item was reopened.
+
+### 1. Command and output
+
+```text
+$ uv run python tools/demo_call.py            # new: make demo places a real call
+...
+[2/5] routing decision
+rule        : R-MOB-CM-40
+disposition : route
+translation : called number -> 013800138000
+next hops   : s-sbc-primary -> s-sbc-failover
+served by   : s-sbc-primary
+...
+demo result: call answered and released; number translation applied on the wire
+exit code: 0
+
+$ uv run python tools/demo_call.py --called +861681234567    # rejection branch
+[2/5] routing decision
+rule        : R-BLOCK-90
+disposition : reject
+served by   : -
+...
+status      : 603
+demo result: call rejected with SIP 603 - the configured policy decision for this number
+exit code: 1
+
+$ for i in 1 2 3; do uv run python tools/capture_call.py; ls docs/specs/message-samples/*.txt | wc -l; done
+14
+14
+14                   # was 13 on some runs before the settle window was added
+```
+
+- `make demo` now places a real call and narrates it (`tools/demo_call.py`); the previous
+  rule-table view moved to `make rules`. The demo writes nothing, so it is repeatable.
+- `tools/capture_call.py` keeps the event loop alive for a settle window (0.3 s) after the
+  call is released, so the closing `200 OK` that answers the relayed `BYE` is always
+  recorded. A capture could previously stop at 13 samples, which left the
+  `14-in-200-trunk.txt` referenced by this report missing from disk.
+- Version consistency: `VERSION` and `pyproject.toml` had drifted apart (0.3.0 vs 0.1.0)
+  after the M2 version node. Both now read `0.3.0`; `uv.lock` was regenerated (metadata
+  normalisation only, still public PyPI URLs) and the M1 node was assigned `0.2.0` so the
+  chain is continuous. `tests/unit/test_repository_baseline.py` guards this invariant.
+
+### 2. Log excerpt
+
+Not applicable: no AS process behaviour changed. The demo reuses the same stack, rules and
+mock as `make capture`.
+
+### 3. CI
+
+The same layered commands as above were executed locally after the changes:
+
+```text
+$ uv run ruff format --check .   -> 65 files already formatted
+$ uv run ruff check .            -> All checks passed!
+$ uv run mypy                    -> Success: no issues found in 20 source files
+$ uv run pytest -q               -> 113 passed in 10.79s
+$ uv run pytest tests/integration -m integration -q -> 11 passed
+$ uv run pytest tests/e2e -m e2e -q                 -> 5 passed
+```
+
+CI itself is still **not executed — no CI runner in this environment**.
+
+### 4. Capture
+
+`docs/specs/message-samples/` was regenerated by the run above: 14 files, ending with
+`14-in-200-trunk.txt`. Volatile values (ports, Call-ID) are no longer quoted in this
+report, because they change with every capture; the files are the record.
 
 ## M3 — Console
 

@@ -41,8 +41,12 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import socket
 import sys
+import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -55,9 +59,9 @@ from sippy.Time.Timeout import Timeout  # noqa: E402
 
 from as_app.bootstrap import AsSettings  # noqa: E402
 from as_app.main import AsStack  # noqa: E402
-from as_app.observability.tracing import SipMessageRecorder  # noqa: E402
+from as_app.observability.tracing import SipMessageRecorder, TraceRecorder  # noqa: E402
 from s_sbc_mock.main import MockConfig, SMockApplication  # noqa: E402
-from s_sbc_mock.uac import CallScenario  # noqa: E402
+from s_sbc_mock.uac import CallOutcome, CallScenario  # noqa: E402
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "docs" / "specs" / "message-samples"
 
@@ -69,6 +73,13 @@ DEFAULT_SCENARIO = CallScenario(
 )
 
 _METHODS = ("INVITE", "ACK", "BYE", "CANCEL", "PRACK", "UPDATE", "INFO", "OPTIONS")
+
+#: Seconds the loop keeps running after the call was released. The call is over as soon as
+#: the trunk leg is released, but the last message of the exchange (the ``200 OK`` that
+#: answers the relayed ``BYE``) can still be in flight. Waiting for a short settle window
+#: makes the recorded message set deterministic, which the samples and the acceptance
+#: report rely on.
+SETTLE_SECONDS = 0.3
 
 
 def free_udp_port() -> int:
@@ -117,38 +128,61 @@ def call_id_of(text: str) -> str:
 _NEXT_HOP_PORT_LINE = re.compile(r"^(\s+port:\s+)\d+(\s.*)?$", re.MULTILINE)
 
 
-def _rewrite_next_hop_ports(rules_file: Path, core_port: int) -> Path:
+@dataclass(frozen=True)
+class CallRun:
+    """What one completed call produced, before any sample is written.
+
+    Attributes:
+        recorder: Recorder the AS stack wrote every wire message to.
+        call_id: SIP Call-ID of the call.
+        outcome: What the trunk side of the mock observed.
+        trace: Per-Call-ID trace recorder of the AS, routing decisions included.
+        trunk_port: UDP port the trunk side of the mock sent from.
+        core_port: UDP port of the core side of the mock, the AS next hop.
+    """
+
+    recorder: SipMessageRecorder
+    call_id: str
+    outcome: CallOutcome
+    trace: TraceRecorder
+    trunk_port: int
+    core_port: int
+
+
+def rewrite_next_hop_ports(rules_file: Path, core_port: int, target_dir: Path) -> Path:
     """Return a copy of the rules file with every next hop port on the core port.
 
     The shipped rules file pins next hops to demo ports (15061, 15062, ...). The capture
     runs on a dynamically allocated port, so every next hop the rules select must point
     at the mock core side. The rewrite is a capture-only convenience; a real deployment
-    keeps the original addresses.
+    keeps the original addresses. The copy is written into ``target_dir`` (a temporary
+    directory owned by the caller) so a capture never leaves a file behind in the
+    repository.
 
     Args:
         rules_file: Path of the shipped rules file.
         core_port: UDP port the mock core side listens on.
+        target_dir: Directory the rewritten copy is written to.
 
     Returns:
-        Path of the rewritten rules file written next to the original.
+        Path of the rewritten rules file inside ``target_dir``.
     """
     text = rules_file.read_text(encoding="utf-8")
     rewritten = _NEXT_HOP_PORT_LINE.sub(rf"\g<1>{core_port}\g<2>", text)
-    target = rules_file.with_suffix(".capture.yaml")
+    target = target_dir / f"{rules_file.stem}.capture.yaml"
     target.write_text(rewritten, encoding="utf-8")
     return target
 
 
-def run_capture(
+def run_call(
     *,
     as_port: int,
     core_port: int,
     trunk_port: int,
     rules_file: Path,
     scenario: CallScenario,
-    output_dir: Path,
-) -> list[Path]:
-    """Run one call and write its messages to the sample directory.
+) -> CallRun:
+    """Run one call through the real SIP stack and return what happened.
 
     Args:
         as_port: UDP port the AS receives the trunk on.
@@ -156,15 +190,15 @@ def run_capture(
         trunk_port: UDP port the trunk side of the mock sends from.
         rules_file: Routing rules file the AS loads.
         scenario: The call to place.
-        output_dir: Directory the samples are written to.
 
     Returns:
-        The paths that were written.
+        The recorder, Call-ID, trunk-side outcome and trace of the call.
 
     Raises:
         TimeoutError: When the call did not complete.
     """
-    capture_rules = _rewrite_next_hop_ports(rules_file, core_port)
+    capture_rules_dir = Path(tempfile.mkdtemp(prefix="as-poc-capture-"))
+    capture_rules = rewrite_next_hop_ports(rules_file, core_port, capture_rules_dir)
     settings = AsSettings(
         _env_file=None,
         sip_listen_address="127.0.0.1",
@@ -200,30 +234,81 @@ def run_capture(
             return bool(current.released)
 
         deadline_timer = Timeout(ED2.breakLoop, 15.0, 1)
-        poll = Timeout(_break_when(released), 0.02, -1)
+        poll = Timeout(_break_after_settle(released, SETTLE_SECONDS), 0.02, -1)
         ED2.loop()
         poll.cancel()
         deadline_timer.cancel()
         if not released():
             raise TimeoutError(f"call {call_id} did not complete within 15 seconds")
-        return write_samples(recorder, call_id, output_dir, trunk_port, core_port)
+        return CallRun(
+            recorder=recorder,
+            call_id=call_id,
+            outcome=mock.uac.outcome_for(call_id) or outcome,
+            trace=as_stack.tracer,
+            trunk_port=trunk_port,
+            core_port=core_port,
+        )
     finally:
         as_stack.stop()
         mock.stop()
+        shutil.rmtree(capture_rules_dir, ignore_errors=True)
 
 
-def _break_when(predicate: Any) -> Any:
-    """Build a loop callback that stops the loop when a condition holds.
+def run_capture(
+    *,
+    as_port: int,
+    core_port: int,
+    trunk_port: int,
+    rules_file: Path,
+    scenario: CallScenario,
+    output_dir: Path,
+) -> list[Path]:
+    """Run one call and write its messages to the sample directory.
 
     Args:
-        predicate: Condition to wait for.
+        as_port: UDP port the AS receives the trunk on.
+        core_port: UDP port of the core side of the mock, the AS next hop.
+        trunk_port: UDP port the trunk side of the mock sends from.
+        rules_file: Routing rules file the AS loads.
+        scenario: The call to place.
+        output_dir: Directory the samples are written to.
+
+    Returns:
+        The paths that were written.
+
+    Raises:
+        TimeoutError: When the call did not complete.
+    """
+    run = run_call(
+        as_port=as_port,
+        core_port=core_port,
+        trunk_port=trunk_port,
+        rules_file=rules_file,
+        scenario=scenario,
+    )
+    return write_samples(run.recorder, run.call_id, output_dir, run.trunk_port, run.core_port)
+
+
+def _break_after_settle(predicate: Any, settle_seconds: float) -> Any:
+    """Build a loop callback that stops the loop once a condition has held for a while.
+
+    Args:
+        predicate: Condition that marks the end of the call.
+        settle_seconds: How long the condition must hold before the loop is stopped.
 
     Returns:
         A callable suitable for :func:`sippy.Time.Timeout.Timeout`.
     """
+    first_hold: list[float] = []
 
     def poll() -> None:
-        if predicate():
+        """Stop the loop when the end-of-call condition has held long enough."""
+        if not predicate():
+            first_hold.clear()
+            return
+        if not first_hold:
+            first_hold.append(time.monotonic())
+        elif time.monotonic() - first_hold[0] >= settle_seconds:
             ED2.breakLoop()
 
     return poll

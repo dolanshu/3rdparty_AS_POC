@@ -60,7 +60,7 @@ are recorded because they are expensive to re-derive.
 
 - **Blocking event loop.** `ED2.loop()` occupies the main thread, so the AS cannot share
   a thread or an asyncio loop with the console. This is why the console is a separate
-  process talking to the AS over an internal API (see ADR-0002, to be written).
+  process talking to the AS over an internal API (see ADR-0002).
 - **Extra dependencies.** Media and web libraries are installed but unused. Accepted;
   noted in the production gap register if it ever matters.
 - **Behaviour must be observed, not assumed.** When sippy's behaviour is unclear, write

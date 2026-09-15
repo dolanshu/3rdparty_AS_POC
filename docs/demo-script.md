@@ -4,8 +4,9 @@ Duration: 5–10 minutes. Audience: architecture reviewers and operator-side rev
 Rehearse it before showing it; if the script and `make demo` disagree, both are wrong
 (`AGENT.md` section 10).
 
-**Status in M0:** the call demo is **not available yet**. Section 4 onwards is the M1/M3
-script and is marked as such. What M0 demos is the rule data and the verified stack.
+**Status:** sections 1–5 run today (M0–M2 are complete): the stack probe, the rule data, a
+real translated call and the failure branches. Section 6 needs the console, which is M3;
+it is marked as not available yet.
 
 ## 0. Setup (before the audience arrives)
 
@@ -42,7 +43,7 @@ The reviewer should see the INVITE, the sippy message log, and the verdict line
 ## 3. The routing policy is data (2 minutes)
 
 ```bash
-make demo         # uv run python tools/show_rules.py
+make rules        # uv run python tools/show_rules.py
 ```
 
 > "The dial plan is a YAML file, not code: 17 rules, six next hops. Emergency numbers
@@ -55,31 +56,40 @@ Show `config/routing_rules.yaml` and the `decisions` table. Emphasise: rules are
 on the console, edited as data, reloaded without a restart, and a broken edit keeps the
 previous rule set alive.
 
-## 4. From M1: one call, end to end (3 minutes — not available in M0)
+## 4. One call, end to end (3 minutes)
 
 ```bash
-make docker-up          # as + s-sbc-mock + console
-make demo               # places a call and prints the Call-ID keyed trace
+make demo               # places a real call and narrates it
+make capture            # the same call, its messages stored as samples
 ```
 
-What the reviewer should see:
+What the reviewer should see, in the transcript `make demo` prints:
 
-1. `INVITE` arriving on the trunk with the called number in E.164.
-2. The trace line with the rule that matched (`R-MOB-CM-40`) and the translation
-   (`+8613800138000` → `013800138000`).
-3. The outbound `INVITE` towards the S-SBC with the translated Request-URI and the
-   original SDP passed through unchanged.
-4. `100 → 180 → 200 OK → ACK → BYE` on both legs, correlated by one Call-ID.
+1. `INVITE` arriving on the trunk with the called number in E.164 (`+8613800138000`).
+2. The routing decision: rule `R-MOB-CM-40`, disposition `route`, the translation
+   (`+8613800138000` → `013800138000`) and the ordered next hops with the one that served
+   the call.
+3. The outbound `INVITE` towards the S-SBC with the translated Request-URI.
+4. Every message on the wire (`100 → 180 → 200 OK → ACK → BYE` on both legs), correlated
+   by one Call-ID, and the final outcome.
 
-## 5. From M2: the failure branches (2 minutes — not available in M0)
+`make demo` writes nothing, so it can be run as often as needed; `make capture` is what
+refreshes `docs/specs/message-samples/`.
+
+## 5. The failure branches (2 minutes)
+
+Each branch is a call of its own — `make demo` takes the called number as an argument:
 
 | What you do | What the reviewer sees |
 | --- | --- |
-| Dial an unroutable number | `404 Not Found`, log code `AS-ROUTE-001`, counter `no_match` |
-| Dial a premium-rate number | `603 Decline`, log code `AS-ROUTE-002`, rule `R-BLOCK-90` |
-| Abandon before answer | `CANCEL`, both legs torn down, disposition `abandoned` |
+| `uv run python tools/demo_call.py --called +8613900000000` | `404 Not Found`, log code `AS-ROUTE-001`, disposition `no_match` |
+| `uv run python tools/demo_call.py --called +861681234567` | `603 Decline`, log code `AS-ROUTE-002`, rule `R-BLOCK-90` |
+| `uv run pytest tests/e2e -m e2e -k cancel` | `CANCEL`, both legs torn down, disposition `abandoned` |
 
-## 6. From M3: the console (1 minute — not available in M0)
+A rejected call exits non-zero on purpose: the tool reports whether the call was answered.
+The rejection itself is the point being demonstrated.
+
+## 6. The console (1 minute — M3, not available yet)
 
 Open `http://127.0.0.1:8081`. Status bar with peer state and version, live message flow
 with direction colours, Call-ID filter, payload viewer, the matched rule highlighted, the
@@ -94,6 +104,6 @@ offline.
 
 ## Notes
 
-- `make demo` in M0 only prints the rule set; the call demo replaces it in M1/M2.
+- `make demo` places a real call; `make rules` prints the rule table it used to print.
 - Capture evidence during the demo with `./tools/capture.sh`; never commit the capture.
 - If anything in this script fails, do not improvise: fix the script and the code.

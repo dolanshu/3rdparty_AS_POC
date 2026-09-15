@@ -879,6 +879,31 @@ $ uv run pytest tests/e2e -m e2e -q
 5 passed in 2.41s
 ```
 
+Clean-checkout rehearsal (the DoD item "`make demo` passes from a clean checkout"): the
+committed HEAD (`7c0b687`) was cloned into a fresh directory and exercised there.
+
+```text
+$ git clone . /tmp/m4_clean && cd /tmp/m4_clean
+$ cat VERSION
+0.5.0
+$ uv sync --frozen
+Installed 49 packages ...                                        # exit 0
+$ uv lock --check
+Resolved 50 packages in 0.87ms                                   # exit 0
+$ make demo
+... [5/5] outcome
+status      : 200
+released    : True
+demo result: call answered and released; number translation applied on the wire
+exit code: 0
+$ uv run pytest tests -q
+118 passed in 13.08s
+$ uv run ruff format --check .
+66 files already formatted
+$ uv run mypy
+Success: no issues found in 20 source files
+```
+
 **One honest caveat.** The first baseline run of this conversation reported
 `1 failed, 117 passed`: `tests/integration/test_translation.py`
 `::test_next_hop_failover_uses_the_second_hop`. It is a rare, non-deterministic flake — the

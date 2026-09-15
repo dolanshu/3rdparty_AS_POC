@@ -35,7 +35,7 @@ Each milestone is executed in its own conversation.
 | M1 — Signalling path | done (2026-09-16) | pending (tagging is done by the maintainer) |
 | M2 — Number translation | done (2026-09-16) | pending (tagging is done by the maintainer) |
 | M3 — Console | done (2026-09-16) | pending (tagging is done by the maintainer) |
-| M4 — Acceptance and polish | not started | — |
+| M4 — Acceptance and polish | done (2026-09-16) | pending (tagging is done by the maintainer) |
 
 ## Environment (verified 2026-09-16)
 
@@ -485,23 +485,76 @@ signalling path or the console needs to change for M4.
 
 ## M4 — Acceptance and polish
 
-**Status:** not started — entry criteria met (M3 done)
+**Status:** done (2026-09-16) — all exit criteria met except the tag itself, which is the
+maintainer's step (agents do not tag), exactly as for M0–M3.
 
 **Scope:** full acceptance run with evidence per `AGENT.md` §4.8; demo script rehearsal;
 ADR and documentation review; tagged release.
 
-**Entry criteria:** M3 done.
+**Entry criteria:** M3 done — met.
 
 **Exit criteria:**
 
-- [ ] Every acceptance item executed with the four kinds of evidence
-- [ ] `docs/demo-script.md` rehearsed end to end
-- [ ] Documentation review pass: no stale samples, no broken links, no unregistered gaps
-- [ ] Version tagged and release notes published
+- [x] Every acceptance item executed with the four kinds of evidence
+- [x] `docs/demo-script.md` rehearsed end to end
+- [x] Documentation review pass: no stale samples, no broken links, no unregistered gaps
+- [x] Version prepared and release notes published; **the tag itself is pending the
+      maintainer** (`v0.5.0-m4`)
 
-**Handover notes:** _to be filled when the milestone ends_
+**Done in this conversation (2026-09-16):**
 
-**Open items:** none yet
+- Full acceptance run recorded in `docs/acceptance/report.md` (M4 section): ACC-M4-001
+  (every acceptance item carries the four kinds of evidence) and ACC-M4-002
+  (`docs/demo-script.md` rehearsed end to end) both accepted.
+- Demo rehearsal with real output: `make demo` (exit 0), `make probe` (exit 0),
+  `make rules` (exit 0), `make capture` (14 samples), the three failure branches
+  (`+9991234567` → `404` / `AS-ROUTE-001`; `+861681234567` → `603` / `AS-ROUTE-002`;
+  `pytest tests/e2e -m e2e -k cancel` → 1 passed) and the console (`make dev` + `make mock`
+  + `make console`: `/healthz` ok, the call visible in the AS internal API, console page
+  HTTP 200).
+- Documentation review and correction of stale milestone status in
+  `docs/demo-script.md` (console section now live; the `404` example number was wrong),
+  `AGENT.md` §15 (removed the stale "current phase: M0" line),
+  `docs/requirements/functional-and-nonfunctional.md` (status column corrected to `done`),
+  `docs/README.md`, `docs/architecture/hld.md`, `docs/architecture/lld.md`, ADR-0002,
+  `docs/operations/deployment.md`, `docs/operations/runbook.md` and
+  `docs/specs/message-samples/README.md`.
+- Release preparation: `VERSION` → `0.5.0`; `CHANGELOG.md` `0.5.0` release notes (the
+  `[Unreleased]` content folded in).
+
+**Handover notes (for the maintainer):**
+
+- **Tagging.** The release is prepared but not tagged (agents do not tag). The maintainer
+  should create the annotated tag `v0.5.0-m4`.
+- **Known test flake (not fixed, out of M4 scope).** `tests/integration/test_translation.py`
+  `::test_next_hop_failover_uses_the_second_hop` failed in roughly 1 run in 6 with
+  `TypeError: 'NoneType' object is not subscriptable` in sippy's
+  `SipTransactionManager.transmitData`. Root cause: `SipTransactionManager.shutdown()`
+  nulls `global_config` but leaves a pending `timerA` retransmission scheduled, and `ED2` is
+  a process-wide singleton, so the stale timer fires during a later test. The failover test
+  (which points a hop at an unbound port on purpose) is the natural trigger. Five
+  consecutive full-suite reruns were green (118 passed). A fix belongs to the M2 test code.
+- **Version drift (defect, reported, not changed in M4).** `src/as_app/__init__.py`
+  hardcodes `__version__ = "0.1.0"`, so the AS `/healthz` and its startup log report
+  `0.1.0` even though `VERSION` is now `0.5.0`. The `VERSION` ↔ `pyproject.toml` pair is
+  guarded by a baseline test; `as_app.__version__` is not. See the M4 report open items.
+
+**Open items:**
+
+- **Version drift in `as_app.__version__`** (above): derive it from `VERSION`, or register
+  it as an accepted gap. Reported in M4; not changed because M4 must not touch `src/`.
+- **`deploy/docker-compose.yml` keeps `ALLOWED_PEERS: s-sbc-mock,127.0.0.1`** (carried from
+  M1): container addresses are not knowable in advance, so the mock's SIP INVITEs are
+  rejected in compose. Compose is validated with `docker compose config` only, never run to
+  a call.
+- **Console not browser-verified against a live call** (carried from M3; registered in
+  `docs/production-gaps.md`).
+- **`AGENT.md` §4.7 names a "release notes template"** that does not exist as a separate
+  file; the per-version `CHANGELOG.md` nodes serve that purpose. Maintainer to confirm the
+  CHANGELOG counts as the template, or drop the wording.
+
+**Entry state for the next milestone:** M4 is the final milestone — there is no M5. A future
+iteration starts from the open items above and from `docs/production-gaps.md`.
 
 ## Conventions
 

@@ -22,7 +22,7 @@ that does not apply — for example a capture for a milestone that generates no 
 | Python | 3.10.12 |
 | Toolchain | `uv` 0.12.15 (installed with `pip install uv`), `uv.lock` committed |
 | sippy | 2.4.2 |
-| Repository version | `VERSION` = 0.1.0 |
+| Repository version | `VERSION` = 0.5.0 at the M4 run (0.1.0 at M0) |
 
 ## M0 — Foundation
 
@@ -692,7 +692,7 @@ Internal API served by the AS process (health, metrics, rules, traces):
 
 ```text
 $ curl -s http://127.0.0.1:<api_port>/healthz
-{"status":"ok","version":"0.4.0","uptime_seconds":1.234,"rule_set_loaded":true}
+{"status":"ok","version":"0.1.0","uptime_seconds":1.234,"rule_set_loaded":true}
 
 $ curl -s http://127.0.0.1:<api_port>/api/v1/metrics
 {"calls_total":0,"calls_by_disposition":{},"errors_by_code":{},"rule_hits":{},"peer_status":{}}
@@ -779,7 +779,7 @@ AS startup with the internal API listening (FastAPI/uvicorn on a daemon thread):
 ```text
 {"timestamp": "2026-09-16T...", "level": "info", "module": "main",
  "call_id": "-", "direction": "internal", "peer": "-",
- "event": "application server starting", "version": "0.4.0",
+ "event": "application server starting", "version": "0.1.0",
  "listen": "127.0.0.1:5060", "next_hop": "127.0.0.1:5061"}
 {"timestamp": "2026-09-16T...", "level": "info", "module": "main",
  "call_id": "-", "direction": "internal", "peer": "-",
@@ -818,8 +818,8 @@ above. No new message samples were captured.
 
 | ID | Criterion | Result | Evidence |
 | --- | --- | --- | --- |
-| ACC-M3-001 | Console shows live flow, rule hit, statistics and topology, with no third-party front-end libraries | **accepted** | 1 (`pytest tests/integration -q -k console`: 5 passed; page content asserts dark theme `#0d1117`, status bar labels, navigation items, direction colours `--in`/`--out`/`--int`, rule-hit `--rule`, SVG topology with S-SBC/AS nodes, no `<script src>` or `<link href>`), 3 (integration) |
-| ACC-M3-002 | Internal API serves health, metrics, rules and traces | **accepted** | 1 (`pytest tests/integration -q -k console`: real AS process started, `GET /healthz` -> `{"status":"ok"}`, `GET /api/v1/metrics` -> `calls_total`, `GET /api/v1/rules` -> `rules` array non-empty, `GET /api/v1/traces` -> `{"calls":[]}`, `GET /api/v1/traces/{call_id}` -> empty events for unknown Call-ID; console process started as separate process, page served with AS API URL injected), 3 (integration) |
+| ACC-M3-001 | Console shows live flow, rule hit, statistics and topology, with no third-party front-end libraries | **accepted** | 1 (`pytest tests/integration -q -k console`: 5 passed; page content asserts dark theme `#0d1117`, status bar labels, navigation items, direction colours `--in`/`--out`/`--int`, rule-hit `--rule`, SVG topology with S-SBC/AS nodes, no `<script src>` or `<link href>`), 3 (integration), 4 (`n/a` — the console milestone generates no SIP traffic, see §4) |
+| ACC-M3-002 | Internal API serves health, metrics, rules and traces | **accepted** | 1 (`pytest tests/integration -q -k console`: real AS process started, `GET /healthz` -> `{"status":"ok"}`, `GET /api/v1/metrics` -> `calls_total`, `GET /api/v1/rules` -> `rules` array non-empty, `GET /api/v1/traces` -> `{"calls":[]}`, `GET /api/v1/traces/{call_id}` -> empty events for unknown Call-ID; console process started as separate process, page served with AS API URL injected), 2 (AS startup log with `internal api listening`, §2), 3 (integration), 4 (`n/a` — see §4) |
 
 ### Open items raised by this run
 
@@ -843,8 +843,270 @@ above. No new message samples were captured.
 
 ## M4 — Acceptance and polish
 
-**Status: not executed.**
+**Status: executed 2026-09-16. 2 of 2 M4 items accepted.** The whole acceptance set was
+re-run, `docs/demo-script.md` was rehearsed end to end, the documentation was reviewed for
+staleness, and the release was prepared. The git tag is the maintainer's step (agents do
+not tag), as for M0–M3.
 
-| ID | Result |
-| --- | --- |
-| ACC-M4-001 … ACC-M4-002 | pending — M4 |
+### 1. Command and output
+
+Quality gates and the full suite:
+
+```text
+$ uv run ruff format --check .
+66 files already formatted
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run mypy
+Success: no issues found in 20 source files
+
+$ uv run pytest tests -q
+118 passed in 12.71s
+```
+
+Per layer (same code):
+
+```text
+$ uv run pytest tests/unit -m unit -q
+97 passed in 0.70s
+
+$ uv run pytest tests/integration -m integration -q
+16 passed in 10.06s
+
+$ uv run pytest tests/e2e -m e2e -q
+5 passed in 2.41s
+```
+
+**One honest caveat.** The first baseline run of this conversation reported
+`1 failed, 117 passed`: `tests/integration/test_translation.py`
+`::test_next_hop_failover_uses_the_second_hop`. It is a rare, non-deterministic flake — the
+test passes in isolation and five consecutive full-suite reruns were green (118 passed).
+Root cause: sippy's `SipTransactionManager.shutdown()` nulls `global_config` but leaves a
+pending `timerA` retransmission scheduled, and `ED2` is a process-wide singleton, so the
+stale timer fires during a later test. The failover test (which points a hop at an unbound
+port on purpose) is the natural trigger. It is an M2 test-isolation issue, not an M4
+deliverable; see the open items.
+
+Demo-script rehearsal (ACC-M4-002). Every command the script names was executed:
+
+```text
+$ make demo
+3rd-party AS POC - trunk call demo
+topology   : emulated S-CSCF --UDP--> AS (B2BUA) --UDP--> emulated core network
+ports      : as 127.0.0.1:47656, trunk 46322, core 44888
+rules      : config/routing_rules.yaml
+
+[1/5] call placed
+scenario    : office-to-mobile
+caller      : +86216180001
+called      : +8613800138000
+Call-ID     : 110c3963bb5dd2c529dac682a30de81f
+trunk INVITE: INVITE sip:+8613800138000@127.0.0.1:47656 SIP/2.0
+
+[2/5] routing decision
+rule        : R-MOB-CM-40
+disposition : route
+translation : called number -> 013800138000
+next hops   : s-sbc-primary -> s-sbc-failover
+served by   : s-sbc-primary
+
+[3/5] next-hop side (after translation)
+core INVITE : INVITE sip:013800138000@127.0.0.1:44888 SIP/2.0
+
+[4/5] message flow (14 messages on the wire)
+      01 trunk <- invite INVITE sip:+8613800138000@127.0.0.1:47656 SIP/2.0
+      02 trunk -> 100    SIP/2.0 100 Trying
+      03 core  -> invite INVITE sip:013800138000@127.0.0.1:44888 SIP/2.0
+      04 core  <- 100    SIP/2.0 100 Trying
+      05 core  <- 180    SIP/2.0 180 Ringing
+      06 trunk -> 180    SIP/2.0 180 Ringing
+      07 core  <- 200    SIP/2.0 200 OK
+      08 core  -> ack    ACK sip:127.0.0.1:44888 SIP/2.0
+      09 trunk -> 200    SIP/2.0 200 OK
+      10 trunk <- ack    ACK sip:127.0.0.1:47656 SIP/2.0
+      11 core  <- bye    BYE sip:+86216180001@127.0.0.1:47656 SIP/2.0
+      12 core  -> 200    SIP/2.0 200 OK
+      13 trunk -> bye    BYE sip:+86216180001@127.0.0.1:46322 SIP/2.0
+      14 trunk <- 200    SIP/2.0 200 OK
+
+[5/5] outcome
+status      : 200
+released    : True
+cancelled   : False
+
+demo result: call answered and released; number translation applied on the wire
+exit code: 0
+
+$ make probe
+16 Sep 07:42:42.106/GLOBAL/probe: RECEIVED message from udp:127.0.0.1:44708:
+INVITE sip:+8613800138000@127.0.0.1:47338;user=phone SIP/2.0
+...
+16 Sep 07:42:42.107/GLOBAL/probe: SENDING message to udp:127.0.0.1:44708:
+SIP/2.0 404 Probe
+...
+python      : 3.10.12
+sippy       : 2.4.2
+...
+first line: SIP/2.0 404 Probe
+minimal SipTransactionManager + ED2.loop() stack: OK
+exit code: 0
+
+$ make rules
+rule set: sample-office-routing (config/routing_rules.yaml)
+... 17 rules, 6 next hops ...
+decisions
+  110                route    R-EMG-01         110 -> 110   s-sbc-primary -> s-sbc-failover
+  10086              route    R-SVC-10         10086 -> 10086   s-sbc-primary -> s-sbc-failover
+  6123               route    R-PBX-30         6123 -> +86216186123   office-pbx-primary -> office-pbx-secondary
+  +8613800138000     route    R-MOB-CM-40      +8613800138000 -> 013800138000   s-sbc-primary -> s-sbc-failover
+  02161234567        route    R-FIX-NAT-70     02161234567 -> +862161234567   s-sbc-primary -> s-sbc-failover
+  0085212345678      route    R-INTL-80        0085212345678 -> +85212345678   intl-gateway-primary -> intl-gateway-secondary
+  +861681234567      reject   R-BLOCK-90       603 AS-ROUTE-002  premium rate numbers are blocked by office policy
+exit code: 0
+
+$ make capture
+as port    : 127.0.0.1:45010
+core port  : 127.0.0.1:46197  (AS next hop)
+trunk port : 127.0.0.1:48017  (emulated S-CSCF)
+captured   : 14 messages
+  docs/specs/message-samples/01-in-invite-trunk.txt
+  ... 14-in-200-trunk.txt
+exit code: 0
+```
+
+The 14 regenerated samples contained only volatile differences (ports, Call-ID, CSeq,
+tags) from the committed ones; they were **not** committed, so the repository keeps the
+previously captured samples and `docs/specs/message-samples/` is unchanged by M4.
+
+Failure branches (`docs/demo-script.md` section 5):
+
+```text
+$ uv run python tools/demo_call.py --called +9991234567
+...
+      03 trunk -> 404    SIP/2.0 404 Not Found
+status      : 404
+demo result: call rejected with SIP 404 - the configured policy decision for this number
+exit code: 1
+
+$ uv run python tools/demo_call.py --called +861681234567
+...
+rule        : R-BLOCK-90
+disposition : reject
+      03 trunk -> 603    SIP/2.0 603 Decline
+status      : 603
+demo result: call rejected with SIP 603 - the configured policy decision for this number
+exit code: 1
+
+$ uv run pytest tests/e2e -m e2e -k cancel -q
+1 passed, 4 deselected in 0.55s
+```
+
+**Correction found by this rehearsal.** `docs/demo-script.md` section 5 previously used
+`--called +8613900000000` as the `404` example. That number is **not** a no-match: `+86139`
+is a China Mobile prefix listed in `R-MOB-CM-40`, so it is translated to `013900000000` and
+the call completes with `200 OK` (exit 0). The script now uses `+9991234567` — the same
+number the M2 e2e test uses — which really yields `404` / `AS-ROUTE-001` / `no_match`.
+
+Console (`docs/demo-script.md` section 6), exercised with a live call this time:
+
+```text
+# terminal 1: make dev      (AS on 127.0.0.1:5060, internal API on 127.0.0.1:8080)
+# terminal 2: make mock     (places the default office-to-mobile call)
+# terminal 3: make console  (console on 127.0.0.1:8081)
+
+$ curl -s http://127.0.0.1:8080/healthz
+{"status":"ok","version":"0.1.0","uptime_seconds":15.663,"rule_set_loaded":true}
+
+$ curl -s http://127.0.0.1:8080/api/v1/metrics
+{"calls_total":1,"calls_by_disposition":{"completed":1},"errors_by_code":{},
+ "rule_hits":{"R-MOB-CM-40":1},
+ "peer_status":{"127.0.0.1:15060:trunk":"reachable","s-sbc-primary:127.0.0.1:15061":"reachable"}}
+
+$ curl -s http://127.0.0.1:8080/api/v1/traces
+calls: 1
+call_ids: ['dadca2555b68ca6951ef1b68766d0981']
+
+$ curl -s -o /dev/null -w "http_status=%{http_code}\n" http://127.0.0.1:8081/
+http_status=200
+```
+
+The console page (solo run) also showed the title `3rd-party AS Console`, **0** external
+`<script src>` / `<link href>` references, and the injected AS API URL
+`http://127.0.0.1:8080`.
+
+**Defect observed, not fixed (reported).** The AS `/healthz` reports `"version":"0.1.0"`
+although `VERSION` is `0.4.0` (and is bumped to `0.5.0` by this milestone):
+`src/as_app/__init__.py` hardcodes `__version__ = "0.1.0"` and nothing reads the `VERSION`
+file at runtime. The M3 `/healthz` evidence above was corrected accordingly. See the open
+items.
+
+### 2. Log excerpt
+
+The AS process from the console run above (`make dev`, `LOG_LEVEL=INFO`), Call-ID
+`dadca2555b68ca6951ef1b68766d0981`, ending with the graceful `SIGTERM` shutdown:
+
+```text
+{"timestamp": "2026-09-16T07:48:11+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "application server starting", "version": "0.1.0", "listen": "127.0.0.1:5060", "next_hop": "127.0.0.1:5061"}
+{"timestamp": "2026-09-16T07:48:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "startup self-check passed", "rules_file": "config/routing_rules.yaml"}
+{"timestamp": "2026-09-16T07:48:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "rule set active", "rule_set": "sample-office-routing", "rules": "17", "next_hops": "6"}
+{"timestamp": "2026-09-16T07:48:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "signalling stack bound", "listen": "127.0.0.1:5060", "next_hop": "127.0.0.1:5061", "allowed_peers": "127.0.0.1"}
+{"timestamp": "2026-09-16T07:48:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "internal api listening", "address": "127.0.0.1:8080"}
+{"timestamp": "2026-09-16T07:48:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "sippy event loop running", "rules_file": "config/routing_rules.yaml", "reload_poll_seconds": "1.0"}
+{"timestamp": "2026-09-16T07:48:20+0800", "level": "info", "module": "call_controller", "call_id": "dadca2555b68ca6951ef1b68766d0981", "direction": "in", "peer": "127.0.0.1:15060", "event": "invite received on the trunk", "method": "INVITE", "called_number": "+8613800138000"}
+{"timestamp": "2026-09-16T07:48:20+0800", "level": "info", "module": "call_controller", "call_id": "dadca2555b68ca6951ef1b68766d0981", "direction": "internal", "peer": "-", "event": "routing decision taken", "rule_id": "R-MOB-CM-40", "disposition": "route", "called_number": "+8613800138000", "translated_number": "013800138000"}
+{"timestamp": "2026-09-16T07:48:20+0800", "level": "info", "module": "call_controller", "call_id": "dadca2555b68ca6951ef1b68766d0981", "direction": "internal", "peer": "-", "event": "call translated", "rule_id": "R-MOB-CM-40", "called_number": "+8613800138000", "translated_number": "013800138000", "target_format": "national", "next_hops": "s-sbc-primary,s-sbc-failover"}
+{"timestamp": "2026-09-16T07:48:20+0800", "level": "info", "module": "call_controller", "call_id": "dadca2555b68ca6951ef1b68766d0981", "direction": "out", "peer": "127.0.0.1:15061", "event": "invite originated towards the next hop", "method": "INVITE", "called_number": "013800138000", "next_hop": "s-sbc-primary", "rule_id": "R-MOB-CM-40"}
+{"timestamp": "2026-09-16T07:48:20+0800", "level": "info", "module": "call_controller", "call_id": "dadca2555b68ca6951ef1b68766d0981", "direction": "internal", "peer": "-", "event": "call finished", "disposition": "completed"}
+{"timestamp": "2026-09-16T07:48:35+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "shutdown complete", "reason": "signal SIGTERM", "grace_seconds": "5.0"}
+```
+
+### 3. CI
+
+| Layer | Job | Result |
+| --- | --- | --- |
+| lint | `lint` | **not observed.** No CI runner is reachable from this environment: the GitHub API for this repository returns `404 Not Found` (the repository is private, or no token is available). `uv run ruff format --check .` (66 files) and `uv run ruff check .` were executed locally and pass. |
+| type | `type-check` | **not observed.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit | `unit` | **not observed.** `uv run pytest tests/unit -m unit -q` executed locally: 97 passed. |
+| integration | `integration` | **not observed.** `uv run pytest tests/integration -m integration -q` executed locally: 16 passed. |
+| e2e | `e2e` | **not observed.** `uv run pytest tests/e2e -m e2e -q` executed locally: 5 passed. |
+
+The workflow `.github/workflows/ci.yml` is committed and runs exactly these commands with
+`uv sync --frozen`; the branch is pushed (`main` == `origin/main`, HEAD `17d4526` at the
+start of M4).
+
+### 4. Capture
+
+`n/a` for M4, for the same reason as M3: the milestone changes no wire behaviour and
+generates no SIP traffic of its own. The demo and console rehearsals re-use the same stack
+and rules as `make capture`; the capture was run only to prove the demo step works
+(14 messages, above) and its output was **not** committed (`AGENT.md` section 13 forbids
+committing captures). The committed samples in `docs/specs/message-samples/` are unchanged.
+
+### Item results
+
+| ID | Criterion | Result | Evidence |
+| --- | --- | --- | --- |
+| ACC-M4-001 | Every acceptance item carries the four kinds of evidence | **accepted** | review of this report: every item row for M0–M4 names evidence kinds 1–4, or marks a kind `n/a` with a reason (M0 and M3 carry `n/a` for kind 4; M4 carries `n/a` for kind 4). Kind 3 is `not observed` everywhere because no CI runner is reachable from this environment — the reason is stated per layer. |
+| ACC-M4-002 | `docs/demo-script.md` rehearsed end to end | **accepted** | 1 (`make demo` exit 0, `make probe` exit 0, `make rules` exit 0, `make capture` 14 samples, the three failure branches and the console with a live call — all above), 2 (AS log, Call-ID `dadca2555b68ca6951ef1b68766d0981`), 3 (see the CI table), 4 (`n/a` — see §4) |
+
+### Open items raised by this run
+
+- **Version drift (defect, reported, not changed in M4).** `src/as_app/__init__.py` hardcodes
+  `__version__ = "0.1.0"`, so the AS `/healthz` and startup log report `0.1.0` while
+  `VERSION` is `0.5.0`. Fix by deriving `__version__` from `VERSION`, or register the drift
+  as an accepted gap.
+- **Test flake (not fixed, out of M4 scope).** `test_next_hop_failover_uses_the_second_hop`
+  can fail roughly 1 run in 6; root cause in sippy's `shutdown()`/`timerA` interaction with
+  the shared `ED2` loop (see §1). A fix belongs to the M2 test code.
+- **Documentation corrected during the review:** `docs/demo-script.md` (console section now
+  live; the `404` example number was wrong), `AGENT.md` §15 (stale "current phase: M0" line
+  removed), `docs/requirements/functional-and-nonfunctional.md` (status column corrected to
+  `done`), `docs/README.md`, `docs/architecture/hld.md`, `docs/architecture/lld.md`,
+  ADR-0002, `docs/operations/deployment.md`, `docs/operations/runbook.md` and
+  `docs/specs/message-samples/README.md`; the `SBC_PEER_PORT` default in `README.md`/`lld.md`
+  was corrected from `15061` to the real code default `5061`.
+- **`AGENT.md` §4.7 "release notes template"** does not exist as a separate file; the
+  per-version `CHANGELOG.md` nodes serve that purpose (maintainer to confirm or drop the
+  wording).

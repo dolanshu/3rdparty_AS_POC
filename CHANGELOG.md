@@ -22,6 +22,14 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 - Documentation aligned with M2: milestone status, M2 evidence figures, sample references,
   demo script and readiness notes no longer describe the call demo as unavailable.
 
+### Fixed
+
+- `make demo` crashed before printing its narration when `--rules-file` was a relative path
+  (which `Makefile:58` passes): `tools/demo_call.py` called `.relative_to(REPO_ROOT)` on the
+  relative path against the absolute repository root, raising `ValueError`. The defect came
+  from the post-M2 audit's demo upgrade (`3c322cc`) and blocked the M3 "make demo passes" DoD;
+  the path is now resolved first, with a fallback for paths outside the repository.
+
 ## [0.4.0] - 2026-09-16 — M3 Console
 
 ### Added

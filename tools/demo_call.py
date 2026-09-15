@@ -174,7 +174,12 @@ def narrate(run: CallRun, *, rules_file: Path, as_port: int, scenario: CallScena
     print("3rd-party AS POC - trunk call demo")
     print("topology   : emulated S-CSCF --UDP--> AS (B2BUA) --UDP--> emulated core network")
     print(f"ports      : as 127.0.0.1:{as_port}, trunk {run.trunk_port}, core {run.core_port}")
-    print(f"rules      : {rules_file.relative_to(REPO_ROOT)}")
+    resolved_rules = Path(rules_file).expanduser().resolve()
+    try:
+        shown_rules = resolved_rules.relative_to(REPO_ROOT)
+    except ValueError:
+        shown_rules = resolved_rules
+    print(f"rules      : {shown_rules}")
     print()
     print("[1/5] call placed")
     print(f"{'scenario':<{_LABEL_WIDTH}}: {scenario.name}")

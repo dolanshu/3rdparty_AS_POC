@@ -28,11 +28,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from ipaddress import ip_address
+from typing import Final
 
 from as_app.errors import AsError, AsErrorCode
 from as_app.routing.rules import NextHop
 
 __all__ = [
+    "PASSTHROUGH_HEADERS",
     "CallLeg",
     "TrunkMessage",
     "build_request_uri",
@@ -44,6 +46,30 @@ __all__ = [
 #: The ``@`` is required: a URI without a user part (``sip:10.0.0.1``) is a host only URI
 #: and must be reported as a malformed request, not treated as a number.
 _USER_FROM_URI = re.compile(r"^sips?:([^@;?]+)@")
+
+#: Headers the B2BUA copies verbatim from the trunk leg to the next-hop leg
+#: (``AGENT.md`` section 1: "SDP bodies and SIP headers are passed through verbatim").
+#:
+#: The list is deliberately explicit and excludes everything the stack itself owns or
+#: regenerates: ``Via``, ``Route``, ``Record-Route``, ``Contact``, ``Max-Forwards``,
+#: ``Content-Length`` (hop by hop) and ``From``, ``To``, ``Call-ID``, ``CSeq`` (dialog,
+#: regenerated for the second leg). ``User-Agent`` is the identity of the AS, not a
+#: pass-through header, and ``Content-Type`` follows the body.
+#:
+#: Documented in ``docs/architecture/lld.md`` section 2.3; the integration test
+#: ``tests/integration/test_signalling_path.py`` asserts that every header listed here
+#: arrives unchanged on the far side.
+PASSTHROUGH_HEADERS: Final[tuple[str, ...]] = (
+    "p-asserted-identity",
+    "p-preferred-identity",
+    "privacy",
+    "p-charging-vector",
+    "p-charging-function-addresses",
+    "p-visited-network-id",
+    "subject",
+    "organization",
+    "priority",
+)
 
 
 @dataclass(frozen=True)

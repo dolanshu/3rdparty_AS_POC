@@ -26,8 +26,8 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `README.md` | ready | Positioning, quickstart, repository tour, non-goals |
 | `CONTRIBUTING.md` | ready | How to work in this repository |
 | `docs/specs/index.md` | ready | Normative references |
-| `docs/specs/message-samples/` | ready (convention) | Real SIP messages on the trunk; samples are added from M1 |
-| `tools/README.md` | ready | Probe, rule viewer and capture helper |
+| `docs/specs/message-samples/` | ready (M1 samples captured) | Real SIP messages on the trunk; the `office-to-mobile` call of M1 is captured in 14 files |
+| `tools/README.md` | ready | Probe, rule viewer, capture helper and the call capture tool |
 
 ## Deployment and operations
 
@@ -41,8 +41,8 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 
 | Document | Status | What it answers |
 | --- | --- | --- |
-| `docs/acceptance/criteria.md` | ready | `ACC-*` items with verification commands; M0 accepted, later milestones planned |
-| `docs/acceptance/report.md` | ready | M0 results with evidence, later milestones pending |
-| `docs/demo-script.md` | ready | The 5–10 minute narrated demo (the call part is M1/M2) |
+| `docs/acceptance/criteria.md` | ready | `ACC-*` items with verification commands; M0 and M1 accepted, later milestones planned |
+| `docs/acceptance/report.md` | ready | M0 and M1 results with evidence, later milestones pending |
+| `docs/demo-script.md` | ready | The 5–10 minute narrated demo (the call part is M2/M4) |
 | `docs/roadmap.md` | ready | Milestone status, handover notes, open items |
 | `CHANGELOG.md` / `VERSION` | ready | Version history and the current version |

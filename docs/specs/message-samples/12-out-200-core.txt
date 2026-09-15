@@ -1,0 +1,9 @@
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:47183;rport=46621;branch=z9hG4bKdf5450b7be55c27c5f3439786db022f7
+From: <sip:+8613800138000@127.0.0.1>;tag=72e99b672e279fae0d1ecd867a56159a
+To: <sip:+86216180001@127.0.0.1>;tag=0e62866da8f6c14b82d88faae434c4f5
+Call-ID: 66214a32501ea3d6a9aaf48db78f1a6c
+CSeq: 822798015 BYE
+Server: 3rd-party AS POC
+Content-Length: 0
+

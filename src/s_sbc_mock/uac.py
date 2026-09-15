@@ -16,16 +16,100 @@
 
 The S-CSCF does not call the AS directly in production — an iFC match routes the INVITE
 to the S-SBC, which forwards it over the trunk. This side of the mock originates that
-INVITE towards the AS and then behaves like a normal UAC (cancel, ack, bye).
-
-The sippy UAC is wired in M1; M0 fixes the interface and the scenario parameters.
+INVITE towards the AS with the ISC-flavoured context a triggered request carries
+(``P-Asserted-Identity``, ``P-Charging-Vector``) and then behaves like a normal UAC
+(ACK, CANCEL, BYE). Driven by :class:`CallScenario` data; built on sippy, the same stack
+as the AS (ADR-0005).
 """
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Any
 
-__all__ = ["CallScenario", "TrunkUac"]
+from sippy.CCEvents import (
+    CCEventConnect,
+    CCEventDisconnect,
+    CCEventFail,
+    CCEventRing,
+    CCEventTry,
+)
+from sippy.MsgBody import MsgBody
+from sippy.SipAddress import SipAddress
+from sippy.SipConf import SipConf
+from sippy.SipContact import SipContact
+from sippy.SipHeader import SipHeader
+from sippy.SipLogger import SipLogger
+from sippy.SipURL import SipURL
+from sippy.Time.Timeout import Timeout
+from sippy.UA import UA
+
+__all__ = [
+    "CallScenario",
+    "CallOutcome",
+    "DEFAULT_SDP_OFFER",
+    "IMS_DOMAIN",
+    "SIP_USER_AGENT_NAME",
+    "TrunkUac",
+]
+
+_LOGGER = logging.getLogger(__name__)
+
+#: User agent name the mock reports on the trunk.
+SIP_USER_AGENT_NAME = "3rd-party AS POC mock S-SBC"
+
+#: Documentation-only IMS domain used in the mock identities (RFC 2606, RFC 6761).
+IMS_DOMAIN = "ims.example.invalid"
+
+#: A plain G.711 offer, realistic enough to prove that the SDP body survives the B2BUA
+#: unchanged. The address is a documentation range address (RFC 5737).
+DEFAULT_SDP_OFFER = "\r\n".join(
+    [
+        "v=0",
+        "o=- 4101 4101 IN IP4 192.0.2.10",
+        "s=3rd-party AS POC call",
+        "c=IN IP4 192.0.2.10",
+        "t=0 0",
+        "m=audio 40000 RTP/AVP 0 8 101",
+        "a=rtpmap:0 PCMU/8000",
+        "a=rtpmap:8 PCMA/8000",
+        "a=rtpmap:101 telephone-event/8000",
+        "a=fmtp:101 0-15",
+        "a=sendrecv",
+        "",
+    ]
+)
+
+
+@contextmanager
+def _trunk_identity(global_config: dict[str, Any]) -> Iterator[None]:
+    """Pin the process-wide sippy identity to this side while a message is generated.
+
+    ``SipConf`` is a module-level singleton and sippy reads it while it builds a ``Via``
+    or a default ``Contact``. The AS and the mock are separate processes in production
+    (ADR-0002) but share one interpreter in the tests, so the mock pins its own identity
+    for the duration of one synchronous message generation and restores the previous
+    values afterwards.
+
+    Args:
+        global_config: sippy global configuration of this side.
+
+    Yields:
+        ``None``; the identity is in place for the body of the ``with`` block.
+    """
+    from sippy.SipConf import SipConf
+
+    saved = (SipConf.my_address, SipConf.my_port, SipConf.my_uaname)
+    SipConf.my_address = str(global_config.get("_sip_address", SipConf.my_address))
+    SipConf.my_port = int(global_config.get("_sip_port", SipConf.my_port))
+    SipConf.my_uaname = str(global_config.get("_sip_uaname", SipConf.my_uaname))
+    try:
+        yield
+    finally:
+        SipConf.my_address, SipConf.my_port, SipConf.my_uaname = saved
 
 
 @dataclass(frozen=True)
@@ -40,6 +124,7 @@ class CallScenario:
         ring_seconds: Time between ``180 Ringing`` and ``200 OK``.
         talk_seconds: Time between ``200 OK`` and ``BYE``.
         abandon: Send ``CANCEL`` instead of completing the call.
+        sdp_offer: SDP offer sent in the INVITE; pass-through is asserted on it.
     """
 
     name: str
@@ -49,6 +134,26 @@ class CallScenario:
     ring_seconds: float = 0.2
     talk_seconds: float = 0.2
     abandon: bool = False
+    sdp_offer: str = DEFAULT_SDP_OFFER
+
+
+@dataclass(frozen=True)
+class CallOutcome:
+    """What the UAC side observed for one placed call.
+
+    Attributes:
+        scenario_name: Identifier of the scenario that was placed.
+        call_id: SIP Call-ID of the call.
+        status: Final SIP status code seen by the caller, ``None`` when abandoned.
+        released: Whether the call has been torn down (``BYE`` seen or call failed).
+        cancelled: Whether this side sent a ``CANCEL``.
+    """
+
+    scenario_name: str
+    call_id: str
+    status: int | None = None
+    released: bool = False
+    cancelled: bool = False
 
 
 class TrunkUac:
@@ -59,6 +164,7 @@ class TrunkUac:
         as_port: UDP port of the AS.
         local_address: Local address the mock sends from.
         local_port: Local UDP port of the mock.
+        outcomes: One entry per placed call, in the order the calls were placed.
     """
 
     def __init__(
@@ -81,6 +187,27 @@ class TrunkUac:
         self.as_port = as_port
         self.local_address = local_address
         self.local_port = local_port
+        self.outcomes: list[CallOutcome] = []
+        self.global_config: dict[str, Any] = {}
+
+    def build_global_config(self, sip_logger: Any | None = None) -> dict[str, Any]:
+        """Build the sippy global configuration of this side of the mock.
+
+        Args:
+            sip_logger: SIP message logger; a ``SipLogger`` is used when omitted.
+
+        Returns:
+            The global configuration dictionary sippy expects.
+        """
+        logger = sip_logger if sip_logger is not None else SipLogger("s-sbc-mock-uac")
+        self.global_config = {
+            "nh_addr": (self.as_address, self.as_port),
+            "_sip_address": self.local_address,
+            "_sip_port": self.local_port,
+            "_sip_uaname": SIP_USER_AGENT_NAME,
+            "_sip_logger": logger,
+        }
+        return self.global_config
 
     def place_call(self, scenario: CallScenario) -> str:
         """Place one call towards the AS.
@@ -89,11 +216,181 @@ class TrunkUac:
             scenario: The call to place.
 
         Returns:
-            The Call-ID of the call.
+            The Call-ID of the call, as generated by the stack.
 
         Raises:
-            NotImplementedError: Until the sippy UAC is wired in M1.
+            RuntimeError: When this side is not bound to a transaction manager yet.
         """
-        raise NotImplementedError(
-            f"TrunkUac.place_call({scenario.name!r}) is implemented in M1 (signalling path)"
+        if self.global_config.get("_sip_tm") is None:
+            raise RuntimeError(
+                "TrunkUac is not bound: build_global_config() and the stack start are required"
+            )
+        event = CCEventTry(
+            (
+                None,
+                scenario.calling_number,
+                scenario.called_number,
+                MsgBody(content=scenario.sdp_offer),
+                None,
+                None,
+            )
         )
+        event.extra_headers = self._isc_headers(scenario)
+        ua = UA(
+            self.global_config,
+            self._event_handler(scenario),
+            nh_address=(self.as_address, self.as_port),
+            nh_transport=SipConf.my_transport,
+        )
+        ua.lContact = SipContact(
+            address=SipAddress(
+                url=SipURL(
+                    host=self.local_address, port=self.local_port, transport=SipConf.my_transport
+                )
+            )
+        )
+        ua.local_ua = str(self.global_config.get("_sip_uaname", ""))
+        with _trunk_identity(self.global_config):
+            ua.recvEvent(event)
+        call_id = str(ua.cId)
+        self.outcomes.append(CallOutcome(scenario_name=scenario.name, call_id=call_id))
+        _LOGGER.info(
+            "trunk side placed call scenario=%s call_id=%s called=%s",
+            scenario.name,
+            call_id,
+            scenario.called_number,
+        )
+        return call_id
+
+    def outcome_for(self, call_id: str) -> CallOutcome | None:
+        """Return the observed outcome of one placed call.
+
+        Args:
+            call_id: SIP Call-ID of the call.
+
+        Returns:
+            The outcome, or ``None`` when the Call-ID is unknown.
+        """
+        for outcome in self.outcomes:
+            if outcome.call_id == call_id:
+                return outcome
+        return None
+
+    def _event_handler(self, scenario: CallScenario) -> Any:
+        """Build the sippy event callback for one call.
+
+        Args:
+            scenario: The scenario the callback belongs to.
+
+        Returns:
+            A callable ``(event, ua)`` sippy can invoke.
+        """
+
+        def handler(event: Any, ua: Any) -> None:
+            self._on_event(event, ua, scenario)
+
+        return handler
+
+    def _isc_headers(self, scenario: CallScenario) -> tuple[Any, ...]:
+        """Build the ISC-flavoured context headers a triggered INVITE carries.
+
+        Args:
+            scenario: The call to place.
+
+        Returns:
+            The extra headers to append to the INVITE.
+        """
+        return (
+            SipHeader(s=f"P-Asserted-Identity: <sip:{scenario.calling_number}@{IMS_DOMAIN}>"),
+            SipHeader(
+                s=(
+                    f"P-Charging-Vector: icid-value=poc-{scenario.name}"
+                    ";icid-generated-at=ims.example.invalid"
+                )
+            ),
+            SipHeader(s=f"P-Visited-Network-ID: {IMS_DOMAIN}"),
+            SipHeader(s="Privacy: none"),
+            SipHeader(s=f"Subject: {scenario.name}"),
+            SipHeader(s=f"Organization: {scenario.name}"),
+            SipHeader(s="Priority: normal"),
+        )
+
+    def _on_event(self, event: Any, ua: Any, scenario: CallScenario) -> None:
+        """Record what the caller observes, and abandon the call when asked to.
+
+        Args:
+            event: A sippy ``CCEvent``.
+            ua: The sippy UA the event came from.
+            scenario: The scenario the call belongs to.
+        """
+        call_id = str(ua.cId)
+        if isinstance(event, CCEventRing):
+            _LOGGER.info("trunk side received %s for call_id=%s", event.getData(), call_id)
+            if scenario.abandon:
+                Timeout(self._abandon, 0.05, 1, ua, call_id)
+            return
+        if isinstance(event, CCEventConnect):
+            self._update(call_id, status=_status_of(event))
+            return
+        if isinstance(event, CCEventFail):
+            self._update(call_id, status=_status_of(event), released=True)
+            return
+        if isinstance(event, CCEventDisconnect):
+            self._update(call_id, released=True)
+            return
+        _LOGGER.debug("trunk side ignored %s", type(event).__name__)
+
+    def _abandon(self, ua: Any, call_id: str) -> None:
+        """Cancel an INVITE the caller no longer wants.
+
+        Args:
+            ua: The sippy UA of the call.
+            call_id: SIP Call-ID of the call, recorded as cancelled.
+        """
+        _LOGGER.info("trunk side cancels call_id=%s", call_id)
+        self._update(call_id, cancelled=True)
+        ua.disconnect()
+
+    def _update(
+        self,
+        call_id: str,
+        *,
+        status: int | None = None,
+        released: bool | None = None,
+        cancelled: bool | None = None,
+    ) -> None:
+        """Update the recorded outcome of a call.
+
+        Args:
+            call_id: SIP Call-ID of the call.
+            status: Final status code to record, when known.
+            released: Whether the call has been torn down.
+            cancelled: Whether this side sent a ``CANCEL``.
+        """
+        for index, outcome in enumerate(self.outcomes):
+            if outcome.call_id != call_id:
+                continue
+            self.outcomes[index] = CallOutcome(
+                scenario_name=outcome.scenario_name,
+                call_id=outcome.call_id,
+                status=outcome.status if status is None else status,
+                released=outcome.released if released is None else released,
+                cancelled=outcome.cancelled if cancelled is None else cancelled,
+            )
+            return
+
+
+def _status_of(event: Any) -> int | None:
+    """Return the SIP status code carried by a connect or fail event.
+
+    Args:
+        event: A ``CCEventConnect`` or ``CCEventFail``.
+
+    Returns:
+        The status code, or ``None`` when the event carries none.
+    """
+    data = event.getData()
+    if data is None:
+        return None
+    code = data[0]
+    return code if isinstance(code, int) else None

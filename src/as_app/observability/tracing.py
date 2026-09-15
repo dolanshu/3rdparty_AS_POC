@@ -12,26 +12,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Per-Call-ID trace and console event feed.
+"""Per-Call-ID trace, console event feed and SIP message recording.
 
 Every event of both call legs is recorded under the SIP Call-ID, which is the
 correlation key for logs, console and acceptance evidence (``AGENT.md`` section 4.3 and
 4.8). The recorder is fed by the sippy glue and drained by the internal API.
+
+:class:`SipMessageRecorder` additionally captures the verbatim SIP messages sippy writes.
+It is what makes message samples real instead of hand-written: the capture tooling points
+the stack at a recorder and stores what actually went on the wire (``AGENT.md``
+section 7).
 """
 
 from __future__ import annotations
 
+import re
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-__all__ = ["CallTrace", "TraceEvent", "TraceRecorder", "get_trace_recorder"]
+__all__ = [
+    "CallTrace",
+    "RecordedSipMessage",
+    "SipMessageRecorder",
+    "TraceEvent",
+    "TraceRecorder",
+    "get_trace_recorder",
+]
 
 #: Number of most recent calls kept in memory. The trace is a demo artefact, not a
 #: persistence layer (see ``docs/production-gaps.md``).
 DEFAULT_MAX_TRACED_CALLS = 200
+
+#: ``Call-ID: <value>`` inside a raw SIP message. The trailing ``\r`` has to be part of
+#: the pattern: SIP lines end with CRLF and ``$`` only matches before ``\n``.
+_CALL_ID_IN_MESSAGE = re.compile(r"^Call-ID:[ \t]*(\S+)[ \t\r]*$", re.IGNORECASE | re.MULTILINE)
+
+#: Prefix sippy writes before a message it received.
+_RECEIVED_PREFIX = "RECEIVED"
 
 
 @dataclass(frozen=True)
@@ -181,3 +201,103 @@ def get_trace_recorder() -> TraceRecorder:
     if _RECORDER is None:
         _RECORDER = TraceRecorder()
     return _RECORDER
+
+
+@dataclass(frozen=True)
+class RecordedSipMessage:
+    """One SIP message as it went over the wire, captured verbatim.
+
+    Attributes:
+        direction: ``in`` when the AS received the message, ``out`` when it sent it.
+        peer: Remote address as reported by the stack, for example ``127.0.0.1:15061``.
+        text: The complete message, CRLF line endings included where sippy emitted them.
+        call_id: SIP Call-ID parsed out of the message, ``"-"`` when absent.
+    """
+
+    direction: str
+    peer: str
+    text: str
+    call_id: str
+
+
+class SipMessageRecorder:
+    """Captures every SIP message sippy writes, as the wire saw it.
+
+    sippy calls ``write(prefix, message)`` on ``global_config['_sip_logger']``, where the
+    prefix says whether the message was received or sent. This recorder implements that
+    same interface and keeps the messages in memory, which is what the capture tooling and
+    the pass-through tests need. It replaces ``SipLogger`` in those cases; the AS process
+    itself uses a real ``SipLogger`` (or a silent one, see ``LOG_PAYLOADS``).
+
+    Attributes:
+        messages: The captured messages, in the order they were written.
+    """
+
+    def __init__(self) -> None:
+        """Create an empty recorder."""
+        self._lock = threading.Lock()
+        self.messages: list[RecordedSipMessage] = []
+
+    def write(self, *args: Any, **kwargs: Any) -> None:
+        """Record one message written by sippy.
+
+        Args:
+            *args: ``(prefix, message)`` as sippy passes them.
+            **kwargs: Ignored; sippy also passes ``ltime`` and ``call_id``.
+        """
+        prefix = str(args[0]) if len(args) > 0 else ""
+        text = str(args[1]) if len(args) > 1 else ""
+        direction = "in" if prefix.startswith(_RECEIVED_PREFIX) else "out"
+        peer = _peer_from_prefix(prefix)
+        call_id = _call_id_of(text)
+        message = RecordedSipMessage(direction=direction, peer=peer, text=text, call_id=call_id)
+        with self._lock:
+            self.messages.append(message)
+
+    def messages_for(self, call_id: str) -> list[RecordedSipMessage]:
+        """Return the messages of one call, in the order they were captured.
+
+        Args:
+            call_id: SIP Call-ID of the call.
+
+        Returns:
+            The messages carrying that Call-ID.
+        """
+        with self._lock:
+            return [message for message in self.messages if message.call_id == call_id]
+
+    def clear(self) -> None:
+        """Drop every captured message."""
+        with self._lock:
+            self.messages = []
+
+
+def _peer_from_prefix(prefix: str) -> str:
+    """Extract the remote address from a sippy log prefix.
+
+    Args:
+        prefix: For example ``RECEIVED message from udp:127.0.0.1:5060:``.
+
+    Returns:
+        The ``address:port`` part, or ``"-"`` when the prefix carries none.
+    """
+    match = re.search(r"(\S+):(\d+)", prefix)
+    if match is None:
+        return "-"
+    address = match.group(1).removeprefix("udp:").removeprefix("[").removesuffix("]")
+    return f"{address}:{match.group(2)}"
+
+
+def _call_id_of(text: str) -> str:
+    """Return the Call-ID of a raw SIP message.
+
+    Args:
+        text: The complete SIP message.
+
+    Returns:
+        The Call-ID value, or ``"-"`` when the message carries none.
+    """
+    match = _CALL_ID_IN_MESSAGE.search(text)
+    if match is None:
+        return "-"
+    return match.group(1)

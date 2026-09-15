@@ -1,0 +1,11 @@
+BYE sip:+86216180001@127.0.0.1:46849 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:47183;rport;branch=z9hG4bK876080568c65e5cf02560e6b948d0d4c
+Max-Forwards: 70
+From: <sip:+8613800138000@127.0.0.1>;tag=b98647ce494d479f03c6e54e2e11928f
+To: <sip:+86216180001@127.0.0.1>;tag=2bdf846197781bbe44aee7a79590c39a
+Call-ID: 66214a32501ea3d6a9aaf48db78f1a6c
+CSeq: 1291543464 BYE
+Contact: <sip:127.0.0.1:47183>
+User-Agent: 3rd-party AS POC
+Content-Length: 0
+

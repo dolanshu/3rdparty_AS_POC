@@ -24,14 +24,16 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | ACC-M0-011 | CI workflow runs the gates in layers and verifies the lock file | `uv run python -c "import yaml,pathlib;print(sorted(yaml.safe_load(pathlib.Path('.github/workflows/ci.yml').read_text())['jobs']))"` | `['e2e', 'integration', 'lint', 'type-check', 'unit']` | REQ-NF-008 |
 | ACC-M0-012 | Production gap register contains the baseline of `AGENT.md` section 3 | `grep -c '^| ' docs/production-gaps.md` | 13 or more table rows, one per baseline area (transport, authentication, topology, core network, header handling, transactions, reliability, media, charging, security, observability, configuration, capacity) | REQ-NF-007 |
 
-## M1 — Signalling path (planned)
+## M1 — Signalling path (executed 2026-09-16)
 
 | ID | Criterion | Verification command | Expected result | Requirement |
 | --- | --- | --- | --- | --- |
 | ACC-M1-001 | A complete call runs: `INVITE → 100 → 180 → 200 OK → ACK → BYE` | `uv run pytest tests/e2e -q -k complete_call` | the e2e test passes and prints a Call-ID keyed trace | REQ-F-002, REQ-F-009 |
 | ACC-M1-002 | Headers and SDP pass through unmodified | `uv run pytest tests/integration -q -k pass_through` | the outbound INVITE carries the same headers and body, only the Request-URI differs | REQ-F-008 |
 | ACC-M1-003 | A request from an unlisted source is rejected with `403` and `AS-PEER-001` | `uv run pytest tests/integration -q -k peer` | the test passes | REQ-F-007 |
-| ACC-M1-004 | Counters, health endpoint and graceful `SIGTERM` shutdown work | `uv run pytest tests/integration -q -k lifecycle` | the test passes; the log ends with `shutdown complete` | REQ-F-011 |
+| ACC-M1-004 | Counters, health endpoint and graceful `SIGTERM` shutdown work | `uv run pytest tests/integration -q -k lifecycle` | the test passes; `/healthz` answers `{"status":"ok",...}`, `/api/v1/metrics` serves the counters, and the log ends with `shutdown complete` and `reason: signal SIGTERM` (exit code `0`) | REQ-F-011 |
+| ACC-M1-005 | Message samples are captured from a real call, never hand-written | `uv run python tools/capture_call.py` | 14 files written to `docs/specs/message-samples/` following `NN-direction-method[-qualifier].txt`, one per message of `INVITE → 100 → 180 → 200 → ACK → BYE`; headers and SDP of `01-in-invite-trunk.txt` reappear unchanged in `03-out-invite-core.txt` | REQ-NF-007 |
+| ACC-M1-006 | The mock S-SBC runs as its own process and answers the AS on configurable ports | `docker compose -f deploy/docker-compose.yml config` and `uv run python -m s_sbc_mock.main --help` | the compose file validates and lists the `s-sbc-mock` service with UDP ports; the process entry point exposes `--listen-address`, `--listen-port`, `--trunk-port`, `--as-address`, `--as-port`, `--call` and `--repeat` | REQ-F-001, REQ-NF-009 |
 
 ## M2 — Number translation (planned)
 

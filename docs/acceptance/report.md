@@ -160,13 +160,250 @@ start in M1 with `tools/capture.sh` and are stored in `captures/` (gitignored).
 
 ## M1 — Signalling path
 
-**Status: not executed.** Items are declared in `docs/acceptance/criteria.md`. Evidence
-for M1 must include, per item: the verification command with output (1), a Call-ID keyed
-log or trace excerpt (2), the CI job result (3) and a pcap with the key frames named (4).
+**Status: executed 2026-09-16. 6 of 6 M1 items accepted.** The AS and the mock S-SBC were
+run both as two real processes and in-process (the test fixtures) on loopback UDP with
+dynamically allocated ports; the evidence below comes from those runs.
 
-| ID | Result |
-| --- | --- |
-| ACC-M1-001 … ACC-M1-004 | pending — M1 |
+### 1. Command and output
+
+Quality gates:
+
+```text
+$ uv run ruff format --check .
+63 files already formatted
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run mypy
+Success: no issues found in 20 source files
+
+$ uv run pytest -q
+105 passed, 2 skipped in 5.6s
+  # the 2 skips are the M2 error branches (404 / 603): number translation is M2 scope
+  # per AGENT.md section 15, so they stay declared and skipped with that reason.
+```
+
+Acceptance items:
+
+```text
+$ uv run pytest tests/e2e -q -k complete_call
+.
+1 passed, 2 deselected ... in 0.7s
+call-id 4dad63799c88fe9482e804a862613323
+  2026-09-15T19:32:48.734+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-15T19:32:48.734+00:00  out      next_hop INVITE  invite originated towards the next hop
+  2026-09-15T19:32:48.736+00:00  in       next_hop 100     100 Trying on the next-hop leg
+  2026-09-15T19:32:48.736+00:00  out      trunk    100     100 Trying relayed to the trunk leg
+  2026-09-15T19:32:48.955+00:00  in       next_hop 180     180 Ringing on the next-hop leg
+  2026-09-15T19:32:48.956+00:00  out      trunk    180     180 Ringing relayed to the trunk leg
+  2026-09-15T19:32:49.168+00:00  in       next_hop 200     200 OK on the next-hop leg
+  2026-09-15T19:32:49.169+00:00  out      trunk    200     200 OK relayed to the trunk leg
+  2026-09-15T19:32:49.387+00:00  in       next_hop BYE     call released on the next-hop leg
+
+$ uv run pytest tests/integration -q -k pass_through
+.
+1 passed, 5 deselected in 4.2s
+
+$ uv run pytest tests/integration -q -k peer
+.
+1 passed, 5 deselected in 4.2s
+
+$ uv run pytest tests/integration -q -k lifecycle
+.
+1 passed, 5 deselected in 4.2s
+```
+
+Message capture and compose validation:
+
+```text
+$ uv run python tools/capture_call.py
+as port    : 127.0.0.1:47183
+core port  : 127.0.0.1:46621  (AS next hop)
+trunk port : 127.0.0.1:46849  (emulated S-CSCF)
+captured   : 14 messages
+  docs/specs/message-samples/01-in-invite-trunk.txt
+  docs/specs/message-samples/02-out-100-trunk.txt
+  docs/specs/message-samples/03-out-invite-core.txt
+  docs/specs/message-samples/04-in-100-core.txt
+  docs/specs/message-samples/05-in-180-core.txt
+  docs/specs/message-samples/06-out-180-trunk.txt
+  docs/specs/message-samples/07-in-200-core.txt
+  docs/specs/message-samples/08-out-ack-core.txt
+  docs/specs/message-samples/09-out-200-trunk.txt
+  docs/specs/message-samples/10-in-ack-trunk.txt
+  docs/specs/message-samples/11-in-bye-core.txt
+  docs/specs/message-samples/12-out-200-core.txt
+  docs/specs/message-samples/13-out-bye-trunk.txt
+  docs/specs/message-samples/14-in-200-trunk.txt
+
+$ docker compose -f deploy/docker-compose.yml config > /dev/null ; echo $?
+0
+```
+
+Peer allowlist against a real AS process (INVITE sent from `127.0.0.2`, which is not in
+`ALLOWED_PEERS=127.0.0.1`; `127.0.0.0/8` is loopback, RFC 6890):
+
+```text
+--- response from the AS ---
+SIP/2.0 403 Forbidden
+Via: SIP/2.0/UDP 127.0.0.2:46306;branch=z9hG4bKpeerdemo4711;rport=46306
+From: <sip:+86216180001@127.0.0.2>;tag=peer-demo-from
+To: <sip:+8613800138000@127.0.0.1>;tag=b0c797b78a174a15ace3f02ca9ce21ea
+Call-ID: peer-demo-4711@example.invalid
+CSeq: 1 INVITE
+Content-Length: 0
+
+as exit code: 0
+```
+
+Header and SDP pass-through, taken from the captured samples of the same call
+(`01-in-invite-trunk.txt` → `03-out-invite-core.txt`, Call-ID
+`66214a32501ea3d6a9aaf48db78f1a6c`):
+
+```text
+P-Asserted-Identity: <sip:+86216180001@ims.example.invalid>       (identical on both legs)
+Privacy: none                                                      (identical)
+P-charging-vector: icid-value=poc-office-to-mobile;...             (identical)
+P-visited-network-id: ims.example.invalid                          (identical)
+Subject: office-to-mobile                                          (identical)
+Organization: office-to-mobile                                     (identical)
+Priority: normal                                                   (identical)
+Content-Type: application/sdp   Content-Length: 230                (identical)
+v=0 ... a=sendrecv                                                 (SDP byte-identical)
+
+changed, as intended: Request-URI, Via, Contact, User-Agent
+```
+
+### 2. Log excerpt
+
+Two real processes, AS `127.0.0.1:45573`, mock core side `127.0.0.1:47333`, mock trunk
+side `127.0.0.1:46826`; both exited `0` on `SIGTERM`. Structured application log of the AS
+(`LOG_LEVEL=DEBUG`), Call-ID `21804554c2c3bc64b74ea8b64fe1aad0`:
+
+```text
+{"timestamp": "2026-09-16T03:38:39+0800", "level": "info", "module": "call_controller",
+ "call_id": "21804554c2c3bc64b74ea8b64fe1aad0", "direction": "in",
+ "peer": "127.0.0.1:46826", "event": "invite received on the trunk", "method": "INVITE",
+ "called_number": "+8613800138000"}
+{"timestamp": "2026-09-16T03:38:39+0800", "level": "info", "module": "call_controller",
+ "call_id": "21804554c2c3bc64b74ea8b64fe1aad0", "direction": "internal", "peer": "-",
+ "event": "call relayed without translation",
+ "event_note": "number translation is implemented in M2 at this seam"}
+{"timestamp": "2026-09-16T03:38:39+0800", "level": "info", "module": "call_controller",
+ "call_id": "21804554c2c3bc64b74ea8b64fe1aad0", "direction": "out",
+ "peer": "127.0.0.1:47333", "event": "invite originated towards the next hop",
+ "method": "INVITE", "called_number": "+8613800138000"}
+{"timestamp": "2026-09-16T03:38:39+0800", "level": "debug", "module": "call_controller",
+ "call_id": "21804554c2c3bc64b74ea8b64fe1aad0", "direction": "in",
+ "peer": "127.0.0.1:47333", "event": "180 Ringing on the next-hop leg", "method": "180",
+ "leg": "next_hop"}
+{"timestamp": "2026-09-16T03:38:39+0800", "level": "debug", "module": "call_controller",
+ "call_id": "21804554c2c3bc64b74ea8b64fe1aad0", "direction": "out",
+ "peer": "127.0.0.1:46826", "event": "180 Ringing relayed to the trunk leg",
+ "method": "180", "leg": "trunk"}
+{"timestamp": "2026-09-16T03:38:39+0800", "level": "debug", "module": "call_controller",
+ "call_id": "21804554c2c3bc64b74ea8b64fe1aad0", "direction": "in",
+ "peer": "127.0.0.1:47333", "event": "200 OK on the next-hop leg", "method": "200",
+ "leg": "next_hop"}
+{"timestamp": "2026-09-16T03:38:39+0800", "level": "debug", "module": "call_controller",
+ "call_id": "21804554c2c3bc64b74ea8b64fe1aad0", "direction": "in",
+ "peer": "127.0.0.1:47333", "event": "call released on the next-hop leg", "method": "BYE",
+ "leg": "next_hop"}
+{"timestamp": "2026-09-16T03:38:39+0800", "level": "info", "module": "call_controller",
+ "call_id": "21804554c2c3bc64b74ea8b64fe1aad0", "direction": "internal", "peer": "-",
+ "event": "call finished", "disposition": "completed"}
+{"timestamp": "2026-09-16T03:38:44+0800", "level": "info", "module": "main",
+ "call_id": "-", "direction": "internal", "peer": "-", "event": "shutdown complete",
+ "reason": "signal SIGTERM", "grace_seconds": "5.0"}
+```
+
+Rejection of an unlisted trunk peer, real AS process, Call-ID
+`peer-demo-4711@example.invalid`:
+
+```text
+{"timestamp": "2026-09-16T03:39:17+0800", "level": "warning", "module": "call_controller",
+ "call_id": "peer-demo-4711@example.invalid", "direction": "in", "peer": "127.0.0.2",
+ "event": "request rejected: source address is not an allowed trunk peer",
+ "method": "INVITE", "error_code": "AS-PEER-001", "sip_status": "403",
+ "error_detail": "source address 127.0.0.2 is not an allowed trunk peer",
+ "source": "127.0.0.2", "sip_method": "INVITE"}
+```
+
+Start-up, health endpoint and graceful shutdown of the same process:
+
+```text
+{"event": "application server starting", "version": "0.1.0",
+ "listen": "127.0.0.1:45573", "next_hop": "127.0.0.1:47333", ...}
+{"event": "startup self-check passed", "rules_file": ".../config/routing_rules.yaml", ...}
+{"event": "rule set active", "rule_set": "sample-office-routing", "rules": "17",
+ "next_hops": "6", ...}
+{"event": "signalling stack bound", "listen": "127.0.0.1:45573",
+ "next_hop": "127.0.0.1:47333", "allowed_peers": "127.0.0.1", ...}
+{"event": "internal api listening", "address": "127.0.0.1:46365", ...}
+{"event": "sippy event loop running", ...}
+{"event": "shutdown complete", "reason": "signal SIGTERM", "grace_seconds": "5.0", ...}
+GET http://127.0.0.1:<port>/healthz -> {"status": "ok", "version": "0.1.0",
+  "uptime_seconds": 3.4, "rule_set_loaded": true}
+GET http://127.0.0.1:<port>/api/v1/metrics -> {"calls_total": 0, ...}
+```
+
+### 3. CI
+
+| Layer | Job | Result |
+| --- | --- | --- |
+| lint | `lint` | **not executed — no CI runner in this environment.** `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass (63 files). |
+| type | `type-check` | **not executed — no CI runner.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit | `unit` | **not executed — no CI runner.** `uv run pytest tests/unit -m unit -q` executed locally and passes. |
+| integration | `integration` | **not executed — no CI runner.** `uv run pytest tests/integration -m integration -q` executed locally: 6 passed. |
+| e2e | `e2e` | **not executed — no CI runner.** `uv run pytest tests/e2e -m e2e -q` executed locally: 2 passed, 2 skipped with the reason `number translation and its 404/603 branches are delivered in M2 (AGENT.md section 15)`. |
+
+No CI badge or run link exists yet: the workflow is committed but this repository has not
+been pushed, so no runner has ever executed it. The commands above are the same commands
+the workflow runs with `uv sync --frozen`.
+
+### 4. Capture
+
+Message samples of the complete call, captured with `uv run python tools/capture_call.py`
+on 2026-09-16 and stored verbatim in `docs/specs/message-samples/`:
+
+- `01-in-invite-trunk.txt` — the INVITE that arrives on the trunk.
+- `03-out-invite-core.txt` — the INVITE the AS originates; same Call-ID
+  `66214a32501ea3d6a9aaf48db78f1a6c`, same pass-through headers, same SDP.
+- `05-in-180-core.txt` / `06-out-180-trunk.txt` — the 180 on both legs.
+- `07-in-200-core.txt` / `09-out-200-trunk.txt` — the 200 OK on both legs.
+- `08-out-ack-core.txt` / `10-in-ack-trunk.txt` — the ACK on both legs.
+- `11-in-bye-core.txt` / `13-out-bye-trunk.txt` — the BYE on both legs.
+
+The scenario, the rule set and the ports of the capture are recorded in
+`docs/specs/message-samples/README.md`. A pcap of the same exchange can be produced with
+`tools/capture.sh`, but a pcap is deliberately not committed: `AGENT.md` section 13
+forbids committing traffic captures, so the message samples are the committed artefact.
+
+### Item results
+
+| ID | Criterion | Result | Evidence |
+| --- | --- | --- | --- |
+| ACC-M1-001 | Complete call `INVITE → 100 → 180 → 200 OK → ACK → BYE` | **accepted** | 1 (`pytest tests/e2e -q -k complete_call`, trace with Call-ID `4dad63799c88fe9482e804a862613323`), 2 (two-process run, Call-ID `21804554c2c3bc64b74ea8b64fe1aad0`), 3, 4 (samples `01` … `14`) |
+| ACC-M1-002 | Headers and SDP pass through unmodified | **accepted** | 1 (`pytest tests/integration -q -k pass_through`, header comparison), 2 (side-by-side of `01-in-invite-trunk.txt` and `03-out-invite-core.txt`), 4 (samples `01`, `03`) |
+| ACC-M1-003 | Unlisted source rejected with `403` / `AS-PEER-001` | **accepted** | 1 (`pytest tests/integration -q -k peer`, real `SIP/2.0 403 Forbidden`), 2 (log line with `AS-PEER-001`, Call-ID `peer-demo-4711@example.invalid`), 3 |
+| ACC-M1-004 | Counters, health endpoint and graceful `SIGTERM` shutdown | **accepted** | 1 (`pytest tests/integration -q -k lifecycle`), 2 (`shutdown complete`, `reason: signal SIGTERM`, exit code 0, `/healthz` → `{"status":"ok"}`), 3 |
+| ACC-M1-005 | Message samples captured, not hand-written | **accepted** | 1 (`uv run python tools/capture_call.py` → 14 files), 4 (samples `01` … `14` in `docs/specs/message-samples/`), 2 (same Call-ID on both legs of the capture) |
+| ACC-M1-006 | Mock S-SBC runs as its own process on configurable ports | **accepted** | 1 (`docker compose config` exit `0`; `python -m s_sbc_mock.main --help` lists the port options), 2 (two-process run: mock on `127.0.0.1:47333` core / `127.0.0.1:46826` trunk, exit code `0` on `SIGTERM`) |
+
+### Open items raised by this run
+
+- The `ACK` is visible in the message samples but not in the Call-ID keyed trace: sippy
+  absorbs the ACK in the transaction layer and never raises a call control event for it.
+  Documented in `docs/architecture/lld.md` section 3.
+- sippy renders unknown header names with `SipGenericHF.getCanName()`, which only
+  capitalises the first letter: `P-Charging-Vector` leaves the AS as `P-charging-vector`
+  and `P-Visited-Network-ID` as `P-visited-network-id`. The values are unchanged; the
+  canonical spelling is not.
+- `deploy/docker-compose.yml` keeps `ALLOWED_PEERS: s-sbc-mock,127.0.0.1`. Container
+  addresses are not knowable in advance, so a name in the allowlist cannot match the
+  source address seen on the wire. M1 does not change it; the compose stack was validated
+  with `docker compose config` only, not run. See `docs/roadmap.md` M1 open items.
 
 ## M2 — Number translation
 

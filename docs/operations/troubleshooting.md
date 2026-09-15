@@ -21,6 +21,10 @@ Symptom → cause → action. Every entry names the error code you would see in 
 | `Timer.go() from wrong thread, expect Bad Stuff to happen` | `ED2.loop()` is not running on the thread that created the timers | Run `ED2.loop()` on the main thread, as `tools/sippy_probe.py` does |
 | `AttributeError: 'NoneType' object has no attribute 'write'` | `_sip_logger` is `None` in the global config | Always set `global_config['_sip_logger']`, for example `SipLogger('as')` |
 | No response at all on the trunk | Wrong peer address, or the source is not in `ALLOWED_PEERS` | Check `SBC_PEER_*` and `ALLOWED_PEERS`; capture with `./tools/capture.sh` |
+| `OSError: [Errno 98] Address already in use` on start-up | A previous `SipTransactionManager` was not shut down, so the UDP port is still bound | Call `SipTransactionManager.shutdown()` on teardown; in tests the `trunk_pair` fixture does it |
+| Outbound messages carry the `Via` or `Contact` of the other application | `SipConf` is a process-wide singleton and both sippy applications share one interpreter | Set `ua.lContact` and `ua.local_ua` and pin `SipConf` around the message generation; see `docs/architecture/lld.md` section 5 |
+| A header leaves the AS as `P-charging-vector` instead of `P-Charging-Vector` | sippy renders unknown headers with `SipGenericHF.getCanName()`, which only capitalises the first letter | Expected sippy behaviour; the value is unchanged. Known headers such as `P-Asserted-Identity` keep their canonical spelling |
+| The `ACK` is on the wire but missing from the Call-ID trace | The transaction layer sends the `ACK`; it never raises a call control event | Expected; see `docs/architecture/lld.md` section 3.1 and the message samples |
 | `uv sync` hangs or is very slow | The default index (`pypi.org`) is slow from this network | Use a mirror for the local run: `UV_DEFAULT_INDEX=https://<mirror>/pypi/simple uv sync` |
 
 ## Routing

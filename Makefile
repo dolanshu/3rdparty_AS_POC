@@ -11,7 +11,7 @@ export PYTHONPATH := $(PYTHONPATH_LOCAL)
 
 .DEFAULT_GOAL := help
 .PHONY: help sync dev as mock console lint format type test unit integration e2e demo \
-        docker-up docker-down clean
+        capture docker-up docker-down clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -56,6 +56,9 @@ e2e: sync ## E2E layer: complete call flows
 
 demo: sync ## Show the active rule set (the call demo lands in M1)
 	$(RUN) python tools/show_rules.py --rules-file config/routing_rules.yaml
+
+capture: sync ## Complete one call and capture its messages as samples
+	$(RUN) python tools/capture_call.py
 
 probe: sync ## Probe the sippy stack and print what it really does
 	$(RUN) python tools/sippy_probe.py

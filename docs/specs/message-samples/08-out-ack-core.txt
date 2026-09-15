@@ -1,0 +1,10 @@
+ACK sip:127.0.0.1:46621 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:47183;rport;branch=z9hG4bK1e0f3bb5b294e130cd2d21865fc58fcd
+Max-Forwards: 70
+From: <sip:+86216180001@127.0.0.1>;tag=0e62866da8f6c14b82d88faae434c4f5
+To: <sip:+8613800138000@127.0.0.1>;tag=72e99b672e279fae0d1ecd867a56159a
+Call-ID: 66214a32501ea3d6a9aaf48db78f1a6c
+CSeq: 2110404889 ACK
+User-Agent: 3rd-party AS POC
+Content-Length: 0
+

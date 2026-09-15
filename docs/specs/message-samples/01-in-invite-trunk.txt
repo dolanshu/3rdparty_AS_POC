@@ -1,0 +1,31 @@
+INVITE sip:+8613800138000@127.0.0.1:47183 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:46849;rport;branch=z9hG4bK35366c9e3d9fb89d68eae5cb7bb2c304
+Max-Forwards: 70
+From: <sip:+86216180001@127.0.0.1>;tag=2bdf846197781bbe44aee7a79590c39a
+To: <sip:+8613800138000@127.0.0.1>
+Call-ID: 66214a32501ea3d6a9aaf48db78f1a6c
+CSeq: 1323175727 INVITE
+Contact: <sip:+86216180001@127.0.0.1:46849>
+Expires: 300
+User-Agent: 3rd-party AS POC mock S-SBC
+P-Asserted-Identity: <sip:+86216180001@ims.example.invalid>
+P-charging-vector: icid-value=poc-office-to-mobile;icid-generated-at=ims.example.invalid
+P-visited-network-id: ims.example.invalid
+Privacy: none
+Subject: office-to-mobile
+Organization: office-to-mobile
+Priority: normal
+Content-Type: application/sdp
+Content-Length: 230
+
+v=0
+o=- 4101 4101 IN IP4 192.0.2.10
+s=3rd-party AS POC call
+c=IN IP4 192.0.2.10
+t=0 0
+m=audio 40000 RTP/AVP 0 8 101
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-15
+a=sendrecv

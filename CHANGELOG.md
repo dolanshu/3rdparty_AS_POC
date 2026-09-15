@@ -8,6 +8,68 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+## [Unreleased] — M1 Signalling path (2026-09-16)
+
+Recorded under M0's version node: no version bump was made, see the note below.
+
+### Added
+
+- B2BUA call control: `CallController` in `src/as_app/call_controller.py` terminates the
+  trunk INVITE on `uaA`, originates the second leg on `uaO` towards the configured next
+  hop and relays sippy call control events between the two legs.
+- `TrunkCallMap`, the process-wide trunk entry point: rejects a request whose source is
+  not in `ALLOWED_PEERS` with `403 Forbidden` and `AS-PEER-001` before any call state is
+  created, answers `481` for an unknown in-dialog request and `501` for anything but
+  `INVITE`.
+- Header and SDP pass-through: the headers of `PASSTHROUGH_HEADERS`
+  (`src/as_app/sip_adapter.py`) and the message body are copied unchanged onto the
+  outbound INVITE. Number translation is a documented seam
+  (`CallController.apply_call_policy`) that M1 leaves as a verbatim relay.
+- `AsStack` in `src/as_app/main.py`: `SipConf` + `SipTransactionManager` + `ED2.loop()`,
+  with a loop-owned timer that stops the loop once a signal handler has requested
+  shutdown.
+- `InternalApiServer` in `src/as_app/internal_api.py`: health (`/healthz`), counters
+  (`/api/v1/metrics`) and traces (`/api/v1/traces`) on their own thread, from the payload
+  builders M0 defined. Scaffolding for the FastAPI application of M3.
+- `SipMessageRecorder` in `src/as_app/observability/tracing.py`, which records the verbatim
+  SIP messages sippy writes.
+- Mock S-SBC implemented: `src/s_sbc_mock/uac.py` places the triggered INVITE with an
+  ISC-flavoured header set and an SDP offer, `src/s_sbc_mock/uas.py` answers `180 Ringing`
+  and `200 OK` and releases with `BYE`, and `src/s_sbc_mock/main.py` runs both sides as
+  one process on configurable ports (`--listen-port`, `--trunk-port`, `--as-port`,
+  `--call`, `--repeat`).
+- `tools/capture_call.py`: runs a real call over loopback UDP and writes every message to
+  `docs/specs/message-samples/` using the naming convention of that folder.
+- `tests/e2e/test_call_flows.py` (replaces `test_call_flows_pending.py`) and
+  `tests/integration/test_signalling_path.py`; `tests/conftest.py` gained a `TrunkPair`
+  fixture that binds AS and mock on ephemeral ports and drives the shared sippy loop.
+
+### Verified
+
+- `INVITE → 100 → 180 → 200 OK → ACK → BYE` completes over real UDP, both as two processes
+  (AS `127.0.0.1:45573`, mock core `127.0.0.1:47333`, mock trunk `127.0.0.1:46826`, both
+  exiting `0` on `SIGTERM`) and in the e2e suite (Call-ID
+  `4dad63799c88fe9482e804a862613323`).
+- Headers and SDP arrive unchanged on the far side; the captured samples
+  `01-in-invite-trunk.txt` and `03-out-invite-core.txt` show it for Call-ID
+  `66214a32501ea3d6a9aaf48db78f1a6c`.
+- An INVITE from `127.0.0.2` is answered `SIP/2.0 403 Forbidden` and logged with
+  `AS-PEER-001` (Call-ID `peer-demo-4711@example.invalid`).
+- Gates: `ruff format --check .` (63 files), `ruff check .`, `mypy` (20 source files) and
+  `pytest` (105 passed, 2 skipped for M2) are green; `docker compose -f
+  deploy/docker-compose.yml config` validates.
+
+### Notes
+
+- No version bump: the public surface did not change and M1 is still an unreleased
+  milestone of the same `0.1.0` node. Bump to `0.2.0` when the maintainer tags M1, or
+  leave `0.1.0` and tag `v0.1.0-m1` if the current scheme of one version node per
+  milestone is meant to carry several milestones. **Recommendation: bump to `0.2.0`**,
+  because the AS gained a user-visible capability — it now completes calls — which reads
+  as a feature addition rather than as a fix. Maintainer decision.
+- Two e2e cases stay skipped: `404` and `603` need the routing decision of
+  M2 — Number translation (`AGENT.md` section 15).
+
 ## [0.1.0] — 2026-09-15 — M0 Foundation
 
 ### Added

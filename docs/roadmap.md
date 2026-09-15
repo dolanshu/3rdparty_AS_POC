@@ -32,7 +32,7 @@ Each milestone is executed in its own conversation.
 | Milestone | Status | Tag |
 | --- | --- | --- |
 | M0 — Foundation | done (2026-09-16) | pending (tagging is done by the maintainer) |
-| M1 — Signalling path | not started | — |
+| M1 — Signalling path | done (2026-09-16) | pending (tagging is done by the maintainer) |
 | M2 — Number translation | not started | — |
 | M3 — Console | not started | — |
 | M4 — Acceptance and polish | not started | — |
@@ -132,8 +132,11 @@ context now lives in `AGENT.md` §1 and in the ADRs.)
   - `global_config['_sip_logger']` must be set (`SipLogger('as')`); `None` raises
     `AttributeError` on the first inbound message.
 - **The `logging` shadowing issue is still open for M1** (see open items below).
-- **`make demo` is a stub** in M0: it prints the rule set and the decisions. The call demo
-  and the four e2e cases are M1/M2 work; they are declared and skipped, not deleted.
+- **`make demo` is a stub** in M0: it prints the rule set and the decisions. It is still a
+  stub after M1 (see the M1 open items). **Updated 2026-09-16 (M1):** the four e2e cases
+  are no longer in `tests/e2e/test_call_flows_pending.py`; that file became
+  `tests/e2e/test_call_flows.py`, where the complete call and the caller-abandonment case
+  pass and the `404` / `603` branches stay skipped for M2.
 - The default catch-all rule `R-DEFAULT-99` is present but **disabled** so that the
   no-match `404` branch stays demonstrable. Enable it to route every remaining number.
 
@@ -145,8 +148,9 @@ context now lives in `AGENT.md` §1 and in the ADRs.)
   `src/as_app/observability/` is never put on `sys.path`. M1 must respect this; the trap
   itself is documented in `docs/architecture/lld.md` section 8.
 - **The configuration model lives in `bootstrap.py`** (startup parsing is a startup
-  concern). If it grows in M1, move it to its own module and update `AGENT.md` §5 —
-  recorded in `docs/architecture/lld.md` section 1.1.
+  concern). Still open after M1 (the model did not grow): if it grows later, move it to
+  its own module and update `AGENT.md` §5 — recorded in `docs/architecture/lld.md`
+  section 1.1.
 - **No CI runner in this environment**: the workflow is committed and its commands were
   executed locally, but no CI badge or run link exists yet. A green run should be recorded
   in `docs/acceptance/report.md` when the repository is pushed.
@@ -168,7 +172,9 @@ manager wiring, the call control hook and the two mock sides.
 
 ## M1 — Signalling path
 
-**Status:** not started
+**Status:** done (2026-09-16) — all six exit criteria met, gates green, six acceptance
+items executed with evidence in `docs/acceptance/report.md`. Tagging is the maintainer's
+step (agents do not tag).
 
 **Scope:** AS boots on sippy; mock S-SBC sends INVITE; a full call completes
 (`100 -> 180 -> 200 -> ACK -> BYE`) with headers and SDP passed through; structured
@@ -179,16 +185,115 @@ connected.
 
 **Exit criteria:**
 
-- [ ] AS process starts, binds UDP, and answers an INVITE from the mock
-- [ ] Complete call flow including BYE, verified by e2e test
-- [ ] Headers and SDP pass through unmodified (asserted in integration tests)
-- [ ] Structured logging with Call-ID correlation
-- [ ] Counters exposed; health endpoint live; `SIGTERM` shuts down gracefully
-- [ ] Acceptance items for M1 recorded with evidence
+- [x] AS process starts, binds UDP, and answers an INVITE from the mock
+- [x] Complete call flow including BYE, verified by e2e test
+- [x] Headers and SDP pass through unmodified (asserted in integration tests)
+- [x] Structured logging with Call-ID correlation
+- [x] Counters exposed; health endpoint live; `SIGTERM` shuts down gracefully
+- [x] Acceptance items for M1 recorded with evidence
 
-**Handover notes:** _to be filled when the milestone ends_
+**Done in this conversation (2026-09-16):**
 
-**Open items:** none yet
+- `src/as_app/call_controller.py` — the real B2BUA glue. `CallController` owns `uaA`
+  (trunk leg) and `uaO` (next-hop leg) and relays sippy call control events between them;
+  `TrunkCallMap` is the process-wide trunk entry point and enforces the peer allowlist.
+  `CallController.apply_call_policy()` is the **single documented seam** where number
+  translation is inserted in M2 — in M1 it relays the call verbatim and logs
+  `call relayed without translation`.
+- `src/as_app/main.py` — `AsStack` wires `SipConf` + `SipTransactionManager` +
+  `ED2.loop()`, starts the internal API and stops the loop from a loop-owned timer when a
+  signal handler has requested shutdown.
+- `src/as_app/internal_api.py` — `InternalApiServer`: a standard-library HTTP server on
+  its own daemon thread serving `/healthz`, `/api/v1/metrics` and `/api/v1/traces` from
+  the existing payload builders. It is scaffolding for the FastAPI application of M3, not
+  a web framework.
+- `src/as_app/observability/tracing.py` — `SipMessageRecorder` records the verbatim SIP
+  messages sippy writes, which is what makes message samples captured rather than
+  hand-written.
+- `src/s_sbc_mock/{uac,uas,main}.py` — the mock S-SBC is implemented: the UAC side places
+  a call with an ISC-flavoured INVITE (`P-Asserted-Identity`, `P-Charging-Vector`,
+  `P-Visited-Network-ID`, `Privacy`, `Subject`, `Organization`, `Priority` and an SDP
+  offer), the UAS side answers `180` / `200 OK` and releases with `BYE`. It runs as its
+  own process and as a test fixture.
+- `tools/capture_call.py` — captures the messages of a real call into
+  `docs/specs/message-samples/` (14 files, `01-in-invite-trunk.txt` …
+  `14-in-200-trunk.txt`).
+- Tests: `tests/e2e/test_call_flows.py` replaces `test_call_flows_pending.py`
+  (complete call and caller abandonment pass; the `404` / `603` branches stay declared and
+  skipped for M2), `tests/integration/test_signalling_path.py` covers pass-through, the
+  peer allowlist and the process lifecycle, and `tests/conftest.py` grew a `TrunkPair`
+  fixture that binds AS and mock on ephemeral ports and drives the shared sippy loop.
+
+**Handover notes (read this before starting M2):**
+
+- **Ports used.** Nothing hardcodes `5060`. The AS uses `SIP_LISTEN_PORT` (default 5060),
+  `SBC_PEER_ADDRESS`/`SBC_PEER_PORT` for the next hop, `INTERNAL_API_PORT` for health and
+  counters. The mock uses `--listen-port` for its core (UAS) side and `--trunk-port` for
+  its trunk (UAC) side, which defaults to `listen-port - 1` — that is why compose exposes
+  `15060/udp` and `15061/udp`. Tests allocate every port dynamically
+  (`tests/conftest.py::_free_udp_port`).
+- **`ED2` is a process-wide singleton and `ED2.loop()` must run on the main thread.** In
+  production the AS and the mock are separate processes, so this never shows up. In the
+  tests they share one interpreter, so they share one loop: `TrunkPair.run_until()`
+  drives it and the test asserts afterwards. Do not start a second `ED2.loop()`.
+- **`SipConf` is a process-wide singleton too** (`my_address`, `my_port`, `my_uaname`) and
+  sippy reads it while it builds a `Via` and a default `Contact`. The mock deliberately
+  does not write to it; each side pins its own identity around the messages it generates
+  (`_as_sip_identity` in `call_controller.py`, `_trunk_identity` in `uac.py`) and sets
+  `ua.lContact` and `ua.local_ua` explicitly. If you add a third sippy application, follow
+  the same pattern or messages will carry the wrong `Via`.
+- **A side needs its own `SipTransactionManager` when it needs its own local port**, and
+  each manager needs `global_config['_sip_tm']` set right after construction.
+- **sippy facts discovered (all by running it):**
+  - `100 Trying` is emitted by `UasStateIdle` when the INVITE is terminated; a UAS
+    application does not send it.
+  - `CCEventTry` carries `(call-id, calling, called, body, auth, calling-name)`; the
+    outbound Request-URI is built from `rAddr0` (the next hop) in `UacStateIdle`, and
+    `event.onUacSetupComplete(ua)` is the documented hook for changing it.
+  - Extra headers are carried on the event (`CCEventGeneric.extra_headers`) and appended
+    to the generated request — that is how the pass-through headers reach the second leg.
+  - The `ACK` of a `200 OK` is sent by the transaction layer and never raises a call
+    control event, so it does **not** appear in the Call-ID keyed trace. It is in the
+    message samples.
+  - `SipGenericHF.getCanName()` only capitalises the first letter, so
+    `P-Charging-Vector` leaves the AS as `P-charging-vector`.
+  - `SipTransactionManager.shutdown()` releases the UDP sockets; call it before a test
+    ends or the next run cannot bind the same port.
+- **`make demo` is still a stub.** It prints the rule set; the call demo is M2/M4 work.
+  `tools/capture_call.py` is the closest thing to a demonstrable call today.
+
+**Open items:**
+
+- **Scope conflict with the M1 task description (reported, not resolved).** The M1 brief
+  asked for four un-skipped e2e cases. `AGENT.md` section 15 puts the `404` and `603`
+  error branches in **M2 — Number translation**, and section 14.3 forbids a milestone
+  conversation from taking scope from another milestone. M1 therefore delivers the
+  complete call and the caller-abandonment (`CANCEL`) case, and leaves
+  `test_unmatched_number_is_answered_with_404` and `test_blocked_number_is_answered_with_603`
+  skipped with an explicit M2 reason. **Maintainer decision needed** if they should be
+  pulled into M1.
+- **`ALLOWED_PEERS` in `deploy/docker-compose.yml` still contains a service name**
+  (`s-sbc-mock,127.0.0.1`). Container addresses are assigned at run time, so a name can
+  never match the source address seen on the wire and every trunk INVITE would be
+  answered `403`. M1 validated the stack with `docker compose config` only — no image was
+  built and no container was started here. Fix options for the maintainer: give the mock a
+  static address with an `ipam` block, or resolve peer names to addresses at start-up.
+- **`SIP_LISTEN_ADDRESS: 0.0.0.0` in compose** makes sippy put `Via: SIP/2.0/UDP
+  0.0.0.0:5060` on outbound messages, because `SipConf.my_address` is taken from the
+  listen address. Harmless on loopback with `rport`, wrong for anything else.
+- **The internal API is scaffolding.** `InternalApiServer` serves three read-only
+  endpoints with `http.server`; M3 replaces it with the FastAPI application of ADR-0002.
+- **The `ACK` is missing from the Call-ID keyed trace** (see the sippy facts above). If
+  the console of M3 must show it, the trace has to be fed from the message recorder
+  instead of from the call control events.
+
+**Entry state for M2:** the complete call runs over real UDP in-process and as two
+processes, headers and SDP pass through unchanged, the peer allowlist rejects unlisted
+sources, the health endpoint and counters answer, and `SIGTERM` shuts the AS down cleanly.
+M2 replaces the body of `CallController.apply_call_policy()` with the routing decision
+(`as_app.routing.engine.decide`), rewrites the Request-URI and the number format, and adds
+the `404`, `603` and `CANCEL` error branches — nothing else in the signalling path has to
+change.
 
 ## M2 — Number translation
 

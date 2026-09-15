@@ -4,9 +4,10 @@ Duration: 5–10 minutes. Audience: architecture reviewers and operator-side rev
 Rehearse it before showing it; if the script and `make demo` disagree, both are wrong
 (`AGENT.md` section 10).
 
-**Status:** sections 1–5 run today (M0–M2 are complete): the stack probe, the rule data, a
-real translated call and the failure branches. Section 6 needs the console, which is M3;
-it is marked as not available yet.
+**Status:** the whole script runs (M0–M3 are complete): the stack probe, the rule data, a
+real translated call, the failure branches and the operations console. Every command below
+was rehearsed for M4; the run that recorded the evidence is in
+`docs/acceptance/report.md`.
 
 ## 0. Setup (before the audience arrives)
 
@@ -82,19 +83,35 @@ Each branch is a call of its own — `make demo` takes the called number as an a
 
 | What you do | What the reviewer sees |
 | --- | --- |
-| `uv run python tools/demo_call.py --called +8613900000000` | `404 Not Found`, log code `AS-ROUTE-001`, disposition `no_match` |
-| `uv run python tools/demo_call.py --called +861681234567` | `603 Decline`, log code `AS-ROUTE-002`, rule `R-BLOCK-90` |
-| `uv run pytest tests/e2e -m e2e -k cancel` | `CANCEL`, both legs torn down, disposition `abandoned` |
+| `uv run python tools/demo_call.py --called +9991234567` | `SIP/2.0 404 Not Found`, exit status 1; no rule matched, so the decision is `no_match` / `AS-ROUTE-001` (the transcript prints `rule: None` because there is no rule to name) |
+| `uv run python tools/demo_call.py --called +861681234567` | `SIP/2.0 603 Decline`, rule `R-BLOCK-90`, disposition `reject` (`AS-ROUTE-002`), exit status 1 |
+| `uv run pytest tests/e2e -m e2e -k cancel` | `1 passed`; the caller abandons and the AS tears the outbound leg down (disposition `abandoned`) |
+
+`+9991234567` is the no-match example: `+999` is not in any rule. Do **not** use
+`+8613900000000` for this branch — `+86139` is a China Mobile prefix covered by
+`R-MOB-CM-40`, so that number is translated and routed (`200 OK`, exit status 0).
 
 A rejected call exits non-zero on purpose: the tool reports whether the call was answered.
 The rejection itself is the point being demonstrated.
 
-## 6. The console (1 minute — M3, not available yet)
+## 6. The console (1 minute)
 
-Open `http://127.0.0.1:8081`. Status bar with peer state and version, live message flow
-with direction colours, Call-ID filter, payload viewer, the matched rule highlighted, the
-statistics dashboard and the SVG topology. No third-party front-end libraries, so it works
-offline.
+The console is a separate process (ADR-0002). It needs a long-running AS to read from, so
+for this section run the AS and the mock in two terminals, then the console in a third:
+
+```bash
+make dev       # terminal 1: AS on 127.0.0.1:5060, internal API on 127.0.0.1:8080
+make mock      # terminal 2: mock S-SBC places one office-to-mobile call on startup
+make console   # terminal 3: console on 127.0.0.1:8081, reading the AS API at :8080
+```
+
+Open `http://127.0.0.1:8081`. The call placed by `make mock` is visible in the live flow.
+Status bar with peer state and version, live message flow with direction colours, Call-ID
+filter, payload viewer, the matched rule highlighted, the statistics dashboard and the SVG
+topology. No third-party front-end libraries, so it works offline.
+
+`make demo` (section 4) runs its own AS and mock on ephemeral ports, so those calls do not
+appear in a console pointed at the long-running AS — use `make dev` + `make mock` here.
 
 ## 7. Closing line
 

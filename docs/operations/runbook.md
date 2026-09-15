@@ -9,8 +9,8 @@ stated otherwise.
 | --- | --- |
 | Sync the environment | `uv sync` |
 | Start the AS | `make dev` (or `uv run python -m as_app.main`) |
-| Start the mock | `make mock` (call behaviour from M1) |
-| Start the console | `make console` (UI from M3) |
+| Start the mock | `make mock` (places the default call on startup) |
+| Start the console | `make console` (console UI on 127.0.0.1:8081) |
 | Start everything with compose | `make docker-up` |
 | Stop everything | `make docker-down` |
 | Stop a foreground process | `Ctrl-C` — expect the `shutdown complete` log line |
@@ -40,8 +40,8 @@ invalid, the **previous rule set stays active** and the error is logged with `AS
 | --- | --- |
 | Active rule set | `uv run python tools/show_rules.py` |
 | Decision for one number | `uv run python tools/show_rules.py --evaluate 02161234567` |
-| Counters | `GET /api/v1/metrics` (from M3) |
-| One call | `GET /api/v1/traces/{call-id}` (from M3) |
+| Counters | `GET /api/v1/metrics` |
+| One call | `GET /api/v1/traces/{call-id}` |
 | Health | `curl -s http://127.0.0.1:8081/healthz` for the console |
 
 ## 4. Logs

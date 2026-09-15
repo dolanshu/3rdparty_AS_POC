@@ -19,7 +19,7 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | ACC-M0-006 | A changed rules file is picked up; an invalid one keeps the previous rule set | `uv run pytest tests/integration -q -k reloaded` | the test passes: reload activates the new file, and a broken edit leaves the previous rule set active | REQ-F-005 |
 | ACC-M0-007 | Structured logging with the mandatory field set and the `AS-*` error model | `uv run pytest tests/unit/test_observability.py tests/unit/test_errors.py -q` | all tests pass; every log line carries `timestamp`, `level`, `module`, `call_id`, `direction`, `peer`, `event` | REQ-F-010, REQ-F-015, REQ-NF-005 |
 | ACC-M0-008 | ADR-0001 … ADR-0006 exist with context, decision and consequences | `ls docs/architecture/adr/` | six files, `0001` … `0006` | REQ-NF-007 |
-| ACC-M0-009 | Quality gates configured and green: ruff (format + lint), mypy, pytest | `uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run pytest tests -q` | each command exits `0`; pytest reports the unit, integration and e2e layers (e2e skipped until M1) | REQ-NF-004, REQ-NF-008 |
+| ACC-M0-009 | Quality gates configured and green: ruff (format + lint), mypy, pytest | `uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run pytest tests -q` | each command exits `0`; pytest reports the unit, integration and e2e layers | REQ-NF-004, REQ-NF-008 |
 | ACC-M0-010 | No secrets, certificates, environment files or real traffic captures are committed | `git grep -nE "BEGIN (RSA|EC|DSA|OPENSSH|PRIVATE) KEY" -- . ; test ! -e .env ; git status --porcelain` | no matches, no `.env` file, no unintended files in `git status` | REQ-NF-006 |
 | ACC-M0-011 | CI workflow runs the gates in layers and verifies the lock file | `uv run python -c "import yaml,pathlib;print(sorted(yaml.safe_load(pathlib.Path('.github/workflows/ci.yml').read_text())['jobs']))"` | `['e2e', 'integration', 'lint', 'type-check', 'unit']` | REQ-NF-008 |
 | ACC-M0-012 | Production gap register contains the baseline of `AGENT.md` section 3 | `grep -c '^| ' docs/production-gaps.md` | 13 or more table rows, one per baseline area (transport, authentication, topology, core network, header handling, transactions, reliability, media, charging, security, observability, configuration, capacity) | REQ-NF-007 |
@@ -52,7 +52,7 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | ACC-M3-001 | Console shows live flow, rule hit, statistics and topology, with no third-party front-end libraries | `uv run pytest tests/integration -q -k console` | the test passes; no external script or stylesheet reference in the page | REQ-F-012, REQ-NF-010 |
 | ACC-M3-002 | Internal API serves health, metrics, rules and traces | `curl -s http://127.0.0.1:8080/healthz` | `{"status":"ok",...}` | REQ-F-011 |
 
-## M4 — Acceptance and polish (planned)
+## M4 — Acceptance and polish (executed 2026-09-16)
 
 | ID | Criterion | Verification command | Expected result | Requirement |
 | --- | --- | --- | --- | --- |

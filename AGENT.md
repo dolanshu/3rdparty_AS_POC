@@ -461,11 +461,9 @@ because the message that would have prevented it was never seen in time.
 
 ## 15. Roadmap
 
-**Current phase: M0 — in progress (documentation baseline).**
-
 **Status board: `docs/roadmap.md`.** That file is the live record of scope, status,
 handover notes and open items for each milestone. This section states the fixed scope
-only; never edit milestone status here.
+only; never edit milestone status here (and never duplicate milestone status here).
 
 - **M0 — Foundation.** Telecom-grade skeleton: `config/ deploy/ src/ tests/ tools/`,
   `pyproject.toml` + `uv.lock`, ruff/mypy/pytest config, CI workflow, meta files

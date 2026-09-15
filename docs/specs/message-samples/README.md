@@ -1,7 +1,9 @@
 # SIP message samples
 
-Real trunk-side messages captured from actual runs of the POC (`make demo` or the e2e
-suite). They are referenced by the interface specification and by acceptance evidence.
+Real trunk-side messages captured from actual runs of the POC with
+`tools/capture_call.py` (the `make capture` target); `make demo` writes nothing, so it does
+not produce samples. They are referenced by the interface specification and by acceptance
+evidence.
 
 ## Naming
 
@@ -13,8 +15,8 @@ suite). They are referenced by the interface specification and by acceptance evi
 - `direction` — `in` (S-SBC -> AS) or `out` (AS -> S-SBC)
 - `method-or-status` — `invite`, `180`, `200`, `ack`, `bye`, `cancel`
 
-Example: `02-out-invite-translated.txt` is the INVITE the AS originates after number
-translation.
+Example: `03-out-invite-core.txt` is the INVITE the AS originates on the core leg after
+number translation.
 
 ## Rules
 

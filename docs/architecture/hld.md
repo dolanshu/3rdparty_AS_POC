@@ -103,7 +103,7 @@ sequenceDiagram
 | Attribute | Approach in this POC |
 | --- | --- |
 | Testability | Translation and routing are pure functions (`routing/engine.py`); three test layers with dynamically allocated UDP ports |
-| Observability | Structured JSON log lines keyed by Call-ID, counters, per-Call-ID trace, console (M3) |
+| Observability | Structured JSON log lines keyed by Call-ID, counters, per-Call-ID trace, operations console |
 | Operability | Startup self-check and fail-fast; configuration from the environment; graceful shutdown |
 | Changeability | Routing policy is data, not code (ADR-0004); switching mock ↔ real S-SBC is configuration only |
 | Security (baseline) | Source address allowlist, no secrets committed, payload logging off by default. TLS and Digest are **not** implemented — see `docs/production-gaps.md` |

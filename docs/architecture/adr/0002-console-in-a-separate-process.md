@@ -41,7 +41,7 @@ never imports AS modules and the AS never imports console modules.
 - **An extra interface to maintain.** The API is a contract; the payload shapes live in
   `src/as_app/internal_api.py` and are covered by unit tests.
 - **Serving the API from the AS needs care.** The AS process is single-threaded, so the
-  HTTP surface (M3) must not run inside the sippy thread; it is served from a thread that
+  HTTP surface must not run inside the sippy thread; it is served from a thread that
   only reads snapshots (counters and traces are lock-guarded).
 - **Deployment has three services** instead of two; see `docs/operations/deployment.md`.
 

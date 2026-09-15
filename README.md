@@ -96,7 +96,7 @@ All configuration is environment based; copy `.env.example` to `.env` and adjust
 | Knob | Default | Purpose |
 | --- | --- | --- |
 | `SIP_LISTEN_ADDRESS` / `SIP_LISTEN_PORT` | `127.0.0.1` / `5060` | where the AS receives the trunk |
-| `SBC_PEER_ADDRESS` / `SBC_PEER_PORT` | `127.0.0.1` / `15061` | next hop (mock or real S-SBC) |
+| `SBC_PEER_ADDRESS` / `SBC_PEER_PORT` | `127.0.0.1` / `5061` | next hop (mock or real S-SBC); `.env.example` ships `15061` to match the local mock |
 | `ALLOWED_PEERS` | `127.0.0.1` | source addresses accepted on the trunk |
 | `RULES_FILE` | `config/routing_rules.yaml` | routing rules |
 | `INTERNAL_API_ADDRESS` / `INTERNAL_API_PORT` | `127.0.0.1` / `8080` | how the console reaches the AS |

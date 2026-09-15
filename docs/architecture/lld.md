@@ -16,18 +16,18 @@
 | `observability/logging.py` | Structured logging with the fixed field set |
 | `observability/metrics.py` | Counters: calls, dispositions, error codes, rule hits, peer status |
 | `observability/tracing.py` | Per-Call-ID trace recorder, bounded in memory |
-| `internal_api.py` | Payload builders for the console API plus `InternalApiServer`, a standard-library HTTP server on its own thread that serves `/healthz`, `/api/v1/metrics` and `/api/v1/traces` until the FastAPI application of M3 replaces it |
+| `internal_api.py` | Payload builders for the console API plus the FastAPI application factory (`create_internal_api_app`) served by uvicorn on a daemon thread: `/healthz`, `/api/v1/metrics`, `/api/v1/rules`, `/api/v1/traces`, `/api/v1/traces/{call_id}` and `WS /ws/events` |
 
 The configuration model lives in `bootstrap.py` because parsing and validation are
-startup concerns. Open item (carried forward from M0, unresolved as of M1): if the
-settings model grows, move it into its own module and update `AGENT.md` section 5 (a
-structural change).
+startup concerns. Open item (carried forward from M0; still unresolved — the model did not
+grow): if the settings model grows, move it into its own module and update `AGENT.md`
+section 5 (a structural change).
 
 ### 1.2 `src/console/` and `src/s_sbc_mock/`
 
 | Module | Responsibility |
 | --- | --- |
-| `console/main.py` | FastAPI application, health endpoint, placeholder page; the operations UI is M3 |
+| `console/main.py` | FastAPI application: health endpoint plus the operations console page (dark theme, live flow, rule highlight, statistics, SVG topology) served from a single inline HTML string |
 | `s_sbc_mock/main.py` | Process entry point, `MockConfig`, wires UAC and UAS |
 | `s_sbc_mock/uac.py` | UAC side: emulates the S-CSCF iFC trigger, places calls from `CallScenario` data |
 | `s_sbc_mock/uas.py` | UAS side: emulates the core network, answers the INVITE originated by the AS |
@@ -125,9 +125,9 @@ stateDiagram-v2
 **Known limitation of the trace.** The `ACK` of a `200 OK` is sent by the sippy
 transaction layer and never raises a call control event, so it does not appear in the
 Call-ID keyed trace even though it is on the wire. The message samples in
-`docs/specs/message-samples/` (`08-out-ack-core.txt`, `10-in-ack-trunk.txt`) carry it. If
-the M3 console has to show it, feed the trace from `SipMessageRecorder` instead of from
-the call control events.
+`docs/specs/message-samples/` (`08-out-ack-core.txt`, `10-in-ack-trunk.txt`) carry it. If a
+future console view has to show it, feed the trace from `SipMessageRecorder` instead of
+from the call control events.
 
 ### 3.2 Process lifecycle
 
@@ -155,11 +155,10 @@ uaA (trunk leg) --CCEventTry--> CallController.recv_event
                                   uaO (next-hop leg)
 ```
 
-M1 relays the call verbatim and logs `call relayed without translation`. M2 replaces the
-body of that method with a call to `as_app.routing.engine.decide`, rewrites the called
-number in the event data and rejects the call with the error the decision carries
-(`404` / `603`). No other module may touch the called number, so the seam stays
-verifiable: after M2 there is exactly one place that can change what is dialled.
+`apply_call_policy()` calls `as_app.routing.engine.decide`, rewrites the called number in
+the event data and rejects the call with the error the decision carries (`404` / `603`).
+No other module may touch the called number, so the seam stays verifiable: there is exactly
+one place in the signalling path that can change what is dialled.
 
 ## 4. Error model
 
@@ -212,7 +211,7 @@ verifiable: after M2 there is exactly one place that can change what is dialled.
 | `SIP_LISTEN_ADDRESS` | `127.0.0.1` | Address the trunk is received on |
 | `SIP_LISTEN_PORT` | `5060` | UDP port of the trunk |
 | `SBC_PEER_ADDRESS` | `127.0.0.1` | Next hop for the outbound INVITE |
-| `SBC_PEER_PORT` | `15061` | UDP port of the next hop |
+| `SBC_PEER_PORT` | `5061` | UDP port of the next hop (`.env.example` ships `15061` for the mock) |
 | `ALLOWED_PEERS` | `127.0.0.1` | Comma separated source addresses accepted on the trunk |
 | `RULES_FILE` | `config/routing_rules.yaml` | Routing rules file |
 | `INTERNAL_API_ADDRESS` | `127.0.0.1` | Address the console reaches |
@@ -250,7 +249,7 @@ library, so the code works, but two things must be respected:
 2. Never add `src/as_app/observability/` to `sys.path` and never run a script from inside
    that directory.
 
-The file is deliberately **not** renamed in M0 (a rename is a structural change that
-would touch `AGENT.md` section 5). Maintainer decision of 2026-09-16: the name stays. M1
-respects the two rules above — every import is package-absolute, and
+The file is deliberately **not** renamed (a rename is a structural change that would
+touch `AGENT.md` section 5). Maintainer decision of 2026-09-16: the name stays. The two
+rules above hold throughout the code: every import is package-absolute, and
 `src/as_app/observability/` is never on `sys.path`.

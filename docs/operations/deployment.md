@@ -44,7 +44,7 @@ The POC has no capacity target (REQ-NF-009). For orientation only:
 
 ```bash
 uv sync                       # install the locked environment
-make dev                      # AS only in M0 (mock and console follow in M1/M3)
+make dev                      # AS locally (run make mock and make console in other terminals)
 python -m as_app.main --self-check-only    # configuration and rules check, then exit
 ```
 
@@ -63,7 +63,7 @@ make docker-down              # docker compose -f deploy/docker-compose.yml down
 | Check | Command | Expected |
 | --- | --- | --- |
 | AS self-check | `uv run python -m as_app.main --self-check-only` | exit code `0`, log event `startup self-check passed` |
-| Internal API | `curl -s http://127.0.0.1:8080/healthz` | `{"status":"ok",...}` (from M3, when the API is served) |
+| Internal API | `curl -s http://127.0.0.1:8080/healthz` | `{"status":"ok",...}` |
 | Console | `curl -s http://127.0.0.1:8081/healthz` | `{"status":"ok","component":"console"}` |
 | Trunk reachable | `uv run python tools/sippy_probe.py` | `minimal SipTransactionManager + ED2.loop() stack: OK` |
 

@@ -1,0 +1,28 @@
+# Mock Service-SBC — UAC side (emulated S-CSCF trigger) and UAS side (emulated core)
+# built on the same SIP stack as the AS (ADR-0001, ADR-0005).
+
+FROM python:3.10-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src \
+    UV_SYSTEM_PYTHON=1 \
+    UV_VERSION=0.12.15
+
+RUN pip install --no-cache-dir uv==${UV_VERSION}
+
+WORKDIR /app
+RUN useradd --create-home --uid 10001 mock
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project
+
+COPY src/ ./src/
+COPY config/ ./config/
+COPY VERSION ./
+
+USER mock
+EXPOSE 15060/udp 15061/udp
+
+ENTRYPOINT []
+CMD ["python", "-m", "s_sbc_mock.main"]

@@ -1,0 +1,53 @@
+3rd-party Application Server POC
+Copyright 2026 the 3rd-party AS POC authors.
+
+This product includes software developed as part of this proof of concept and is licensed
+under the Apache License, Version 2.0 (see LICENSE).
+
+--------------------------------------------------------------------------------
+Third-party notices
+--------------------------------------------------------------------------------
+
+sippy — RFC3261 SIP Stack and Back-to-Back User Agent (B2BUA)
+    https://pypi.org/project/sippy/
+    Version used: 2.4.2
+    Copyright (c) 2006-2019, 2003-2005 Maxim Sobolev <sobomax@gmail.com>
+    Copyright (c) 2006-2019, Sippy Software, Inc., http://www.sippysoft.com
+    License: BSD 2-Clause ("Simplified BSD License")
+
+    sippy is distributed as a source distribution and pulls in its own dependencies
+    (ElPeriodic, rtpsynth, g722, pycryptodome, websockets, flask, flask-login). The
+    media-related dependencies are installed even though this project does no media
+    work; see ADR-0001 and docs/production-gaps.md.
+
+ElPeriodic — periodic event scheduler used by sippy
+    License: BSD 2-Clause
+
+rtpsynth / g722 — RTP and codec helpers used by sippy
+    License: BSD 2-Clause
+
+The full text of the BSD 2-Clause licence is reproduced below.
+
+--------------------------------------------------------------------------------
+BSD 2-Clause License
+--------------------------------------------------------------------------------
+
+Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of
+   conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of
+   conditions and the following disclaimer in the documentation and/or other materials
+   provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
+OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
+TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

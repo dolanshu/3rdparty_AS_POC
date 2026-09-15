@@ -1,0 +1,79 @@
+# Local demo stack: the third-party AS, the mock Service-SBC and the console.
+#
+# The AS and the mock talk SIP over UDP on the trunk; the console reaches the AS over the
+# internal HTTP API in a separate process (ADR-0002). Ports are declared explicitly so the
+# port matrix in docs/operations/deployment.md and this file never drift apart.
+#
+# Usage:  docker compose -f deploy/docker-compose.yml up --build
+#         make docker-up / make docker-down
+
+name: third-party-as-poc
+
+services:
+  as:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.as
+    command: ["python", "-m", "as_app.main"]
+    environment:
+      SIP_LISTEN_ADDRESS: 0.0.0.0
+      SIP_LISTEN_PORT: "5060"
+      SBC_PEER_ADDRESS: s-sbc-mock
+      SBC_PEER_PORT: "15061"
+      ALLOWED_PEERS: s-sbc-mock,127.0.0.1
+      RULES_FILE: config/routing_rules.yaml
+      INTERNAL_API_ADDRESS: 0.0.0.0
+      INTERNAL_API_PORT: "8080"
+      LOG_LEVEL: INFO
+      LOG_STRUCTURED: "true"
+      LOG_PAYLOADS: "false"
+    ports:
+      - "5060:5060/udp"
+      - "8080:8080/tcp"
+    networks:
+      - trunk
+    restart: unless-stopped
+
+  s-sbc-mock:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.mock
+    command:
+      - python
+      - -m
+      - s_sbc_mock.main
+      - --listen-address
+      - 0.0.0.0
+      - --listen-port
+      - "15061"
+      - --as-address
+      - as
+      - --as-port
+      - "5060"
+    ports:
+      # 15060/udp is the UAC side (emulated S-CSCF trigger), 15061/udp the UAS side
+      # (emulated core network) that receives the translated INVITE.
+      - "15060:15060/udp"
+      - "15061:15061/udp"
+    networks:
+      - trunk
+    restart: unless-stopped
+
+  console:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.console
+    command: ["python", "-m", "console.main", "--address", "0.0.0.0", "--port", "8081"]
+    environment:
+      AS_INTERNAL_API_URL: http://as:8080
+    ports:
+      - "8081:8081/tcp"
+    depends_on:
+      - as
+    networks:
+      - trunk
+    restart: unless-stopped
+
+networks:
+  trunk:
+    name: as-poc-trunk

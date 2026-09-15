@@ -1,0 +1,156 @@
+# Copyright 2026 the 3rd-party AS POC authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Thin wrapper around the sippy primitives.
+
+This is the only place, together with :mod:`as_app.call_controller`, that is allowed to
+touch sippy objects. Everything above the adapter talks in plain Python values, so the
+translation and routing logic stays testable without a stack (``AGENT.md`` section 12).
+
+The URI and header handling here follows RFC 3261: a Request-URI of the form
+``sip:user@host`` and the ``P-Asserted-Identity`` header carrying the calling party on an
+IMS trunk (3GPP TS 24.229).
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from ipaddress import ip_address
+
+from as_app.errors import AsError, AsErrorCode
+from as_app.routing.rules import NextHop
+
+__all__ = [
+    "CallLeg",
+    "TrunkMessage",
+    "build_request_uri",
+    "extract_called_number",
+    "is_allowed_peer",
+]
+
+#: ``sip:+8613800100000@10.0.0.1:5060;user=phone`` -> ``+8613800100000``.
+#: The ``@`` is required: a URI without a user part (``sip:10.0.0.1``) is a host only URI
+#: and must be reported as a malformed request, not treated as a number.
+_USER_FROM_URI = re.compile(r"^sips?:([^@;?]+)@")
+
+
+@dataclass(frozen=True)
+class CallLeg:
+    """One side of a B2BUA call.
+
+    Attributes:
+        leg: ``in`` for the trunk leg towards the S-SBC, ``out`` for the leg towards the
+            next hop.
+        call_id: SIP Call-ID of the dialog.
+        local_address: Local address of the leg.
+        remote_address: Peer address of the leg.
+    """
+
+    leg: str
+    call_id: str
+    local_address: str
+    remote_address: str
+
+
+@dataclass(frozen=True)
+class TrunkMessage:
+    """The AS-facing view of a SIP message received on the trunk.
+
+    Attributes:
+        method: SIP method, for example ``INVITE``.
+        call_id: SIP Call-ID, the correlation key of the call.
+        request_uri: Request-URI as received.
+        called_number: User part of the Request-URI.
+        calling_number: Calling party from ``P-Asserted-Identity``, when present.
+        source_address: Address the message came from.
+        headers: Relevant headers, verbatim.
+        body: Message body, carried through unmodified (SDP pass-through).
+    """
+
+    method: str
+    call_id: str
+    request_uri: str
+    called_number: str
+    calling_number: str | None = None
+    source_address: str = "-"
+    headers: dict[str, str] = field(default_factory=dict)
+    body: str = ""
+
+
+def extract_called_number(request_uri: str) -> str:
+    """Return the user part of a SIP or SIPS URI.
+
+    Args:
+        request_uri: A Request-URI such as ``sip:+8613800100000@10.0.0.1;user=phone``.
+
+    Returns:
+        The user part of the URI.
+
+    Raises:
+        AsError: ``AS-PEER-003`` when the URI has no user part.
+    """
+    match = _USER_FROM_URI.match(request_uri.strip())
+    if match is None:
+        raise AsError(
+            AsErrorCode.PEER_MALFORMED_REQUEST,
+            f"request-uri has no user part: {request_uri!r}",
+            context={"request_uri": request_uri},
+        )
+    return match.group(1)
+
+
+def build_request_uri(number: str, hop: NextHop) -> str:
+    """Build the Request-URI of the outbound INVITE (RFC 3261 section 19.1).
+
+    Args:
+        number: Translated called number.
+        hop: Next hop the INVITE is sent to.
+
+    Returns:
+        A SIP URI of the form ``sip:<number>@<host>:<port>;transport=udp``.
+    """
+    host = hop.address if _is_ipv6(hop.address) is False else f"[{hop.address}]"
+    return f"sip:{number}@{host}:{hop.port};transport={hop.transport}"
+
+
+def _is_ipv6(address: str) -> bool:
+    """Tell whether an address literal is IPv6.
+
+    Args:
+        address: Address literal or host name.
+
+    Returns:
+        ``True`` when the address parses as an IPv6 address.
+    """
+    try:
+        return ip_address(address).version == 6
+    except ValueError:
+        return False
+
+
+def is_allowed_peer(source_address: str, allowed_peers: list[str]) -> bool:
+    """Check a trunk source address against the allowlist.
+
+    The trunk is treated as untrusted: a message from an address that is not configured
+    is rejected with ``403`` and ``AS-PEER-001`` (``AGENT.md`` section 9).
+
+    Args:
+        source_address: Source IP address of the message.
+        allowed_peers: Configured peer addresses.
+
+    Returns:
+        ``True`` when the source is an allowed peer.
+    """
+    return source_address in allowed_peers

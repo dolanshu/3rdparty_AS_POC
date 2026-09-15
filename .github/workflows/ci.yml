@@ -1,0 +1,104 @@
+name: CI
+
+# Quality gates in layers, as required by AGENT.md section 4.7:
+# lint -> type check -> unit -> integration -> e2e.
+# The dependency lock is verified: every job runs `uv sync --frozen`, which fails when
+# uv.lock is not in sync with pyproject.toml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.10"
+  UV_VERSION: "0.12.15"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: pip install uv==${{ env.UV_VERSION }}
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Sync the locked environment
+        run: uv sync --frozen
+      - name: ruff format --check
+        run: uv run ruff format --check .
+      - name: ruff check
+        run: uv run ruff check .
+
+  type-check:
+    name: type
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: pip install uv==${{ env.UV_VERSION }}
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Sync the locked environment
+        run: uv sync --frozen
+      - name: mypy
+        run: uv run mypy
+
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+    needs: [lint, type-check]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: pip install uv==${{ env.UV_VERSION }}
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Sync the locked environment
+        run: uv sync --frozen
+      - name: pytest unit
+        run: uv run pytest tests/unit -m unit -q
+
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    needs: [unit]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: pip install uv==${{ env.UV_VERSION }}
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Sync the locked environment
+        run: uv sync --frozen
+      - name: pytest integration
+        run: uv run pytest tests/integration -m integration -q
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    needs: [integration]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: pip install uv==${{ env.UV_VERSION }}
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Sync the locked environment
+        run: uv sync --frozen
+      - name: pytest e2e
+        run: uv run pytest tests/e2e -m e2e -q
+      - name: Upload the call trace as evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-trace
+          path: artifacts/
+          if-no-files-found: ignore

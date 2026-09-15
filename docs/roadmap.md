@@ -31,22 +31,27 @@ Each milestone is executed in its own conversation.
 
 | Milestone | Status | Tag |
 | --- | --- | --- |
-| M0 — Foundation | in progress (documentation baseline) | — |
+| M0 — Foundation | done (2026-09-16) | pending (tagging is done by the maintainer) |
 | M1 — Signalling path | not started | — |
 | M2 — Number translation | not started | — |
 | M3 — Console | not started | — |
 | M4 — Acceptance and polish | not started | — |
 
-## Environment (verified 2026-09-15)
+## Environment (verified 2026-09-16)
 
 - Python **3.10.12** is the interpreter available on this machine; the project targets it
-- **`uv` is not installed** — M0 must install it (or fall back to `venv` + `pip`) before
-  anything can be run
-- `sippy` 2.4.2 installs cleanly on 3.10.12 (see ADR-0001)
+- **`uv` 0.12.15 is installed** (`pip install uv`, done in M0) and is the toolchain in use
+- `sippy` 2.4.2 installs cleanly on 3.10.12 and runs a minimal stack (see ADR-0001 and the
+  probe output in `docs/acceptance/report.md`)
+- Note for slow networks: this machine reaches `pypi.org` very slowly. Local runs used
+  `UV_DEFAULT_INDEX=https://<mirror>/pypi/simple uv sync`; the committed `uv.lock`
+  references the public PyPI, so CI and a clean checkout are unaffected.
 
 ## M0 — Foundation
 
-**Status:** in progress (documentation baseline)
+**Status:** done (2026-09-16) — all exit criteria met, gates green, acceptance items
+executed with evidence in `docs/acceptance/report.md`. Tagging is the maintainer's step
+(agents do not tag).
 
 **Scope** (from `AGENT.md` §15): telecom-grade skeleton `config/ deploy/ src/ tests/
 tools/`; `pyproject.toml` + lock file; ruff/mypy/pytest config; CI workflow; meta files
@@ -60,18 +65,22 @@ context now lives in `AGENT.md` §1 and in the ADRs.)
 
 **Exit criteria:**
 
-- [ ] Directory skeleton created exactly as `AGENT.md` §5
-- [ ] `uv` installed and locked; `uv sync` works from a clean checkout
-- [ ] sippy 2.4.2 verified: installs and runs a minimal stack on Python 3.10
-- [ ] ruff / mypy / pytest configured and running (even with no tests yet)
-- [ ] CI workflow present, running lint / type / unit / integration / e2e layers
-- [ ] Meta files present: VERSION, CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY,
+- [x] Directory skeleton created exactly as `AGENT.md` §5
+- [x] `uv` installed and locked; `uv sync` works from a clean checkout
+      (`uv sync --frozen` and `uv lock --check` both pass)
+- [x] sippy 2.4.2 verified: installs and runs a minimal stack on Python 3.10
+      (`tools/sippy_probe.py`, real request/response exchange, exit code 0)
+- [x] ruff / mypy / pytest configured and running (100 tests pass, 4 e2e cases skipped
+      until M1)
+- [x] CI workflow present, running lint / type / unit / integration / e2e layers
+- [x] Meta files present: VERSION, CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY,
       NOTICE
-- [ ] `docs/` baseline complete per `AGENT.md` §4.2 (see `docs/README.md` for status)
-- [ ] Sample routing data meets `AGENT.md` §4.6
-- [ ] `README.md` quickstart written; `docs/README.md` up to date
-- [ ] `docs/acceptance/criteria.md` populated with M0 acceptance items
-- [ ] ADR-0002 … ADR-0006 written (`AGENT.md` §4.5)
+- [x] `docs/` baseline complete per `AGENT.md` §4.2 (see `docs/README.md` for status)
+- [x] Sample routing data meets `AGENT.md` §4.6 (17 rules, 6 next hops, four number
+      formats, priority + failover)
+- [x] `README.md` quickstart written; `docs/README.md` up to date
+- [x] `docs/acceptance/criteria.md` populated with M0 acceptance items
+- [x] ADR-0002 … ADR-0006 written (`AGENT.md` §4.5)
 
 **Done in this conversation (2026-09-15):**
 
@@ -88,22 +97,74 @@ context now lives in `AGENT.md` §1 and in the ADRs.)
 - `docs/README.md` — documentation map by audience
 - `docs/roadmap.md` — this board
 
-**Handover notes:**
+**Done in this conversation (2026-09-16):**
 
-- Scope and standards are settled; do not re-open them without the maintainer
-- The remaining M0 work is mechanical: skeleton, toolchain, docs baseline, sample data
-- An `uv` installation step is required before any Python command works
+- Skeleton per `AGENT.md` §5: `config/ deploy/ docs/ src/ tests/ tools/`, with
+  `src/as_app/` (main, bootstrap, call_controller, sip_adapter, errors,
+  routing/{rules,engine}, observability/{logging,metrics,tracing}, internal_api),
+  `src/console/`, `src/s_sbc_mock/` and the three test layers
+- `pyproject.toml` + committed `uv.lock`; ruff (format + lint), mypy, pytest configured
+- CI workflow with the five layers; meta files; README with quickstart and repository tour
+- Documentation baseline: SRS, HLD, LLD, ADR-0002 … ADR-0006, operations guides,
+  acceptance criteria and report, demo script, glossary, production gap register
+- Sample routing data (17 rules, 6 next hops) plus the Pydantic model, loader and reload
+  detection
+- `deploy/docker-compose.yml` with `as`, `s-sbc-mock` and `console` and one Dockerfile
+  each; `tools/{sippy_probe.py,show_rules.py,capture.sh}`
+- M0 acceptance run: 12 of 12 items accepted, evidence in `docs/acceptance/report.md`
 
-**Open items:** resolved by the maintainer (2026-09-15).
+**Handover notes (read this before starting M1):**
 
-- **Toolchain fallback: `venv`.** `uv` is the primary tool (0.12.15 is available on
-  PyPI). If `uv` cannot be installed in a target environment, fall back to `venv` +
-  `pip` with an exported requirements file. Which one was actually used is recorded in
-  the M0 handover notes.
-- **Remaining ADRs: write them.** ADR-0002 (process separation between AS and console),
-  ADR-0003 (UDP-only transport), ADR-0004 (declarative YAML rules with hot reload),
-  ADR-0005 (mock strategy for the S-SBC) and ADR-0006 (signalling-only scope) are part
-  of the M0 documentation baseline (`AGENT.md` §4.5). ADR-0001 (sippy) is written.
+- **Toolchain actually used: `uv` 0.12.15**, installed with `pip install uv`. The project
+  is installed editable, so `uv sync` alone is enough: `uv run python -m as_app.main`
+  works without setting `PYTHONPATH`. The maintainer-approved `venv` + `pip` fallback was
+  **not** needed.
+- **sippy verification result: passed.** `uv run python tools/sippy_probe.py` starts
+  `SipConf` + `SipTransactionManager` + `ED2.loop()` on loopback, sends one INVITE
+  (`Call-ID: probe-17442@example.invalid`) and receives `SIP/2.0 404 Probe` with a
+  generated `To` tag; the last line is
+  `minimal SipTransactionManager + ED2.loop() stack: OK`, exit code 0. Full output is in
+  `docs/acceptance/report.md`.
+- **Two sippy facts discovered while probing** (they are in
+  `docs/operations/troubleshooting.md` as well):
+  - `ED2.loop()` must run on the main thread; running it in a worker thread produces
+    `Timer.go() from wrong thread, expect Bad Stuff to happen`.
+  - `global_config['_sip_logger']` must be set (`SipLogger('as')`); `None` raises
+    `AttributeError` on the first inbound message.
+- **The `logging` shadowing issue is still open for M1** (see open items below).
+- **`make demo` is a stub** in M0: it prints the rule set and the decisions. The call demo
+  and the four e2e cases are M1/M2 work; they are declared and skipped, not deleted.
+- The default catch-all rule `R-DEFAULT-99` is present but **disabled** so that the
+  no-match `404` branch stays demonstrable. Enable it to route every remaining number.
+
+**Open items:**
+
+- **Resolved (maintainer, 2026-09-16): `src/as_app/observability/logging.py` keeps its
+  name.** Ruled on after M0 flagged that it shadows the stdlib `logging` module. The
+  binding rule is now in `AGENT.md` §5: all imports of it are package-absolute, and
+  `src/as_app/observability/` is never put on `sys.path`. M1 must respect this; the trap
+  itself is documented in `docs/architecture/lld.md` section 8.
+- **The configuration model lives in `bootstrap.py`** (startup parsing is a startup
+  concern). If it grows in M1, move it to its own module and update `AGENT.md` §5 —
+  recorded in `docs/architecture/lld.md` section 1.1.
+- **No CI runner in this environment**: the workflow is committed and its commands were
+  executed locally, but no CI badge or run link exists yet. A green run should be recorded
+  in `docs/acceptance/report.md` when the repository is pushed.
+- **`uv` needs a package index mirror on this machine** (`UV_DEFAULT_INDEX=...`); the
+  committed lock refers to the public PyPI, so this is local-only.
+- **Unused runtime dependencies**: sippy pulls in `rtpsynth`, `g722`, `flask` and
+  `flask-login`, which this signalling-only service never imports. Registered in
+  `docs/production-gaps.md`.
+
+**Entry state for M1:** `uv sync --frozen` works, all gates pass, the rule set loads and
+reloads, and the sippy stack is proven to run. What M1 has to add is the transaction
+manager wiring, the call control hook and the two mock sides.
+
+**Previously open, resolved in M0:**
+
+- **Toolchain fallback: `venv`.** `uv` was installed successfully, so the fallback was not
+  used. It stays approved for environments where `uv` cannot be installed.
+- **Remaining ADRs: write them.** ADR-0002 … ADR-0006 are written.
 
 ## M1 — Signalling path
 

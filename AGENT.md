@@ -242,6 +242,11 @@ docs/                         see §4.2
 - sippy runs its **own blocking event loop** (`ED2.loop()`). It must never share a
   thread or an asyncio loop with the console; the two processes talk over the internal
   API only.
+- `src/as_app/observability/logging.py` keeps its name **by maintainer decision**
+  (2026-09-16); it shadows the stdlib module name, so every import of it must be
+  package-absolute (`from as_app.observability.logging import ...`) and
+  `src/as_app/observability/` must never be placed on `sys.path`. Renaming it is a
+  structural change and requires the maintainer. See `docs/architecture/lld.md` §8.
 - Adding, moving or renaming a directory or a configuration field is a **structural
   change** and must update this file, `README.md` and `docs/README.md` in the same
   commit (§12).

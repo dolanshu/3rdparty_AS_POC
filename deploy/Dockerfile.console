@@ -1,0 +1,26 @@
+# Console — separate process, plain HTML/CSS/JS, talks to the AS over its internal API.
+
+FROM python:3.10-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src \
+    UV_SYSTEM_PYTHON=1 \
+    UV_VERSION=0.12.15
+
+RUN pip install --no-cache-dir uv==${UV_VERSION}
+
+WORKDIR /app
+RUN useradd --create-home --uid 10001 console
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project
+
+COPY src/ ./src/
+COPY VERSION ./
+
+USER console
+EXPOSE 8081/tcp
+
+ENTRYPOINT []
+CMD ["python", "-m", "console.main", "--address", "0.0.0.0", "--port", "8081"]

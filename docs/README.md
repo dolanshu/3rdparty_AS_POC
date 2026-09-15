@@ -11,36 +11,38 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | Document | Status | What it answers |
 | --- | --- | --- |
 | `AGENT.md` §1–§5, §15 | ready | Positioning, boundaries, non-goals, delivery standards, roadmap |
-| `docs/architecture/hld.md` | planned | System context, deployment view, interface view, quality attributes |
-| `docs/architecture/lld.md` | planned | Modules, data structures, state machines, error codes, process model |
-| `docs/architecture/adr/` | in progress | Decisions and consequences — ADR-0001 (sippy) is ready |
-| `docs/production-gaps.md` | planned | Every POC shortcut and what production would require |
-| `docs/glossary.md` | planned | Terminology |
+| `docs/architecture/hld.md` | ready | System context, deployment view, interface view, quality attributes, key flows |
+| `docs/architecture/lld.md` | ready | Modules, data structures, state machines, error codes, process model, log fields |
+| `docs/architecture/adr/` | ready | ADR-0001 … ADR-0006: sippy, process separation, UDP only, YAML rules, mock strategy, signalling only |
+| `docs/production-gaps.md` | ready | Every POC shortcut and what production would require |
+| `docs/glossary.md` | ready | Terminology |
+| `docs/requirements/functional-and-nonfunctional.md` | ready | `REQ-F-*` / `REQ-NF-*` capability list with milestone status |
 
 ## Development
 
 | Document | Status | What it answers |
 | --- | --- | --- |
 | `AGENT.md` §5–§13 | ready | Layout, stack, configuration, workflow, testing, conventions, commits |
+| `README.md` | ready | Positioning, quickstart, repository tour, non-goals |
+| `CONTRIBUTING.md` | ready | How to work in this repository |
 | `docs/specs/index.md` | ready | Normative references |
-| `docs/specs/message-samples/` | ready (convention) | Real SIP messages on the trunk |
-| `CONTRIBUTING.md` | planned | How to work in this repository |
-| `docs/requirements/functional-and-nonfunctional.md` | planned | `REQ-*` capability list |
+| `docs/specs/message-samples/` | ready (convention) | Real SIP messages on the trunk; samples are added from M1 |
+| `tools/README.md` | ready | Probe, rule viewer and capture helper |
 
 ## Deployment and operations
 
 | Document | Status | What it answers |
 | --- | --- | --- |
-| `docs/operations/deployment.md` | planned | Topology, port matrix, startup, health checks |
-| `docs/operations/runbook.md` | planned | Routine operations |
-| `docs/operations/troubleshooting.md` | planned | Symptom -> cause -> action |
+| `docs/operations/deployment.md` | ready | Topology, port matrix, resource profile, startup, health checks |
+| `docs/operations/runbook.md` | ready | Routine operations: start/stop, reload rules, inspect state, log locations |
+| `docs/operations/troubleshooting.md` | ready | Symptom -> cause -> action, keyed by `AS-*` error code |
 
 ## Acceptance and demo
 
 | Document | Status | What it answers |
 | --- | --- | --- |
-| `docs/acceptance/criteria.md` | planned | `ACC-*` items with verification commands |
-| `docs/acceptance/report.md` | planned | Results and evidence |
-| `docs/demo-script.md` | planned | The 5–10 minute narrated demo |
+| `docs/acceptance/criteria.md` | ready | `ACC-*` items with verification commands; M0 accepted, later milestones planned |
+| `docs/acceptance/report.md` | ready | M0 results with evidence, later milestones pending |
+| `docs/demo-script.md` | ready | The 5–10 minute narrated demo (the call part is M1/M2) |
 | `docs/roadmap.md` | ready | Milestone status, handover notes, open items |
-| `CHANGELOG.md` / `VERSION` | planned | Version history and the current version |
+| `CHANGELOG.md` / `VERSION` | ready | Version history and the current version |

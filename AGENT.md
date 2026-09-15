@@ -448,6 +448,17 @@ Rule of thumb: **read-only work -> synchronous subagent; any file change -> team
 `mode = "acceptEdits"`.** If a subagent reports it "cannot edit" or "is read-only", you
 spawned it in the wrong mode — respawn it in team mode.
 
+**Message timing and irreversibility (learned in M3).** A team-mode message is delivered to
+the member's inbox and read only at its next turn boundary, so it **cannot interrupt a turn
+that is already running**. A `stop` or correction sent while the member is mid-turn is seen
+too late to prevent the work — in M3 a correction arrived after the member had already
+implemented the change. Therefore: (a) put every hard constraint in the spawn `prompt`
+itself, before the member starts, rather than trusting a later message to enforce it;
+(b) instruct the member to stop and report **before** any change that is expensive to
+revert (adding a dependency, changing a schema, deleting code, committing); (c) if a wrong
+turn has already run, expect to revert the member's uncommitted work and have it re-do,
+because the message that would have prevented it was never seen in time.
+
 ## 15. Roadmap
 
 **Current phase: M0 — in progress (documentation baseline).**

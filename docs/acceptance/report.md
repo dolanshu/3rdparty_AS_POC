@@ -714,6 +714,64 @@ $ curl -s http://127.0.0.1:<api_port>/api/v1/traces/no-such-call
 {"call_id":"no-such-call","events":[]}
 ```
 
+End-to-end `make demo` (the M3 DoD "feature works end to end" command; one real trunk call
+placed through the make target):
+
+```text
+$ make demo
+3rd-party AS POC - trunk call demo
+topology   : emulated S-CSCF --UDP--> AS (B2BUA) --UDP--> emulated core network
+ports      : as 127.0.0.1:<as_port>, trunk <trunk_port>, core <core_port>
+rules      : config/routing_rules.yaml
+
+[1/5] call placed
+scenario    : office-to-mobile
+caller      : +86216180001
+called      : +8613800138000
+Call-ID     : <Call-ID>
+trunk INVITE: INVITE sip:+8613800138000@127.0.0.1:<as_port> SIP/2.0
+
+[2/5] routing decision
+rule        : R-MOB-CM-40
+disposition : route
+translation : called number -> 013800138000
+next hops   : s-sbc-primary -> s-sbc-failover
+served by   : s-sbc-primary
+
+[3/5] next-hop side (after translation)
+core INVITE : INVITE sip:013800138000@127.0.0.1:<core_port> SIP/2.0
+
+[4/5] message flow (14 messages on the wire)
+      01 trunk <- invite INVITE sip:+8613800138000@127.0.0.1:<as_port> SIP/2.0
+      02 trunk -> 100    SIP/2.0 100 Trying
+      03 core  -> invite INVITE sip:013800138000@127.0.0.1:<core_port> SIP/2.0
+      04 core  <- 100    SIP/2.0 100 Trying
+      05 core  <- 180    SIP/2.0 180 Ringing
+      06 trunk -> 180    SIP/2.0 180 Ringing
+      07 core  <- 200    SIP/2.0 200 OK
+      08 core  -> ack    ACK sip:127.0.0.1:<core_port> SIP/2.0
+      09 trunk -> 200    SIP/2.0 200 OK
+      10 trunk <- ack    ACK sip:127.0.0.1:<as_port> SIP/2.0
+      11 core  <- bye    BYE sip:+86216180001@127.0.0.1:<as_port> SIP/2.0
+      12 core  -> 200    SIP/2.0 200 OK
+      13 trunk -> bye    BYE sip:+86216180001@127.0.0.1:<trunk_port> SIP/2.0
+      14 trunk <- 200    SIP/2.0 200 OK
+
+[5/5] outcome
+status      : 200
+released    : True
+cancelled   : False
+
+demo result: call answered and released; number translation applied on the wire
+```
+
+Ports and the Call-ID are allocated per run and are shown as placeholders (same convention as
+the `curl` transcripts above); the run exit status was 0.
+
+**DoD note:** the milestone DoD item "`make demo` passes from a clean checkout" is now backed
+by this executed run (above). It had previously been recorded without the make target actually
+being exercised — see the corrected record in "Open items raised by this run".
+
 ### 2. Log excerpt
 
 AS startup with the internal API listening (FastAPI/uvicorn on a daemon thread):
@@ -774,6 +832,14 @@ above. No new message samples were captured.
 - `mypy` reports 20 source files (unchanged from M2). The new `console/main.py` is checked
   by mypy but `internal_api.py` was already counted; no new source files were added to the
   `packages` list.
+- **Corrected record (2026-09-16).** The DoD item "`make demo` passes from a clean checkout"
+  had been recorded as a pass although the make target had never actually been run. Executing
+  it exposed a defect introduced by the post-M2 audit's demo upgrade (`3c322cc`): `Makefile:58`
+  passes a relative `--rules-file config/routing_rules.yaml`, and `tools/demo_call.py` called
+  `.relative_to(REPO_ROOT)` on that relative path against the absolute `REPO_ROOT`, raising
+  `ValueError` before any narration was printed. Fixed here (the path is resolved first, with a
+  `ValueError` fallback); `make demo` now completes end to end with exit status 0 — evidence in
+  §1 above.
 
 ## M4 — Acceptance and polish
 

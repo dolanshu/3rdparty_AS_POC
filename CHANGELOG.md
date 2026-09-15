@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). One
 version node per milestone; the milestone tag is `v<version>-m<n>`.
 
-## [Unreleased]
+## [0.5.0] - 2026-09-16 — M4 Acceptance and polish (final release)
 
 ### Changed
 
@@ -29,6 +29,52 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   relative path against the absolute repository root, raising `ValueError`. The defect came
   from the post-M2 audit's demo upgrade (`3c322cc`) and blocked the M3 "make demo passes" DoD;
   the path is now resolved first, with a fallback for paths outside the repository.
+- `docs/demo-script.md` used `--called +8613900000000` as the no-match `404` example. That
+  number is covered by rule `R-MOB-CM-40` (`+86139` is a China Mobile prefix), so the call
+  was in fact translated and answered `200 OK`. The example is now `+9991234567`, which
+  really yields `404` / `AS-ROUTE-001` / `no_match` (found during the M4 rehearsal).
+- Documented `SBC_PEER_PORT` default corrected from `15061` to the real code default `5061`
+  in `README.md` and `docs/architecture/lld.md`; `15061` is the `.env.example`/mock value.
+
+### Documentation
+
+- Corrected stale milestone status across the documentation set during the M4 review:
+  `docs/demo-script.md` (the console section is now live, with `make dev` + `make mock` +
+  `make console`), `AGENT.md` §15 (dropped the stale "current phase: M0" line),
+  `docs/requirements/functional-and-nonfunctional.md` (status column `planned`/`partial` →
+  `done`), `docs/README.md`, `docs/architecture/hld.md`, `docs/architecture/lld.md`,
+  ADR-0002, `docs/operations/deployment.md`, `docs/operations/runbook.md` and
+  `docs/specs/message-samples/README.md`.
+- Corrected the M3 `/healthz` evidence in `docs/acceptance/report.md` to the value the code
+  actually produces (`0.1.0`; see Known issues).
+
+### Verified
+
+- Full M4 acceptance run: `ruff format --check .` (66 files), `ruff check .`, `mypy`
+  (20 source files) and `pytest tests -q` (118 passed: 97 unit + 16 integration + 5 e2e).
+- `docs/demo-script.md` rehearsed end to end: `make demo` (exit 0), `make probe` (exit 0),
+  `make rules` (exit 0), `make capture` (14 samples), the three failure branches and the
+  console with a live call. Evidence is in `docs/acceptance/report.md`.
+- `docker compose -f deploy/docker-compose.yml config` still validates; message samples in
+  `docs/specs/message-samples/` are unchanged.
+
+### Known issues
+
+- The AS runtime version is hardcoded in `src/as_app/__init__.py` (`__version__ = "0.1.0"`),
+  so `/healthz` and the startup log do not track `VERSION`. Reported during M4; not fixed
+  because M4 must not change `src/`.
+- `tests/integration/test_translation.py::test_next_hop_failover_uses_the_second_hop` is a
+  rare flake (a stale sippy `timerA` retransmission firing on the shared `ED2` loop after
+  `shutdown()`); the full suite is 118 passed on reruns. A fix belongs to the M2 test code.
+
+### Notes
+
+- Version node: `0.5.0`. One version node per milestone; M4 is the final
+  acceptance-and-release milestone, so the version chain is `0.1.0` (M0), `0.2.0` (M1),
+  `0.3.0` (M2), `0.4.0` (M3), `0.5.0` (M4). M4 adds no user-visible capability of its own —
+  it is the release that carries the acceptance run, the demo rehearsal, the documentation
+  corrections and the release preparation.
+- The tag `v0.5.0-m4` is created by the maintainer (agents do not tag), as for M0–M3.
 
 ## [0.4.0] - 2026-09-16 — M3 Console
 

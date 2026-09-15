@@ -26,6 +26,7 @@ the sockets and the test drives the loop explicitly through
 
 from __future__ import annotations
 
+import re
 import socket
 import time
 from collections.abc import Callable
@@ -197,11 +198,19 @@ def free_udp_port() -> int:
 
 
 @pytest.fixture
-def trunk_pair(rules_file: Path):
+def trunk_pair(rules_file: Path, tmp_path: Path):
     """Run the AS and the mock S-SBC on loopback UDP with ephemeral ports.
+
+    The shipped rule set pins next hops to demo ports (15061, 15062, ...). The tests run
+    on ephemeral ports, so the fixture rewrites the next hop addresses of
+    ``s-sbc-primary`` (and the PBX / international hops when a test asks for them) to the
+    dynamically allocated core port of the mock. This keeps the rule engine pure: the
+    rule decides *which* hop, and the hop's address is real data that just happens to be
+    generated for the test.
 
     Args:
         rules_file: Path of the shipped sample rule set.
+        tmp_path: Per-test temporary directory for the rewritten rules file.
 
     Yields:
         A bound :class:`TrunkPair`; both sides are stopped after the test.
@@ -217,6 +226,7 @@ def trunk_pair(rules_file: Path):
         _free_udp_port(),
         _free_udp_port(),
     )
+    test_rules = _rewrite_next_hops(rules_file, tmp_path, core_port)
     settings = AsSettings(
         _env_file=None,
         sip_listen_address=TRUNK_ADDRESS,
@@ -224,7 +234,7 @@ def trunk_pair(rules_file: Path):
         sbc_peer_address=TRUNK_ADDRESS,
         sbc_peer_port=core_port,
         allowed_peers=[TRUNK_ADDRESS],
-        rules_file=rules_file,
+        rules_file=test_rules,
         internal_api_address=TRUNK_ADDRESS,
         internal_api_port=api_port,
         log_payloads=False,
@@ -252,3 +262,48 @@ def trunk_pair(rules_file: Path):
         yield pair
     finally:
         pair.stop()
+
+
+def _rewrite_next_hops(source: Path, tmp_path: Path, core_port: int) -> Path:
+    """Return a copy of the rules file with the primary next hops on the test port.
+
+    The shipped rules file pins next hops to demo ports. The rewrite maps every next hop
+    address/port to the mock's dynamically allocated core port, so a rule-selected hop
+    always reaches the mock regardless of which hop the rule chooses. Tests that need a
+    hop to fail can use :func:`_rewrite_next_hops_with_failover` instead.
+
+    Args:
+        source: Path of the shipped rules file.
+        tmp_path: Temporary directory for the rewritten file.
+        core_port: UDP port the mock core side listens on.
+
+    Returns:
+        Path of the rewritten rules file.
+    """
+    text = source.read_text(encoding="utf-8")
+    # Rewrite every ``address: 127.0.0.1`` + ``port: <n>`` pair inside a next hop to the
+    # test core port, so every hop the rules select reaches the mock. A real deployment
+    # keeps the original addresses; the rewrite is a test-only convenience.
+    rewritten = _replace_next_hop_ports(text, core_port)
+    target = tmp_path / "routing_rules.yaml"
+    target.write_text(rewritten, encoding="utf-8")
+    return target
+
+
+_NEXT_HOP_PORT_LINE = re.compile(r"^(\s+port:\s+)\d+(\s.*)?$", re.MULTILINE)
+
+
+def _replace_next_hop_ports(text: str, port: int) -> str:
+    """Rewrite every ``port:`` line that sits under a next hop to one value.
+
+    The next hop block is the only place a ``port:`` line appears in the rules file, so a
+    global replace is safe and keeps the rewrite trivial.
+
+    Args:
+        text: The rules file content.
+        port: The port to substitute.
+
+    Returns:
+        The rules file content with every next hop port replaced.
+    """
+    return _NEXT_HOP_PORT_LINE.sub(rf"\g<1>{port}\g<2>", text)

@@ -33,7 +33,7 @@ Each milestone is executed in its own conversation.
 | --- | --- | --- |
 | M0 — Foundation | done (2026-09-16) | pending (tagging is done by the maintainer) |
 | M1 — Signalling path | done (2026-09-16) | pending (tagging is done by the maintainer) |
-| M2 — Number translation | not started | — |
+| M2 — Number translation | done (2026-09-16) | pending (tagging is done by the maintainer) |
 | M3 — Console | not started | — |
 | M4 — Acceptance and polish | not started | — |
 
@@ -297,27 +297,82 @@ change.
 
 ## M2 — Number translation
 
-**Status:** not started
+**Status:** done (2026-09-16); tagging is done by the maintainer.
 
 **Scope:** rule engine with YAML hot reload; Request-URI and number format rewriting
-inside `CallController`; error branches (`404`, `603`, `CANCEL`); error code system;
-unit + integration + e2e tests; first acceptance run.
+inside `CallController`; error branches (`404`, `603`, `480`, `500`, `CANCEL`); error code
+system; unit + integration + e2e tests; first acceptance run.
 
-**Entry criteria:** M1 done; call flow stable.
+**Entry criteria:** M1 done; call flow stable — met.
 
 **Exit criteria:**
 
-- [ ] Rules loaded from `config/` with hot reload
-- [ ] Translation applied to Request-URI and number formats (E.164, `0`-prefixed, short
+- [x] Rules loaded from `config/` with hot reload
+- [x] Translation applied to Request-URI and number formats (E.164, `0`-prefixed, short
       codes, international `00`)
-- [ ] Multiple next hops with priority and failover
-- [ ] Error branches `404` / `603` / `CANCEL` covered by tests
-- [ ] Error code system (`AS-*`) implemented and documented in the LLD
-- [ ] Unit, integration and e2e layers green
+- [x] Multiple next hops with priority and failover
+- [x] Error branches `404` / `603` / `CANCEL` covered by tests
+- [x] Error code system (`AS-*`) implemented and documented in the LLD
+- [x] Unit, integration and e2e layers green
 
-**Handover notes:** _to be filled when the milestone ends_
+**Handover notes:**
 
-**Open items:** none yet
+- **Rule versioning:** the shipped `config/routing_rules.yaml` has `version: 1` and
+  `name: sample-office-routing` (17 rules, 6 next hops). The `RuleSetStore` detects a
+  file change by size + modification time and activates the new rule set; a broken edit
+  keeps the previous rule set (ADR-0004 fail-safe reload). The AS polls for reload from a
+  loop-owned timer (`RULE_RELOAD_POLL_SECONDS = 1.0`) so the sippy thread is never
+  blocked by file I/O.
+- **Hot reload verification:** `tests/integration/test_translation.py` covers both the
+  successful reload (new rule set name active) and the fail-safe reload (broken YAML
+  keeps the previous rule set and logs `AS-RULE-002`). The `_poll_rule_reload` method
+  logs `rule set reloaded` with the new name and rule count.
+- **Next-hop failover result:** the `CallController` owns a controller-managed no-answer
+  timer (`_DEFAULT_NEXT_HOP_EXPIRE = 3.0` s) instead of sippy's `expire_time`, because
+  sippy anchors `expire_time` to the INVITE event `rtime` and it would fire immediately
+  on a failover attempt whose pending event carries the original timestamp. When the
+  timer fires, the controller calls `uaO.disconnect()`, sippy emits a
+  `CCEventDisconnect`, and `_relay_from_next_hop` treats it as a failover trigger when
+  the leg has not connected. The failover test
+  (`test_next_hop_failover_uses_the_second_hop`) proves a call completes via the second
+  hop when the first is unreachable.
+- **Translation seam:** `CallController.apply_call_policy` is the single place that
+  rewrites the called number. It rebuilds the `CCEventTry` with the translated called
+  number (data tuple index 2) and attaches pass-through headers. SDP still passes
+  through verbatim (M1 rule, unchanged).
+- **Error branches:** `404` / `AS-ROUTE-001` (no match, e.g. `+999...`), `603` /
+  `AS-ROUTE-002` (rule `R-BLOCK-90` rejects premium-rate), `480` / `AS-ROUTE-003` (no
+  next hop — defended by schema validation at load time, exercised at unit level),
+  `500` / `AS-ROUTE-004` (translation yields empty — exercised at unit level), `CANCEL`
+  (caller abandonment, e2e). The rejection is sent on the trunk leg by
+  `uaA.recvEvent(CCEventFail((status, phrase, None)))`.
+- **sippy facts discovered:** `CCEventTry` data is `(cId, callingID, calledID, body,
+  auth, callingName)`; `UacStateIdle` builds `rTarget` from `rAddr0` (the UA's
+  `nh_address`) and uses `calledID` as the Request-URI user part, so rebuilding the
+  event with a new `calledID` rewrites the Request-URI. `UacStateTrying.recvEvent` on
+  `CCEventFail` changes state to `UacStateCancelling` but does **not** enqueue the event
+  for the callback, so the controller uses `disconnect()` (which enqueues
+  `CCEventDisconnect`) to trigger failover. Stale UA events from a replaced `uaO` are
+  ignored in `recv_event` (`if ua is not self.uaO: return`).
+
+**Open items:**
+
+- The `_DEFAULT_NEXT_HOP_EXPIRE = 3.0` no-answer timeout is a loopback POC value; a real
+  deployment should make it per-next-hop or configuration-driven (e.g.
+  `_next_hop_expire_seconds` in `global_config`).
+- The `480` / `AS-ROUTE-003` branch is defended by `AS-RULE-003` schema validation at
+  load time; it is exercised at the unit level but not end-to-end, because the schema
+  rejects a rule that references an unknown next hop before runtime.
+- The `500` / `AS-ROUTE-004` branch (translation yields empty) is exercised at the unit
+  level (`test_translation_to_empty_yields_500`); a rule that strips the entire number
+  is a misconfiguration that the loader accepts but the engine rejects at decision time.
+- `deploy/docker-compose.yml` still has `ALLOWED_PEERS: s-sbc-mock,127.0.0.1`; container
+  addresses are not knowable in advance (carried from M1).
+
+**Entry state for M3:** M2 is done; the AS applies number translation, handles error
+branches, and supports hot reload and next-hop failover. The internal API
+(`InternalApiServer`) already serves `/healthz`, `/api/v1/metrics` and
+`/api/v1/traces`; M3 builds the FastAPI application and the console UI on top.
 
 ## M3 — Console
 

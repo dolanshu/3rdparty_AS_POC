@@ -114,6 +114,31 @@ def call_id_of(text: str) -> str:
     return match.group(1) if match is not None else "-"
 
 
+_NEXT_HOP_PORT_LINE = re.compile(r"^(\s+port:\s+)\d+(\s.*)?$", re.MULTILINE)
+
+
+def _rewrite_next_hop_ports(rules_file: Path, core_port: int) -> Path:
+    """Return a copy of the rules file with every next hop port on the core port.
+
+    The shipped rules file pins next hops to demo ports (15061, 15062, ...). The capture
+    runs on a dynamically allocated port, so every next hop the rules select must point
+    at the mock core side. The rewrite is a capture-only convenience; a real deployment
+    keeps the original addresses.
+
+    Args:
+        rules_file: Path of the shipped rules file.
+        core_port: UDP port the mock core side listens on.
+
+    Returns:
+        Path of the rewritten rules file written next to the original.
+    """
+    text = rules_file.read_text(encoding="utf-8")
+    rewritten = _NEXT_HOP_PORT_LINE.sub(rf"\g<1>{core_port}\g<2>", text)
+    target = rules_file.with_suffix(".capture.yaml")
+    target.write_text(rewritten, encoding="utf-8")
+    return target
+
+
 def run_capture(
     *,
     as_port: int,
@@ -139,6 +164,7 @@ def run_capture(
     Raises:
         TimeoutError: When the call did not complete.
     """
+    capture_rules = _rewrite_next_hop_ports(rules_file, core_port)
     settings = AsSettings(
         _env_file=None,
         sip_listen_address="127.0.0.1",
@@ -146,7 +172,7 @@ def run_capture(
         sbc_peer_address="127.0.0.1",
         sbc_peer_port=core_port,
         allowed_peers=["127.0.0.1"],
-        rules_file=rules_file,
+        rules_file=capture_rules,
         log_payloads=True,
     )
     recorder = SipMessageRecorder()

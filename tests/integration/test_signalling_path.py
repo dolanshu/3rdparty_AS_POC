@@ -150,11 +150,14 @@ def test_headers_and_sdp_pass_through(trunk_pair) -> None:
     assert body_of(outbound[0].text) == body_of(inbound[0].text), "SDP body changed"
     assert body_of(outbound[0].text) == scenario.sdp_offer.strip()
 
-    # Only the Request-URI differs: it points at the next hop of the AS.
+    # Only the Request-URI differs: it points at the next hop of the AS and carries the
+    # translated called number. +8613800138000 is a China Mobile E.164 number; rule
+    # R-MOB-CM-40 strips +86 and prepends 0, so the outbound Request-URI user part is
+    # 013800138000 (M2 number translation).
     sent_ruri = start_line_of(inbound[0].text).split(" ")[1]
     forwarded_ruri = start_line_of(outbound[0].text).split(" ")[1]
     assert forwarded_ruri != sent_ruri
-    assert forwarded_ruri.startswith(f"sip:{scenario.called_number}@127.0.0.1:")
+    assert forwarded_ruri.startswith("sip:013800138000@127.0.0.1:")
 
 
 def test_request_from_an_unlisted_source_is_rejected(trunk_pair) -> None:

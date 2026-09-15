@@ -70,6 +70,10 @@ SIP_USER_AGENT_NAME = "3rd-party AS POC"
 #: How often the loop-owned shutdown poller looks at the shutdown flag, in seconds.
 SHUTDOWN_POLL_SECONDS = 0.1
 
+#: How often the loop-owned rule reload poller checks the rules file (ADR-0004). The
+#: reload is pull-based because the sippy thread must not be blocked by file I/O.
+RULE_RELOAD_POLL_SECONDS = 1.0
+
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     """Parse the command line of the AS process.
@@ -155,6 +159,7 @@ class AsStack:
         self.internal_api: InternalApiServer | None = None
         self._sip_logger = _build_sip_logger(settings, sip_logger)
         self._shutdown_timer: Any = None
+        self._reload_timer: Any = None
         self.transaction_manager: Any = None
         self.global_config: dict[str, Any] = {}
         self.call_map: TrunkCallMap | None = None
@@ -226,25 +231,33 @@ class AsStack:
         """Run the blocking sippy event loop until a shutdown is requested.
 
         Signal handlers only set the flag; the timer below is owned by the loop, which is
-        the only place allowed to stop it (ADR-0002, ``AGENT.md`` section 6).
+        the only place allowed to stop it (ADR-0002, ``AGENT.md`` section 6). A second
+        loop-owned timer polls the rules file for hot reload (ADR-0004): the reload is
+        pull-based because the sippy thread must not be blocked by file I/O.
 
         Args:
             shutdown: Shutdown state written by the signal handlers.
         """
         self._shutdown_timer = Timeout(self._poll_shutdown, SHUTDOWN_POLL_SECONDS, -1, shutdown)
+        self._reload_timer = Timeout(self._poll_rule_reload, RULE_RELOAD_POLL_SECONDS, -1)
         log_event(
             _LOGGER,
             logging.INFO,
             "sippy event loop running",
             direction=LogDirection.INTERNAL,
+            rules_file=str(self.settings.rules_file),
+            reload_poll_seconds=str(RULE_RELOAD_POLL_SECONDS),
         )
         ED2.loop()
 
     def stop(self) -> None:
-        """Release the trunk socket, the loop timer and the internal API port."""
+        """Release the trunk socket, the loop timers and the internal API port."""
         if self._shutdown_timer is not None:
             self._shutdown_timer.cancel()
             self._shutdown_timer = None
+        if self._reload_timer is not None:
+            self._reload_timer.cancel()
+            self._reload_timer = None
         if self.transaction_manager is not None:
             self.transaction_manager.shutdown()
             self.transaction_manager = None
@@ -261,6 +274,36 @@ class AsStack:
         """
         if shutdown.requested:
             ED2.breakLoop()
+
+    def _poll_rule_reload(self) -> None:
+        """Reload the rule set when the file changed on disk (ADR-0004).
+
+        Reload is fail-safe: a broken edit keeps the previous rule set active and logs
+        the error. A successful reload logs the new rule set name and rule count so the
+        operator can see that the change took effect.
+        """
+        try:
+            if self.rule_set_store.maybe_reload():
+                rule_set = self.rule_set_store.current
+                log_event(
+                    _LOGGER,
+                    logging.INFO,
+                    "rule set reloaded",
+                    direction=LogDirection.INTERNAL,
+                    rule_set=rule_set.document.name,
+                    rules=str(len(rule_set.ordered_rules)),
+                    next_hops=str(len(rule_set.document.next_hops)),
+                    rules_file=str(self.settings.rules_file),
+                )
+        except AsError as error:
+            log_event(
+                _LOGGER,
+                logging.ERROR,
+                "rule set reload failed; previous rule set stays active",
+                direction=LogDirection.INTERNAL,
+                rules_file=str(self.settings.rules_file),
+                **error.as_log_fields(),
+            )
 
 
 def main(argv: list[str] | None = None) -> int:

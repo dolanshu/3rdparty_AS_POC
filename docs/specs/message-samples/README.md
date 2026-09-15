@@ -24,7 +24,7 @@ translation.
 4. Each scenario gets a short `README` or a section naming the scenario and the rule set
    used, so a reviewer can reproduce it.
 
-## Scenario: M1 complete call (`office-to-mobile`)
+## Scenario: M2 translated call (`office-to-mobile`)
 
 Captured on **2026-09-16** with
 
@@ -33,27 +33,34 @@ uv run python tools/capture_call.py
 ```
 
 which runs the AS and the mock S-SBC on loopback UDP with dynamically allocated ports,
-places one call and writes every message of it to this directory.
+places one call and writes every message of it to this directory. The AS now applies
+number translation (M2): the called number `+8613800138000` (China Mobile, E.164) is
+rewritten to `013800138000` (national format) by rule `R-MOB-CM-40` before the outbound
+INVITE is originated.
 
 | Item | Value |
 | --- | --- |
 | Scenario | `office-to-mobile` (`src/s_sbc_mock/uac.py`) |
 | Calling party | `+86216180001` (documentation range) |
-| Called party | `+8613800138000` (documentation range) |
+| Called party (in) | `+8613800138000` (documentation range, E.164) |
+| Called party (out) | `013800138000` (national format, translated) |
 | Rule set | `config/routing_rules.yaml`, `sample-office-routing` (17 rules, 6 next hops) |
-| Ports of this capture | AS `127.0.0.1:47183`, mock core side `127.0.0.1:46621`, mock trunk side `127.0.0.1:46849` |
-| Call-ID | `66214a32501ea3d6a9aaf48db78f1a6c` |
+| Matched rule | `R-MOB-CM-40` (China Mobile, E.164 in, national out) |
+| Ports of this capture | AS `127.0.0.1:48077`, mock core side `127.0.0.1:46884`, mock trunk side `127.0.0.1:46677` |
+| Call-ID | `73c506a40bf78bd3fcec6207ed0d7f11` |
 
 Ports differ on every capture because they are allocated dynamically; the Call-ID differs
-too, because the stack generates it. What must not differ is the message content: the
-pass-through headers and the SDP body of `01-in-invite-trunk.txt` reappear unchanged in
-`03-out-invite-core.txt`, only the Request-URI, `Via`, `Contact` and `User-Agent` change.
+too, because the stack generates it. What must not differ across the two legs is the
+pass-through header set and the SDP body: the headers of `01-in-invite-trunk.txt` reappear
+unchanged in `03-out-invite-core.txt`. What **does** change in M2 is the called number in
+the Request-URI, `To` and `Contact`: `+8613800138000` on the trunk becomes `013800138000`
+on the core leg.
 
 | File | Message |
 | --- | --- |
-| `01-in-invite-trunk.txt` | INVITE from the emulated S-CSCF, received on the trunk |
+| `01-in-invite-trunk.txt` | INVITE from the emulated S-CSCF, Request-URI `sip:+8613800138000@...` |
 | `02-out-100-trunk.txt` | 100 Trying towards the emulated S-CSCF |
-| `03-out-invite-core.txt` | INVITE the AS originates towards the emulated core network |
+| `03-out-invite-core.txt` | INVITE the AS originates, Request-URI `sip:013800138000@...` (translated) |
 | `04-in-100-core.txt` | 100 Trying from the emulated core network |
 | `05-in-180-core.txt` | 180 Ringing from the emulated core network |
 | `06-out-180-trunk.txt` | 180 Ringing towards the emulated S-CSCF |

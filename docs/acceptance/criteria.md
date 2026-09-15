@@ -35,13 +35,15 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | ACC-M1-005 | Message samples are captured from a real call, never hand-written | `uv run python tools/capture_call.py` | 14 files written to `docs/specs/message-samples/` following `NN-direction-method[-qualifier].txt`, one per message of `INVITE → 100 → 180 → 200 → ACK → BYE`; headers and SDP of `01-in-invite-trunk.txt` reappear unchanged in `03-out-invite-core.txt` | REQ-NF-007 |
 | ACC-M1-006 | The mock S-SBC runs as its own process and answers the AS on configurable ports | `docker compose -f deploy/docker-compose.yml config` and `uv run python -m s_sbc_mock.main --help` | the compose file validates and lists the `s-sbc-mock` service with UDP ports; the process entry point exposes `--listen-address`, `--listen-port`, `--trunk-port`, `--as-address`, `--as-port`, `--call` and `--repeat` | REQ-F-001, REQ-NF-009 |
 
-## M2 — Number translation (planned)
+## M2 — Number translation (executed 2026-09-16)
 
 | ID | Criterion | Verification command | Expected result | Requirement |
 | --- | --- | --- | --- | --- |
-| ACC-M2-001 | The Request-URI and number format are rewritten per rules | `uv run pytest tests/e2e -q -k translation` | `+8613800138000` leaves the AS as `013800138000` | REQ-F-003 |
-| ACC-M2-002 | Next hop failover is used when the first hop is unavailable | `uv run pytest tests/e2e -q -k failover` | the second next hop receives the INVITE | REQ-F-004 |
-| ACC-M2-003 | Error branches: `404`, `603`, `CANCEL` | `uv run pytest tests/e2e -q` | all error-branch tests pass | REQ-F-006 |
+| ACC-M2-001 | The Request-URI and number format are rewritten per rules | `uv run pytest tests/e2e -q -k translation` | `+8613800138000` leaves the AS as `013800138000` (rule `R-MOB-CM-40`) | REQ-F-003 |
+| ACC-M2-002 | Next hop failover is used when the first hop is unavailable | `uv run pytest tests/integration -q -k failover` | the second next hop receives the INVITE and the call completes with `200 OK` | REQ-F-004 |
+| ACC-M2-003 | Error branches: `404`, `603`, `CANCEL` | `uv run pytest tests/e2e -q` | all error-branch tests pass (`404` / `AS-ROUTE-001`, `603` / `AS-ROUTE-002`, `CANCEL`); `480` / `500` covered at unit level | REQ-F-006 |
+| ACC-M2-004 | YAML hot reload: a changed rules file activates at runtime; a broken one keeps the previous rule set | `uv run pytest tests/integration -q -k reload` | both reload tests pass (ADR-0004) | REQ-F-005 |
+| ACC-M2-005 | Translated-call message samples captured, not hand-written | `uv run python tools/capture_call.py` | 14 files in `docs/specs/message-samples/`; `01-in-invite-trunk.txt` carries `+8613800138000`, `03-out-invite-core.txt` carries `013800138000`, same Call-ID | REQ-NF-007 |
 
 ## M3 — Console (planned)
 

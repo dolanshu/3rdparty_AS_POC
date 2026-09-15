@@ -407,11 +407,152 @@ forbids committing traffic captures, so the message samples are the committed ar
 
 ## M2 — Number translation
 
-**Status: not executed.**
+**Status: executed 2026-09-16. 5 of 5 M2 items accepted.** The AS applies number
+translation in `CallController.apply_call_policy`, supports YAML hot reload and next-hop
+failover, and covers the `404` / `603` / `480` / `500` / `CANCEL` error branches.
 
-| ID | Result |
-| --- | --- |
-| ACC-M2-001 … ACC-M2-003 | pending — M2 |
+### 1. Command and output
+
+Quality gates:
+
+```text
+$ uv run ruff format --check .
+64 files already formatted
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run mypy
+Success: no issues found in 20 source files
+
+$ uv run pytest -q
+113 passed in 10.86s
+  # 0 skipped: the two M2 e2e cases (404, 603) are now un-skipped and pass
+```
+
+Acceptance items:
+
+```text
+$ uv run pytest tests/e2e -q -k translation
+.
+1 passed in 0.5s
+  # +8613800138000 leaves the AS as 013800138000 (rule R-MOB-CM-40)
+
+$ uv run pytest tests/integration -q -k failover
+.
+1 passed in 4.1s
+  # the second next hop receives the INVITE after the first times out
+
+$ uv run pytest tests/e2e -q
+.....  5 passed in 2.3s
+  # complete call, abandonment (CANCEL), translation, 404, 603
+
+$ uv run pytest tests/integration -q -k reload
+..
+2 passed in 0.3s
+  # hot reload activates new rule set; broken edit keeps the previous one
+
+$ uv run python tools/capture_call.py
+as port    : 127.0.0.1:46334
+core port  : 127.0.0.1:46085  (AS next hop)
+trunk port : 127.0.0.1:46308  (emulated S-CSCF)
+captured   : 14 messages
+  docs/specs/message-samples/01-in-invite-trunk.txt   ... 03-out-invite-core.txt ...
+
+$ docker compose -f deploy/docker-compose.yml config > /dev/null ; echo $?
+0
+```
+
+### 2. Log excerpt
+
+Structured application log of a translated call (Call-ID
+`ad417517973efb10e4df347db08a563d`, rule `R-MOB-CM-40`):
+
+```text
+{"timestamp": "2026-09-16T05:03:23+0800", "level": "info", "module": "call_controller",
+ "call_id": "ad417517973efb10e4df347db08a563d", "direction": "in",
+ "peer": "127.0.0.1:46878", "event": "invite received on the trunk",
+ "method": "INVITE", "called_number": "+8613800138000"}
+{"timestamp": "2026-09-16T05:03:23+0800", "level": "info", "module": "call_controller",
+ "call_id": "ad417517973efb10e4df347db08a563d", "direction": "internal", "peer": "-",
+ "event": "routing decision taken", "rule_id": "R-MOB-CM-40", "disposition": "route",
+ "called_number": "+8613800138000", "translated_number": "013800138000"}
+{"timestamp": "2026-09-16T05:03:23+0800", "level": "info", "module": "call_controller",
+ "call_id": "ad417517973efb10e4df347db08a563d", "direction": "internal", "peer": "-",
+ "event": "call translated", "rule_id": "R-MOB-CM-40",
+ "called_number": "+8613800138000", "translated_number": "013800138000",
+ "target_format": "national", "next_hops": "s-sbc-primary,s-sbc-failover"}
+{"timestamp": "2026-09-16T05:03:23+0800", "level": "info", "module": "call_controller",
+ "call_id": "ad417517973efb10e4df347db08a563d", "direction": "out",
+ "peer": "127.0.0.1:46085", "event": "invite originated towards the next hop",
+ "method": "INVITE", "called_number": "013800138000", "next_hop": "s-sbc-primary",
+ "rule_id": "R-MOB-CM-40"}
+```
+
+The translated INVITE before/after (captured, Call-ID `73c506a40bf78bd3fcec6207ed0d7f11`):
+
+```text
+--- 01-in-invite-trunk.txt (inbound, Request-URI) ---
+INVITE sip:+8613800138000@127.0.0.1:48077 SIP/2.0
+
+--- 03-out-invite-core.txt (outbound, Request-URI) ---
+INVITE sip:013800138000@127.0.0.1:46884 SIP/2.0
+```
+
+The pass-through headers (`P-Asserted-Identity`, `P-Charging-Vector`, `Subject`,
+`Organization`, `Priority`, `Privacy`, `P-Visited-Network-ID`) and the SDP body are
+byte-identical across the two legs; only the Request-URI, `Via`, `Contact`, `To` and
+`User-Agent` change.
+
+### 3. CI
+
+| Layer | Job | Result |
+| --- | --- | --- |
+| lint | `lint` | **not executed — no CI runner in this environment.** `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass (64 files). |
+| type | `type-check` | **not executed — no CI runner.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit | `unit` | **not executed — no CI runner.** `uv run pytest tests/unit -m unit -q` executed locally and passes. |
+| integration | `integration` | **not executed — no CI runner.** `uv run pytest tests/integration -m integration -q` executed locally: 7 passed (including failover, hot reload, 480, 500). |
+| e2e | `e2e` | **not executed — no CI runner.** `uv run pytest tests/e2e -m e2e -q` executed locally: 5 passed, 0 skipped (the 404 and 603 cases are now un-skipped). |
+
+No CI badge or run link exists yet: the workflow is committed but this repository has not
+been pushed, so no runner has ever executed it. The commands above are the same commands
+the workflow runs with `uv sync --frozen`.
+
+### 4. Capture
+
+Message samples of the translated call, captured with `uv run python tools/capture_call.py`
+on 2026-09-16 and stored verbatim in `docs/specs/message-samples/`:
+
+- `01-in-invite-trunk.txt` — INVITE from the emulated S-CSCF, Request-URI
+  `sip:+8613800138000@127.0.0.1:48077`.
+- `03-out-invite-core.txt` — INVITE the AS originates, Request-URI
+  `sip:013800138000@127.0.0.1:46884` (translated), same Call-ID
+  `73c506a40bf78bd3fcec6207ed0d7f11`, same pass-through headers, same SDP.
+- `05-in-180-core.txt` / `06-out-180-trunk.txt` — the 180 on both legs.
+- `07-in-200-core.txt` / `09-out-200-trunk.txt` — the 200 OK on both legs.
+- `08-out-ack-core.txt` / `10-in-ack-trunk.txt` — the ACK on both legs.
+- `11-in-bye-core.txt` / `13-out-bye-trunk.txt` — the BYE on both legs.
+
+### Item results
+
+| ID | Criterion | Result | Evidence |
+| --- | --- | --- | --- |
+| ACC-M2-001 | Request-URI and number format rewritten per rules | **accepted** | 1 (`pytest tests/e2e -q -k translation`, `013800138000`), 2 (log `call translated`, rule `R-MOB-CM-40`), 4 (samples `01`, `03`) |
+| ACC-M2-002 | Next hop failover when the first hop is unavailable | **accepted** | 1 (`pytest tests/integration -q -k failover`, call completes via second hop), 2 (`next hop failed; trying failover hop`) |
+| ACC-M2-003 | Error branches `404`, `603`, `CANCEL` | **accepted** | 1 (`pytest tests/e2e -q`: 5 passed, 0 skipped), 2 (404/AS-ROUTE-001 and 603/AS-ROUTE-002 log lines), 3 |
+| ACC-M2-004 | YAML hot reload (ADR-0004) | **accepted** | 1 (`pytest tests/integration -q -k reload`: 2 passed), 2 (fail-safe reload keeps previous rule set) |
+| ACC-M2-005 | Translated-call message samples captured | **accepted** | 1 (`tools/capture_call.py` -> 14 files), 4 (samples `01`..`14` in `docs/specs/message-samples/`) |
+
+### Open items raised by this run
+
+- The `480` / `AS-ROUTE-003` branch is defended by `AS-RULE-003` schema validation at
+  load time; it is exercised at the unit level but not end-to-end, because the schema
+  rejects a rule that references an unknown next hop before runtime.
+- The `500` / `AS-ROUTE-004` branch (translation yields empty) is exercised at the unit
+  level; a rule that strips the entire number is a misconfiguration the loader accepts
+  but the engine rejects at decision time.
+- The `_DEFAULT_NEXT_HOP_EXPIRE = 3.0` no-answer timeout is a loopback POC value; a real
+  deployment should make it per-next-hop or configuration-driven.
 
 ## M3 — Console
 

@@ -8,6 +8,58 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-16 — M2 Number translation
+
+### Added
+
+- Number translation seam: `CallController.apply_call_policy` is the single place that
+  rewrites the called number before the outbound INVITE. It calls
+  `as_app.routing.engine.decide`, rebuilds the `CCEventTry` with the translated called
+  number, and attaches pass-through headers. SDP still passes through verbatim (M1 rule,
+  unchanged). `+8613800138000` (E.164) leaves the AS as `013800138000` (national) per
+  rule `R-MOB-CM-40`.
+- Error branches wired to the error code system (`src/as_app/errors.py`): no matching
+  rule -> `404` / `AS-ROUTE-001`; policy rejection -> `603` / `AS-ROUTE-002`; no next
+  hop -> `480` / `AS-ROUTE-003`; translation yields empty -> `500` / `AS-ROUTE-004`;
+  caller abandons -> `CANCEL` handled cleanly.
+- Next-hop failover: the `CallController` owns a controller-managed no-answer timer
+  (`_DEFAULT_NEXT_HOP_EXPIRE = 3.0` s) that tears the serving hop down when it does not
+  answer; `_relay_from_next_hop` tries the next hop from the decision's ordered list and
+  records which hop served the call.
+- YAML hot reload: `AsStack.run` starts a loop-owned timer
+  (`RULE_RELOAD_POLL_SECONDS = 1.0`) that calls `RuleSetStore.maybe_reload()`; a changed
+  rules file activates a new rule set with a `rule set reloaded` log line naming the new
+  rule set, and a broken edit keeps the previous rule set (ADR-0004 fail-safe reload).
+- `tests/integration/test_translation.py`: next-hop failover, hot reload (success and
+  fail-safe), `480` / `AS-ROUTE-003`, `500` / `AS-ROUTE-004` coverage.
+- `tests/e2e/test_call_flows.py`: the two M1-skipped cases (`404`, `603`) are
+  un-skipped and pass; a translation assertion case is added.
+- `tools/capture_call.py` rewrites next-hop ports to the mock core port so the captured
+  call reaches the mock; `docs/specs/message-samples/` regenerated with the translated
+  Request-URI.
+
+### Verified
+
+- `+8613800138000` leaves the AS as `013800138000` (rule `R-MOB-CM-40`, Call-ID
+  `07c49b41b5aaa5724a015ffffa67839c` in the captured samples).
+- `404` / `AS-ROUTE-001` for `+9991234567`; `603` / `AS-ROUTE-002` for `+861681234567`
+  (rule `R-BLOCK-90`); `CANCEL` for caller abandonment — all e2e.
+- Next-hop failover: a call completes via the second hop when the first is unreachable
+  (integration test).
+- Hot reload: a changed rules file activates at runtime; a broken edit keeps the previous
+  rule set (integration tests).
+- Gates: `ruff format --check .` (64 files), `ruff check .`, `mypy` (20 source files) and
+  `pytest` (113 passed, 0 skipped) are green; `docker compose -f
+  deploy/docker-compose.yml config` validates.
+
+### Notes
+
+- No version bump: the public surface did not change and M2 is still an unreleased
+  milestone of the same `0.1.0` node. **Recommendation: bump to `0.3.0`** when the
+  maintainer tags M2, because the AS gained a user-visible capability — it now translates
+  numbers and handles error branches — which reads as a feature addition. Maintainer
+  decision.
+
 ## [Unreleased] — M1 Signalling path (2026-09-16)
 
 Recorded under M0's version node: no version bump was made, see the note below.

@@ -588,10 +588,10 @@ ADR and documentation review; tagged release.
 **Entry state for the next milestone:** M4 is the final milestone — there is no M5. A future
 iteration starts from the open items above and from `docs/production-gaps.md`.
 
-## Next steps (after M4) — tracked as P1–P6
+## Next steps (after M4) — tracked as P1–P7
 
 These are not a formal M5 — `AGENT.md` §15 still names M4 as the final milestone — but they
-are the known work to schedule, referenced as **P1–P6** (Post-M4 items) to stay distinct from
+are the known work to schedule, referenced as **P1–P7** (Post-M4 items) to stay distinct from
 the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already done.
 
 - **P1 — Docker compose demo (top priority).** Make the three-service stack actually complete a

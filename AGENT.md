@@ -472,9 +472,9 @@ instructions, since a member may read a stale "hold" and a new decision in the s
 (d) when several decisions are pending, send one consolidated instruction rather than a
 stream of small ones.
 
-### 14.2 Delegation policy for the Post-M4 items (P1–P6)
+### 14.2 Delegation policy for the Post-M4 items (P1–P7)
 
-Post-M4 work (tracked as P1–P6 in `docs/roadmap.md`) follows §14 rule 9: the main agent
+Post-M4 work (tracked as P1–P7 in `docs/roadmap.md`) follows §14 rule 9: the main agent
 plans, tracks status in `docs/roadmap.md` and reviews; it does not implement.
 
 - **Main-agent boundary.** The main agent plans and tracks status (Open → In progress →

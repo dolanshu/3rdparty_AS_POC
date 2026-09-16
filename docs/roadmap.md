@@ -615,6 +615,12 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
 - **P6 — sippy retransmission-timer shutdown fix.** Cancel per-transaction timers on
   `SipTransactionManager.shutdown()` to remove the rare failover test flake (registered gap,
   deferred). **[Optional · Status: Open]**
+- **P7 — Capture clears stale samples before writing.** `tools/capture_call.py` deleted only
+  `NN-*.txt` before writing a new capture, so a run that produced fewer messages than the
+  previous one could leave orphaned sample files that no longer belong to the captured call.
+  It now removes every file in `docs/specs/message-samples/` except `README.md` first, so the
+  directory always holds exactly the messages of the most recent capture (found during the
+  post-M4 demo-steps review). **[Required · Status: Done]**
 
 ## Conventions
 

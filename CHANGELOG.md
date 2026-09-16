@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). One
 version node per milestone; the milestone tag is `v<version>-m<n>`.
 
+## [Unreleased]
+
+### Fixed
+
+- `tools/capture_call.py` now clears every previously generated sample in
+  `docs/specs/message-samples/` (everything except that folder's `README.md`) before writing
+  a new capture. It previously removed only `NN-*.txt`, so a capture that produced fewer
+  messages than the previous run could leave orphaned sample files behind. The directory now
+  always holds exactly the messages of the most recent capture (P7, `docs/roadmap.md`).
+
 ## [0.5.0] - 2026-09-16 — M4 Acceptance and polish (final release)
 
 ### Changed

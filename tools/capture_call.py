@@ -323,6 +323,11 @@ def write_samples(
 ) -> list[Path]:
     """Write the captured messages of one call to disk.
 
+    Every sample left behind by a previous capture is removed first, except the folder's
+    ``README.md``, so the directory always holds exactly the messages of the most recent
+    call. A capture that produces fewer messages than the previous one can therefore not
+    leave orphaned sample files behind.
+
     Args:
         recorder: The recorder the AS stack was writing to.
         call_id: SIP Call-ID of the call to write.
@@ -334,8 +339,9 @@ def write_samples(
         The paths that were written.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    for stale in output_dir.glob("[0-9][0-9]-*.txt"):
-        stale.unlink()
+    for stale in list(output_dir.iterdir()):
+        if stale.is_file() and stale.name != "README.md":
+            stale.unlink()
     written: list[Path] = []
     for index, message in enumerate(recorder.messages_for(call_id), start=1):
         leg = "core" if message.peer.endswith(f":{core_port}") else "trunk"

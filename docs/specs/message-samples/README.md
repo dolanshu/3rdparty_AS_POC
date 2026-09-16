@@ -25,6 +25,9 @@ number translation.
 3. No real subscriber data: use documentation number ranges only.
 4. Each scenario gets a short `README` or a section naming the scenario and the rule set
    used, so a reviewer can reproduce it.
+5. A capture clears the previously generated samples first (everything in this directory
+   except this `README.md`), so the folder always holds exactly the messages of the most
+   recent call — no orphaned files from an earlier, longer capture.
 
 ## Scenario: M2 translated call (`office-to-mobile`)
 

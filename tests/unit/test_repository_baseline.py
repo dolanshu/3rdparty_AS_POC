@@ -132,6 +132,19 @@ def test_version_file_matches_the_project_version(repo_root: Path) -> None:
     assert f'version = "{version}"' in pyproject
 
 
+def test_runtime_version_matches_the_version_file(repo_root: Path) -> None:
+    """``as_app.__version__`` is derived from ``VERSION`` and cannot drift (M4).
+
+    The AS serves this value on ``/healthz`` and writes it to the ``application server
+    starting`` log line, so it must equal the released version rather than a hardcoded
+    string. It was ``0.1.0`` while ``VERSION`` had advanced to ``0.4.0`` until M4.
+    """
+    import as_app
+
+    version = (repo_root / "VERSION").read_text(encoding="utf-8").strip()
+    assert as_app.__version__ == version
+
+
 def test_env_example_declares_every_configuration_knob(repo_root: Path) -> None:
     """All knobs of AGENT.md section 8 are declared in ``.env.example``."""
     content = (repo_root / ".env.example").read_text(encoding="utf-8")

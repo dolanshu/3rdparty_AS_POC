@@ -21,4 +21,31 @@ and :mod:`as_app.call_controller`, and the observability surface in
 run against a real S-SBC without a code change (``AGENT.md`` section 5).
 """
 
-__version__ = "0.1.0"
+from __future__ import annotations
+
+from pathlib import Path
+
+#: Reported when the ``VERSION`` file cannot be read, for example in an installed wheel.
+_UNKNOWN_VERSION = "0.0.0+unknown"
+
+
+def _read_version() -> str:
+    """Return the repository version from the ``VERSION`` file.
+
+    ``VERSION`` sits at the repository root, two directories above this module. Deriving the
+    value from it keeps the runtime version (the ``/healthz`` payload and the ``application
+    server starting`` log line) in step with ``VERSION`` and ``pyproject.toml``, which
+    ``AGENT.md`` section 4.7 and the test suite already guard.
+
+    Returns:
+        The stripped contents of ``VERSION``, or ``_UNKNOWN_VERSION`` when the file is not
+        present — which is the case for an installed wheel (see ``docs/production-gaps.md``).
+    """
+    version_file = Path(__file__).resolve().parents[2] / "VERSION"
+    try:
+        return version_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return _UNKNOWN_VERSION
+
+
+__version__ = _read_version()

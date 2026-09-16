@@ -8,13 +8,77 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+### Added
+
+- The `docker compose` stack now completes a real call end to end (P1,
+  `docs/roadmap.md`). The three images were built and run for the first time: the stack comes
+  up, the mock's default `office-to-mobile` call
+  (`+86216180001` → `+8613800138000`) is translated to `013800138000` by rule `R-MOB-CM-40`
+  and finishes with disposition `completed`, and the console (`:8081`) and the AS internal API
+  (`:8080`) answer health, metrics and the Call-ID keyed trace.
+- `config/routing_rules.compose.yaml` — the deployment variant of the sample rule set: the
+  same 17 rules with the `next_hops` catalogue pointed at the mock's fixed compose address
+  (`172.28.0.3`). The AS originates the second leg to the hop the *rule set* selects, so the
+  trunk address has to live in the rules data; `deploy/docker-compose.yml` sets
+  `RULES_FILE` to this file.
+- Build arguments for the package index in all three Dockerfiles (`PIP_INDEX_URL`, which pip
+  reads, and `UV_DEFAULT_INDEX`, which uv reads) plus the matching `build.args` in the compose
+  file. Both **default to public PyPI**, so CI and a normal checkout build exactly as before;
+  a network that cannot reach PyPI overrides them for its own build, e.g.
+  `PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple docker compose ... build`. The
+  rationale and the verified uv behaviour are in `docs/operations/deployment.md` section 4.2.
+
 ### Fixed
 
+- The compose services could not import their own dependencies: `uv sync` installs into the
+  project environment `/app/.venv`, but `CMD ["python", ...]` resolved to the **system**
+  interpreter, so `as`, `s-sbc-mock` and `console` all exited immediately with
+  `ModuleNotFoundError: No module named 'sippy'` (and `... 'fastapi'`). `/app/.venv/bin` is now
+  first on `PATH` in each Dockerfile. Found by running the stack for the first time — no
+  `docker compose config` check could have caught it.
+- The AS could not reach the mock in the compose network: the canonical rule set points every
+  next hop at `127.0.0.1`, and each container has its own loopback, so the AS originated the
+  second leg to `127.0.0.1:15061` inside its own container, timed out
+  (`AS-PEER-002`), failed over to `127.0.0.1:15062` and never reached the mock. The compose
+  stack now uses `config/routing_rules.compose.yaml` (see Added).
+- The image build could not finish against public PyPI on this machine. `uv sync --frozen`
+  downloads the wheel URLs recorded in `uv.lock` (`files.pythonhosted.org`, measured here at
+  ≈15 kB/s — a 10 MB wheel exceeds uv's 30 s HTTP timeout) and does **not** substitute the
+  configured index for them, so the index build argument alone did not help. When
+  `PIP_INDEX_URL` is not the public default the Dockerfiles now let uv re-resolve against that
+  index; the re-resolution keeps every pinned version (same 50 packages) and writes the
+  rewritten lock **inside the image only** — the committed `uv.lock` still references public
+  PyPI. With the public default the build still runs `uv sync --frozen`, so a stale lock fails
+  the build as before. `UV_HTTP_TIMEOUT` is raised to 180 s and the uv download cache is a
+  BuildKit cache mount, so a slow link no longer fails the build outright.
 - `tools/capture_call.py` now clears every previously generated sample in
   `docs/specs/message-samples/` (everything except that folder's `README.md`) before writing
   a new capture. It previously removed only `NN-*.txt`, so a capture that produced fewer
   messages than the previous run could leave orphaned sample files behind. The directory now
   always holds exactly the messages of the most recent capture (P7, `docs/roadmap.md`).
+
+### Verified
+
+- Compose demo run (2026-09-16, real output): `docker compose -f deploy/docker-compose.yml
+  up -d` brought all three services `Up`; the mock's default call completed with Call-ID
+  `e48cb46795675ab0f76f5578cf5b4449`, the AS log showing `invite received on the trunk` →
+  `routing decision taken` (`R-MOB-CM-40`) → `call translated` (`+8613800138000` →
+  `013800138000`, `national`) → `invite originated towards the next hop` (`s-sbc-primary`) →
+  `call finished` (`disposition: completed`). The core leg carried
+  `INVITE sip:013800138000@172.28.0.3:15061` with `Via: SIP/2.0/UDP 172.28.0.2:5060;rport`
+  (no `0.0.0.0`), and the mock log shows
+  `INVITE → 100 Trying → 180 Ringing → 200 OK → ACK → BYE → 200 OK` on both legs with the same
+  Call-ID. Console: `GET :8081/healthz` → `{"status":"ok","component":"console"}`, page HTTP
+  200. AS internal API: `GET :8080/healthz` →
+  `{"status":"ok","version":"0.5.0","uptime_seconds":...,"rule_set_loaded":true}`,
+  `GET :8080/api/v1/metrics` → `{"calls_total":1,"calls_by_disposition":{"completed":1},
+  "errors_by_code":{},"rule_hits":{"R-MOB-CM-40":1},"peer_status":{...:"reachable"}}`.
+  `docker compose down` left no stray container, network or volume, and the host ports were
+  released.
+- The full gate chain stayed green after the change: `ruff format --check .`, `ruff check .`,
+  `mypy` and `pytest tests -q`.
+- `uv.lock` is unchanged by a mirror build: its md5 is identical before and after a build with
+  `PIP_INDEX_URL` set to a mirror, and `git status` on it stays clean.
 
 ### Changed
 

@@ -88,6 +88,19 @@ mirror to `/etc/docker/daemon.json` and restart the daemon:
 in another mirror (`https://hub-mirror.c.163.com`, `https://mirror.baidubce.com`,
 `https://mirror.ccs.tencentyun.com`).
 
+The image build also needs a **package** index (for `pip install uv` and `uv sync`), separate
+from the registry mirror. Both tools take it from a build argument that defaults to public
+PyPI, so no mirror is baked into the repository and the committed `uv.lock` is never rewritten
+by a build:
+
+```bash
+PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+  docker compose -f deploy/docker-compose.yml build
+```
+
+See `docs/operations/deployment.md` section 4.2 for what that build argument does and why a
+non-default index changes the lock rule.
+
 ### Demo
 
 **`make demo` places a real call and narrates it.** It starts the AS and the emulated
@@ -137,8 +150,10 @@ All configuration is environment based; copy `.env.example` to `.env` and adjust
 | `INTERNAL_API_ADDRESS` / `INTERNAL_API_PORT` | `127.0.0.1` / `8080` | how the console reaches the AS |
 | `LOG_LEVEL`, `LOG_STRUCTURED`, `LOG_PAYLOADS` | `INFO` / `true` / `false` | logging |
 
-Switching from the mock to a real S-SBC is a change of `SBC_PEER_*` and `ALLOWED_PEERS`
-only. Full reference: `docs/architecture/lld.md` section 6.
+Switching from the mock to a real S-SBC is a change of `SBC_PEER_*`, `ALLOWED_PEERS` and the
+next-hop addresses in the active rule set: the AS originates the second leg to the hop the
+rule set selects. Full reference: `docs/architecture/lld.md` section 6 and
+`docs/operations/deployment.md` section 6.
 
 ## Repository tour
 

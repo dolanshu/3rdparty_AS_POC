@@ -570,12 +570,12 @@ ADR and documentation review; tagged release.
 - **Version handling in `as_app.__version__`** (above): RESOLVED in M4 — derived from
   `VERSION` and guarded by a test. Only the wheel follow-up remains, registered in
   `docs/production-gaps.md`.
-- **Docker compose demo is the largest open delivery gap (scheduled as the next step after
-  M4; not started).** `deploy/docker-compose.yml` keeps `ALLOWED_PEERS: s-sbc-mock,127.0.0.1`
-  (carried from M1): container addresses are not knowable in advance, so the mock's SIP
-  INVITEs are rejected in compose. `SIP_LISTEN_ADDRESS: 0.0.0.0` also puts `Via: 0.0.0.0` on
-  outbound messages. Compose is validated with `docker compose config` only, never built or
-  run to a completed call. See "Next steps" for the planned work.
+- **Docker compose demo was the largest open delivery gap — CLOSED by P1 (2026-09-16).**
+  The compose network (static `ipam` subnet, `SIP_LISTEN_ADDRESS: 172.28.0.2`,
+  `SBC_PEER_ADDRESS: 172.28.0.3`, `ALLOWED_PEERS: 172.28.0.3`) and the three images are now
+  actually built and run: the stack completes a full call and the outbound `Via` carries
+  `172.28.0.2:5060`, never `0.0.0.0`. See the P1 entry under "Next steps" for the changes and
+  the Call-ID keyed evidence.
 - **Console not browser-verified against a live call** (carried from M3; registered in
   `docs/production-gaps.md`).
 - **`AGENT.md` §4.7 "release notes template" — RESOLVED in M4.** The maintainer chose to drop
@@ -596,14 +596,62 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   addresses at start-up so the on-wire source matches), fix `SIP_LISTEN_ADDRESS` so the
   outbound `Via` is not `0.0.0.0`, build the images and run `docker compose up` to a full
   `INVITE -> 200 OK -> BYE`. This closes the largest open delivery gap (see M4 open items).
-  **[Required · Status: Open]**
+  **[Required · Status: Done]** (2026-09-16)
+
+  **Done in this conversation (2026-09-16).** The three images were built and the stack ran a
+  complete call for the first time. Running it surfaced three defects that no amount of
+  `docker compose config` could have shown; all three are fixed in `deploy/` and `config/`
+  and nothing under `src/` changed:
+
+  1. **The container command ran the wrong interpreter.** `uv sync` installs into the project
+     environment `/app/.venv`, but `CMD ["python", ...]` resolved to the *system* interpreter,
+     so all three services died with `ModuleNotFoundError: No module named 'sippy'`
+     (and `... 'fastapi'`). `/app/.venv/bin` is now first on `PATH` in each Dockerfile.
+  2. **The build could not reach its packages.** `uv sync --frozen` installs the wheel URLs
+     recorded in `uv.lock` (`files.pythonhosted.org`) and does **not** substitute the
+     configured index for them — verified with uv 0.12.15, see `docs/operations/deployment.md`
+     §4.2. On this machine that host delivers ≈15 kB/s (a 10 MB wheel times out), so the build
+     failed on uv's 30 s HTTP timeout. The package index is now a build arg whose **default is
+     public PyPI** (CI unchanged); a build that overrides it lets uv re-resolve against that
+     index inside the image only — same 50 packages, same pinned versions, and the committed
+     `uv.lock` still references public PyPI.
+  3. **The next hop was unreachable.** The AS originates the second leg to the hop the *rule
+     set* selects, and the canonical `config/routing_rules.yaml` points every hop at
+     `127.0.0.1` (correct for local runs, but each container has its own loopback).
+     `SBC_PEER_ADDRESS` describes the peer for the startup self-check and logging; it does not
+     rewrite the rule catalogue. The compose stack therefore uses
+     `config/routing_rules.compose.yaml`, the same 17 rules with the hops at the mock's fixed
+     trunk address `172.28.0.3` (see §4.2 of the deployment guide and the gap register).
+
+  **Evidence (real, captured from the running stack).**
+  `docker compose -f deploy/docker-compose.yml up -d` brings all three services up
+  (`as` → 5060/udp + 8080/tcp, `s-sbc-mock` → 15060-15061/udp, `console` → 8081/tcp). The
+  mock's default `office-to-mobile` call (`+86216180001` → `+8613800138000`) completed with
+  **Call-ID `e48cb46795675ab0f76f5578cf5b4449`**; the AS structured log carries, in order:
+  `invite received on the trunk` (`+8613800138000`), `routing decision taken` (`R-MOB-CM-40`),
+  `call translated` (`+8613800138000` → `013800138000`, `national`),
+  `invite originated towards the next hop` (`s-sbc-primary`), `call finished`
+  (`disposition: completed`) — all with that Call-ID. On the wire the core leg carried
+  `INVITE sip:013800138000@172.28.0.3:15061` with `Via: SIP/2.0/UDP 172.28.0.2:5060;rport`
+  (never `0.0.0.0`), and the mock log shows the full
+  `INVITE → 100 Trying → 180 Ringing → 200 OK → ACK → BYE → 200 OK` exchange on both legs with
+  the same Call-ID. The console answered `GET http://127.0.0.1:8081/healthz` with
+  `{"status":"ok","component":"console"}` and served its page (HTTP 200, 16754 bytes); the AS
+  internal API answered `GET :8080/healthz` (`{"status":"ok","version":"0.5.0",...}`),
+  `GET :8080/api/v1/metrics` (`calls_total: 1`, `calls_by_disposition: {"completed": 1}`,
+  `rule_hits: {"R-MOB-CM-40": 1}`, both peers `reachable`) and
+  `GET :8080/api/v1/traces/e48cb46795675ab0f76f5578cf5b4449` (the Call-ID keyed trace).
+  `docker compose down` then removed every container and the `as-poc-trunk` network: no stray
+  container, network or volume was left behind.
 - **P2 — Manual testing gate (after P1).** *Added by maintainer.* Before any further Post-M4
   work, the running stack must be verified by hand: (a) `as` / `s-sbc-mock` / `console` all
   healthy via `docker ps`; (b) a full `INVITE -> 180 -> 200 OK -> BYE` loop is observable in
   the AS logs; (c) the AS structured log shows the translated Request-URI and the matched rule
   name; (d) the console at `localhost:8081` renders the live message flow; (e) failure branches
   (`+999...` -> `404`, premium -> `603`) also behave correctly in the live stack. Human
-  sign-off, not an automated check. **[Required · Status: Open]**
+  sign-off, not an automated check. **[Required · Status: Open]** — the stack P2 needs now
+  exists (P1) and its log/API evidence covers (a)–(d) as a starting point for the human review;
+  (e) is still to be exercised by hand.
 - **P3 — CI via GitHub Actions (held).** Push the repository and let the committed workflow run;
   record the run link/badge as the `AGENT.md` §4.8 CI-result evidence. On hold per maintainer.
   **[Optional · Status: Open]** (held — needs user to push to GitHub)

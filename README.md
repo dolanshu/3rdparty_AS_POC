@@ -35,7 +35,7 @@ engagement for this repository.
 ## Quickstart
 
 ```bash
-git clone git@github.com:dolanshu/3rdparty_AS_POC.git
+git clone https://github.com/dolanshu/3rdparty_AS_POC.git
 cd 3rdparty_AS_POC
 pip install uv          # uv 0.12.15 is what the toolchain was verified with
 uv sync                 # creates .venv from the committed uv.lock

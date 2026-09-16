@@ -166,7 +166,14 @@ context now lives in `AGENT.md` §1 and in the ADRs.)
   until a run exists, the `AGENT.md` §4.8 CI-result evidence and the README CI badge remain
   pending. **Held by maintainer decision (2026-09-16)** — not implemented now.
 - **`uv` needs a package index mirror on this machine** (`UV_DEFAULT_INDEX=...`); the
-  committed lock refers to the public PyPI, so this is local-only.
+  committed lock refers to the public PyPI, so this is local-only. Verified working
+  (2026-09-16): `UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple` plus
+  `UV_PYTHON_DOWNLOAD_URL=https://ghproxy.net/https://github.com/astral-sh/python-build-standalone/releases/download`
+  install Python 3.10 + all deps in seconds. **Caveat:** syncing with a mirror rewrites
+  `uv.lock` to point at the mirror — `git checkout uv.lock` before committing so CI keeps
+  using public PyPI. Docker Hub is slow too; the compose demo needs a registry mirror
+  (`https://docker.m.daocloud.io`) in `/etc/docker/daemon.json` (verified reachable here,
+  but Docker is not installed in this environment so it was not run to a build).
 - **Unused runtime dependencies**: sippy pulls in `rtpsynth`, `g722`, `flask` and
   `flask-login`, which this signalling-only service never imports. Registered in
   `docs/production-gaps.md`.

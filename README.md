@@ -49,9 +49,44 @@ Fallback without `uv` (maintainer-approved): `python3 -m venv .venv`, activate i
 `pip install sippy==2.4.2 pydantic pydantic-settings pyyaml pytest ruff mypy fastapi
 uvicorn`.
 
-If the default package index is slow on your network, point `uv` at a mirror for the
-local run — for example `UV_DEFAULT_INDEX=https://<mirror>/pypi/simple uv sync`. The
-committed `uv.lock` always references the public PyPI.
+### Slow or blocked network (China mirrors)
+
+The default indices live on public PyPI and GitHub, which are slow or blocked from some
+networks. The snippet below routes **everything** through domestic mirrors. It does not
+change `pyproject.toml`, and the committed `uv.lock` still records the public PyPI so CI
+is unaffected.
+
+```bash
+# 1) uv package index -> Tsinghua PyPI mirror (fast pip/uv resolution)
+export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 2) uv downloads the managed Python (3.10) from python-build-standalone on GitHub ->
+#    route it through a GitHub proxy so `uv sync` does not stall on the Python fetch
+export UV_PYTHON_DOWNLOAD_URL=https://ghproxy.net/https://github.com/astral-sh/python-build-standalone/releases/download
+
+# 3) If uv itself is not installed and `pip` is unavailable, fetch the uv binary via the
+#    same proxy (the install script downloads from GitHub directly and would be slow):
+curl -LsSf "https://ghproxy.net/https://github.com/astral-sh/uv/releases/download/0.12.15/uv-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/uv.tgz
+tar -xzf /tmp/uv.tgz -C /tmp && install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uv ~/.local/bin/uv
+
+uv sync                 # Python 3.10 + all deps now download in seconds
+```
+
+> **Lock caveat.** Syncing with a mirror rewrites `uv.lock` so every package source points
+> at the mirror. Revert it before any commit — `git checkout uv.lock` — so the committed lock
+> keeps referencing the public PyPI (CI-safe). The built `.venv` and uv's wheel cache stay
+> fast on repeat runs.
+
+For `docker compose` (base image + sippy dependencies pull from Docker Hub), add a registry
+mirror to `/etc/docker/daemon.json` and restart the daemon:
+
+```json
+{ "registry-mirrors": ["https://docker.m.daocloud.io"] }
+```
+
+`docker.m.daocloud.io` was reachable from this environment; if your network blocks it, swap
+in another mirror (`https://hub-mirror.c.163.com`, `https://mirror.baidubce.com`,
+`https://mirror.ccs.tencentyun.com`).
 
 ### Demo
 

@@ -6,6 +6,7 @@
 SHELL := /bin/bash
 UV ?= uv
 RUN := $(UV) run
+ARGS ?=
 PYTHONPATH_LOCAL := $(CURDIR)/src
 export PYTHONPATH := $(PYTHONPATH_LOCAL)
 
@@ -25,8 +26,8 @@ dev: sync ## Run the AS locally (mock and console follow in their milestones)
 as: sync ## Run only the AS process
 	$(RUN) python -m as_app.main
 
-mock: sync ## Run only the mock S-SBC process
-	$(RUN) python -m s_sbc_mock.main
+mock: sync ## Run only the mock S-SBC process (ARGS="--call +86216180001=+9991234567")
+	$(RUN) python -m s_sbc_mock.main $(ARGS)
 
 console: sync ## Run only the console process
 	$(RUN) python -m console.main

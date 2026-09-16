@@ -20,8 +20,8 @@ ADR-0006. Do not imply in documentation, logs or demos that they exist:
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately to the project maintainers rather than
-opening a public issue. Include:
+Please report suspected vulnerabilities privately to the project maintainer, Dolan Shu
+<dolan.d.shu@gmail.com>, rather than opening a public issue. Include:
 
 - what you observed and where (component, version from `VERSION`),
 - the steps to reproduce, using the local mock only,

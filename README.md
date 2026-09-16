@@ -215,3 +215,5 @@ implemented, and `CHANGELOG.md` for the milestone history.
 
 Apache-2.0 (`LICENSE`). Third-party notices, including the BSD-2-Clause attribution for
 sippy, are in `NOTICE`.
+
+Maintained by Dolan Shu <dolan.d.shu@gmail.com>.

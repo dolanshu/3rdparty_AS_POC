@@ -57,6 +57,7 @@ REQUIRED_DOCUMENTS = (
     "docs/acceptance/criteria.md",
     "docs/acceptance/report.md",
     "docs/demo-script.md",
+    "docs/demo-steps.md",
     "docs/glossary.md",
     "docs/production-gaps.md",
     "docs/specs/index.md",

@@ -124,6 +124,7 @@ scatter Dockerfiles, compose files or scripts at the root.
 | `docs/acceptance/criteria.md` | Formal acceptance list, one row per item: criterion, verification command, expected result, related requirement |
 | `docs/acceptance/report.md` | Result of the acceptance run with evidence (see §4.8) |
 | `docs/demo-script.md` | 5–10 minute narration: what to run, what to say, what the reviewer should see |
+| `docs/demo-steps.md` | Quick follow-along command checklist for the demo (companion to docs/demo-script.md) |
 | `docs/glossary.md` | Terminology: IMS, S-SBC, ISC, iFC, B2BUA, E.164, IMPU, trunk, and so on |
 | `docs/production-gaps.md` | The register from §3 |
 

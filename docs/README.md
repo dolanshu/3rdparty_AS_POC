@@ -44,5 +44,6 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `docs/acceptance/criteria.md` | ready | `ACC-*` items with verification commands; M0–M3 accepted, M4 executed |
 | `docs/acceptance/report.md` | ready | M0–M4 results with evidence |
 | `docs/demo-script.md` | ready | The 5–10 minute narrated demo; every section runs today, the console included |
+| `docs/demo-steps.md` | ready | The one-page copy-pasteable command checklist for the demo |
 | `docs/roadmap.md` | ready | Milestone status, handover notes, open items |
 | `CHANGELOG.md` / `VERSION` | ready | Version history and the current version |

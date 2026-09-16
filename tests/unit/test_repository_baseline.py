@@ -20,6 +20,7 @@ These tests exist because the repository itself is a deliverable: the skeleton o
 
 from __future__ import annotations
 
+import importlib.metadata
 from pathlib import Path
 
 import pytest
@@ -144,6 +145,64 @@ def test_runtime_version_matches_the_version_file(repo_root: Path) -> None:
 
     version = (repo_root / "VERSION").read_text(encoding="utf-8").strip()
     assert as_app.__version__ == version
+
+
+def test_runtime_version_is_not_the_unknown_placeholder() -> None:
+    """``as_app.__version__`` is a real version, never ``0.0.0+unknown`` (P5).
+
+    ``_UNKNOWN_VERSION`` is what an installed wheel used to report because it ships no
+    ``VERSION`` file. The distribution metadata branch now answers first, so the runtime
+    version is resolved in this environment — editable install or source checkout alike.
+    """
+    import as_app
+
+    assert as_app.__version__ != as_app._UNKNOWN_VERSION
+    assert as_app.__version__ == importlib.metadata.version(as_app._DISTRIBUTION_NAME)
+
+
+def test_runtime_version_falls_back_to_the_version_file_when_metadata_is_missing(
+    repo_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ``VERSION`` file is used when the distribution metadata cannot be read (P5).
+
+    A source checkout run without an install has no ``third-party-as-poc`` distribution, so
+    ``importlib.metadata.version`` raises ``PackageNotFoundError`` and the chain must fall
+    through to ``VERSION`` rather than to ``_UNKNOWN_VERSION``.
+    """
+    import as_app
+
+    real_version = importlib.metadata.version
+
+    def raising_version(distribution_name: str) -> str:
+        if distribution_name == as_app._DISTRIBUTION_NAME:
+            raise importlib.metadata.PackageNotFoundError(distribution_name)
+        return real_version(distribution_name)
+
+    monkeypatch.setattr(importlib.metadata, "version", raising_version)
+
+    expected = (repo_root / "VERSION").read_text(encoding="utf-8").strip()
+    assert as_app._read_version() == expected
+    assert as_app._read_version() != as_app._UNKNOWN_VERSION
+
+
+def test_runtime_version_is_unknown_when_no_version_source_is_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_UNKNOWN_VERSION`` is the last resort when both sources are unavailable (P5).
+
+    This is the state the chain exists to avoid: no distribution metadata *and* no
+    ``VERSION`` file. It is reached only by a broken install, and it stays the honest
+    answer instead of a fabricated version.
+    """
+    import as_app
+
+    def raising_version(distribution_name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(distribution_name)
+
+    monkeypatch.setattr(importlib.metadata, "version", raising_version)
+    monkeypatch.setattr(as_app, "_version_file_version", lambda: as_app._UNKNOWN_VERSION)
+
+    assert as_app._read_version() == as_app._UNKNOWN_VERSION
 
 
 def test_env_example_declares_every_configuration_knob(repo_root: Path) -> None:

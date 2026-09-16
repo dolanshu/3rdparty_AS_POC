@@ -102,3 +102,36 @@ jobs:
           name: e2e-trace
           path: artifacts/
           if-no-files-found: ignore
+
+# ============================================================================
+# GAP / TODO (planned, NOT yet implemented):
+#   Add a `docker` job here to build & push the three images (as / mock /
+#   console) to a registry (e.g. GHCR). It is intentionally INDEPENDENT of the
+#   `uv sync` jobs above: each Dockerfile runs `uv sync --frozen` *inside* the
+#   image using the committed uv.lock, so no runner-side `uv sync` is needed.
+#   Trigger on tag pushes (refs/tags/v*) and/or pushes to main. Use
+#   docker/setup-buildx-action + docker/login-action + docker/build-push-action.
+#   Build context is the repo root, and .dockerignore already keeps .venv out
+#   of the build context. Fill this in when CI work resumes.
+# ----------------------------------------------------------------------------
+#   docker:
+#     name: docker-build
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: read
+#       packages: write
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: docker/setup-buildx-action@v3
+#       - uses: docker/login-action@v3
+#         with:
+#           registry: ghcr.io
+#           username: ${{ github.actor }}
+#           password: ${{ secrets.GITHUB_TOKEN }}
+#       - uses: docker/build-push-action@v6
+#         with:
+#           context: .
+#           file: deploy/Dockerfile.as
+#           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+#           tags: ghcr.io/${{ github.repository }}/as:${{ github.sha }}
+#       # Repeat build-push for deploy/Dockerfile.mock and deploy/Dockerfile.console.

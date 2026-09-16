@@ -16,6 +16,15 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   messages than the previous run could leave orphaned sample files behind. The directory now
   always holds exactly the messages of the most recent capture (P7, `docs/roadmap.md`).
 
+### Changed
+
+- The generated message samples (`docs/specs/message-samples/*.txt`) are no longer tracked:
+  they are removed from the index (`git rm --cached`) and matched by a new `.gitignore`
+  rule, so a `make capture` run can never dirty the working tree. The folder's `README.md`
+  stays tracked as the record of the capture convention and the scenario. Documentation that
+  cited the samples as committed evidence now describes them as generated and reproduced
+  with `make capture`.
+
 ## [0.5.0] - 2026-09-16 — M4 Acceptance and polish (final release)
 
 ### Changed

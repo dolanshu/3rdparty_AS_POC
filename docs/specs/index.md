@@ -21,5 +21,6 @@ specific release is chosen, record the exact release number and file name here.
    from observed sippy behaviour — never from memory.
 2. Cite the document and section when a protocol decision is made (in code comments and
    in `docs/architecture/lld.md`).
-3. `docs/specs/message-samples/` holds real messages; a sample that no longer matches
+3. `docs/specs/message-samples/` holds real messages, generated with `make capture` and
+   gitignored (only the folder `README.md` is tracked); a sample that no longer matches
    real traffic is a bug and must be regenerated.

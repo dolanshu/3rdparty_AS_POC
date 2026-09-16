@@ -26,7 +26,7 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `README.md` | ready | Positioning, quickstart, repository tour, non-goals |
 | `CONTRIBUTING.md` | ready | How to work in this repository |
 | `docs/specs/index.md` | ready | Normative references |
-| `docs/specs/message-samples/` | ready | Real SIP messages on the trunk; the `office-to-mobile` call is captured in 14 files, the translated outbound INVITE included |
+| `docs/specs/message-samples/` | ready | Real SIP messages on the trunk, generated with `make capture` and gitignored (only the folder `README.md` is tracked); the `office-to-mobile` call is 14 files, the translated outbound INVITE included |
 | `tools/README.md` | ready | Probe, rule viewer, capture helper and the call capture tool |
 
 ## Deployment and operations

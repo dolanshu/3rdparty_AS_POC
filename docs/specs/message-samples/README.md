@@ -5,6 +5,11 @@ Real trunk-side messages captured from actual runs of the POC with
 not produce samples. They are referenced by the interface specification and by acceptance
 evidence.
 
+**The sample files are generated, not committed.** `docs/specs/message-samples/*.txt` is
+gitignored, so a capture never dirties the working tree. This `README.md` is the tracked
+part of the folder: it records the naming convention and the scenario, and the samples
+themselves are reproduced with `make capture` (or `uv run python tools/capture_call.py`).
+
 ## Naming
 
 ```text

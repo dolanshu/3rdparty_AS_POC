@@ -117,7 +117,7 @@ scatter Dockerfiles, compose files or scripts at the root.
 | `docs/architecture/hld.md` | High level design: system context, deployment view, interface view, quality attributes, constraints, key message flows |
 | `docs/architecture/lld.md` | Low level design: module and class responsibilities, data structures, state machines, error code table, process model, configuration and log field reference |
 | `docs/architecture/adr/NNNN-*.md` | Architecture decision records (see §4.5) |
-| `docs/specs/index.md`, `docs/specs/message-samples/` | Normative references and real message samples |
+| `docs/specs/index.md`, `docs/specs/message-samples/` | Normative references and real message samples; the generated samples are gitignored, only the folder `README.md` is tracked |
 | `docs/operations/deployment.md` | Deployment guide: topology, port matrix, resource profile, startup and shutdown, health checks |
 | `docs/operations/runbook.md` | Routine operations: start/stop, reload rules, inspect state, log locations |
 | `docs/operations/troubleshooting.md` | Symptom -> cause -> action runbook |

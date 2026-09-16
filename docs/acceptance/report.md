@@ -1371,7 +1371,7 @@ them), so no new capture artefact is committed for this item.
 - **`config/routing_rules.compose.yaml` duplicates the sample rule set.** The two files differ
   only in the `next_hops` catalogue addresses and nothing detects drift; registered in
   `docs/production-gaps.md` together with the build-time index re-resolution.
-- **Failure branches were not exercised in the compose stack — RESOLVED by P2 (2026-09-17).**
+- **Failure branches were not exercised in the compose stack — RESOLVED by P2 (branches exercised on the live stack on 2026-09-17).**
   Both branches were placed on the live compose stack: `+9991234567` → `404` / `AS-ROUTE-001`
   (Call-ID `fff8f9d4d34122326a6f7ffe8f157959`) and `+861681234567` → `603` / `AS-ROUTE-002` /
   rule `R-BLOCK-90` (Call-ID `cd3b2b396d1e7a29074f119ee6d1b318`). See the P2 entry below.

@@ -5,7 +5,8 @@ description = "Proof of concept of a third-party IMS/SIP Application Server (B2B
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
 license = { text = "Apache-2.0" }
-authors = [{ name = "3rd-party AS POC maintainers" }]
+authors = [{ name = "Dolan Shu", email = "dolan.d.shu@gmail.com" }]
+maintainers = [{ name = "Dolan Shu", email = "dolan.d.shu@gmail.com" }]
 keywords = ["sip", "ims", "b2bua", "application-server", "sbc", "number-translation"]
 classifiers = [
   "Development Status :: 3 - Alpha",

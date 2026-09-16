@@ -2,11 +2,17 @@
 
 FROM python:3.10-slim
 
+# Build-time package index and lock rule; the defaults are public PyPI so CI and a normal
+# checkout are unaffected. Dockerfile.as carries the full rationale.
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG UV_DEFAULT_INDEX=${PIP_INDEX_URL}
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/src \
     UV_SYSTEM_PYTHON=1 \
-    UV_VERSION=0.12.15
+    UV_VERSION=0.12.15 \
+    UV_HTTP_TIMEOUT=180
 
 RUN pip install --no-cache-dir uv==${UV_VERSION}
 
@@ -14,10 +20,18 @@ WORKDIR /app
 RUN useradd --create-home --uid 10001 console
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ "${PIP_INDEX_URL}" = "https://pypi.org/simple" ]; then \
+        uv sync --frozen --no-install-project; \
+    else \
+        uv sync --no-install-project; \
+    fi
 
 COPY src/ ./src/
 COPY VERSION ./
+
+# Run from the project environment uv created; see Dockerfile.as for the rationale.
+ENV PATH="/app/.venv/bin:${PATH}"
 
 USER console
 EXPOSE 8081/tcp

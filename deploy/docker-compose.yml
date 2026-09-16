@@ -14,6 +14,14 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.as
+      # Build-time package index. Defaults to public PyPI, so CI is unaffected; a network
+      # that cannot reach PyPI overrides them for its own build, e.g.
+      #   PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+      #   docker compose -f deploy/docker-compose.yml build
+      # (UV_DEFAULT_INDEX then follows PIP_INDEX_URL unless it is set explicitly.)
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-${PIP_INDEX_URL:-https://pypi.org/simple}}
     command: ["python", "-m", "as_app.main"]
     environment:
       # Address sippy advertises in the Via and Contact of every message the AS sends.
@@ -28,7 +36,9 @@ services:
       # from its fixed container IP 172.28.0.3 (see networks.trunk), so that is the only
       # entry that passes the allowlist; anything else is rejected with 403 / AS-PEER-001.
       ALLOWED_PEERS: 172.28.0.3
-      RULES_FILE: config/routing_rules.yaml
+      # Compose-network variant of the sample rule set: same rules, but every next hop is the
+      # mock's fixed trunk address (see config/routing_rules.compose.yaml).
+      RULES_FILE: config/routing_rules.compose.yaml
       INTERNAL_API_ADDRESS: 0.0.0.0
       INTERNAL_API_PORT: "8080"
       LOG_LEVEL: INFO
@@ -46,6 +56,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.mock
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-${PIP_INDEX_URL:-https://pypi.org/simple}}
     command:
       - python
       - -m
@@ -72,6 +85,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.console
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-${PIP_INDEX_URL:-https://pypi.org/simple}}
     command: ["python", "-m", "console.main", "--address", "0.0.0.0", "--port", "8081"]
     environment:
       AS_INTERNAL_API_URL: http://as:8080

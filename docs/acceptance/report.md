@@ -124,13 +124,20 @@ response `SIP/2.0 404 Probe` with a generated `To` tag.
 
 ### 3. CI
 
+**CI is now observed.** Run
+[35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999)
+(2026-09-17) is the first execution of this workflow on a runner. It is reported green by
+the maintainer — no agent re-fetched it (see the caveat in the P3 section at the end of
+this report). It exercised the **current** `main`, not the M0 code, so it does not replace
+the local evidence below; it supersedes only the `not executed` verdict.
+
 | Layer | Job | Result |
 | --- | --- | --- |
-| lint | `lint` | not executed — no CI runner in this environment; `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass |
-| type | `type-check` | not executed; `uv run mypy` executed locally and passes |
-| unit | `unit` | not executed; `uv run pytest tests/unit -m unit -q` executed locally and passes |
-| integration | `integration` | not executed; `uv run pytest tests/integration -m integration -q` executed locally and passes |
-| e2e | `e2e` | not executed; `uv run pytest tests/e2e -m e2e -q` executed locally: 4 skipped, reason `signalling path is delivered in M1` |
+| lint | `lint` | **green — run 35155542999 (current `main`, not the M0 code).** At M0: not executed — no CI runner; `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass |
+| type | `type-check` | **green — run 35155542999 (current `main`).** At M0: not executed; `uv run mypy` executed locally and passes |
+| unit | `unit` | **green — run 35155542999 (current `main`).** At M0: not executed; `uv run pytest tests/unit -m unit -q` executed locally and passes |
+| integration | `integration` | **green — run 35155542999 (current `main`).** At M0: not executed; `uv run pytest tests/integration -m integration -q` executed locally and passes |
+| e2e | `e2e` | **green — run 35155542999 (current `main`).** At M0: not executed; `uv run pytest tests/e2e -m e2e -q` executed locally: 4 skipped, reason `signalling path is delivered in M1` |
 
 The workflow `.github/workflows/ci.yml` is committed and runs the same commands with
 `uv sync --frozen`, which is also how the lock file is verified.
@@ -350,17 +357,23 @@ GET http://127.0.0.1:<port>/api/v1/metrics -> {"calls_total": 0, ...}
 
 ### 3. CI
 
+**CI is now observed.** Run
+[35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999)
+(2026-09-17) is the first execution of this workflow on a runner. It is reported green by
+the maintainer — no agent re-fetched it (see the caveat in the P3 section at the end of
+this report). It exercised the **current** `main`, not the M1 code, so it does not replace
+the local evidence below; it supersedes only the `not executed` verdict.
+
 | Layer | Job | Result |
 | --- | --- | --- |
-| lint | `lint` | **not executed — no CI runner in this environment.** `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass (63 files). |
-| type | `type-check` | **not executed — no CI runner.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
-| unit | `unit` | **not executed — no CI runner.** `uv run pytest tests/unit -m unit -q` executed locally and passes. |
-| integration | `integration` | **not executed — no CI runner.** `uv run pytest tests/integration -m integration -q` executed locally: 6 passed. |
-| e2e | `e2e` | **not executed — no CI runner.** `uv run pytest tests/e2e -m e2e -q` executed locally: 2 passed, 2 skipped with the reason `number translation and its 404/603 branches are delivered in M2 (AGENT.md section 15)`. |
+| lint | `lint` | **green — run 35155542999 (current `main`, not the M1 code).** At M1: not executed — no CI runner; `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass (63 files). |
+| type | `type-check` | **green — run 35155542999 (current `main`).** At M1: not executed — no CI runner; `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit | `unit` | **green — run 35155542999 (current `main`).** At M1: not executed — no CI runner; `uv run pytest tests/unit -m unit -q` executed locally and passes. |
+| integration | `integration` | **green — run 35155542999 (current `main`).** At M1: not executed — no CI runner; `uv run pytest tests/integration -m integration -q` executed locally: 6 passed. |
+| e2e | `e2e` | **green — run 35155542999 (current `main`).** At M1: not executed — no CI runner; `uv run pytest tests/e2e -m e2e -q` executed locally: 2 passed, 2 skipped with the reason `number translation and its 404/603 branches are delivered in M2 (AGENT.md section 15)`. |
 
-No CI badge or run link exists yet: the workflow is committed but this repository has not
-been pushed, so no runner has ever executed it. The commands above are the same commands
-the workflow runs with `uv sync --frozen`.
+A run link now exists (above). The commands above are the same commands the workflow runs
+with `uv sync --frozen`.
 
 ### 4. Capture
 
@@ -509,17 +522,23 @@ byte-identical across the two legs; only the Request-URI, `Via`, `Contact`, `To`
 
 ### 3. CI
 
+**CI is now observed.** Run
+[35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999)
+(2026-09-17) is the first execution of this workflow on a runner. It is reported green by
+the maintainer — no agent re-fetched it (see the caveat in the P3 section at the end of
+this report). It exercised the **current** `main`, not the M2 code, so it does not replace
+the local evidence below; it supersedes only the `not executed` verdict.
+
 | Layer | Job | Result |
 | --- | --- | --- |
-| lint | `lint` | **not executed — no CI runner in this environment.** `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass (64 files). |
-| type | `type-check` | **not executed — no CI runner.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
-| unit | `unit` | **not executed — no CI runner.** `uv run pytest tests/unit -m unit -q` executed locally and passes. |
-| integration | `integration` | **not executed — no CI runner.** `uv run pytest tests/integration -m integration -q` executed locally: 11 passed (including failover, hot reload, 480, 500). |
-| e2e | `e2e` | **not executed — no CI runner.** `uv run pytest tests/e2e -m e2e -q` executed locally: 5 passed, 0 skipped (the 404 and 603 cases are now un-skipped). |
+| lint | `lint` | **green — run 35155542999 (current `main`, not the M2 code).** At M2: not executed — no CI runner; `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass (64 files). |
+| type | `type-check` | **green — run 35155542999 (current `main`).** At M2: not executed — no CI runner; `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit | `unit` | **green — run 35155542999 (current `main`).** At M2: not executed — no CI runner; `uv run pytest tests/unit -m unit -q` executed locally and passes. |
+| integration | `integration` | **green — run 35155542999 (current `main`).** At M2: not executed — no CI runner; `uv run pytest tests/integration -m integration -q` executed locally: 11 passed (including failover, hot reload, 480, 500). |
+| e2e | `e2e` | **green — run 35155542999 (current `main`).** At M2: not executed — no CI runner; `uv run pytest tests/e2e -m e2e -q` executed locally: 5 passed, 0 skipped (the 404 and 603 cases are now un-skipped). |
 
-No CI badge or run link exists yet: the workflow is committed but this repository has not
-been pushed, so no runner has ever executed it. The commands above are the same commands
-the workflow runs with `uv sync --frozen`.
+A run link now exists (above). The commands above are the same commands the workflow runs
+with `uv sync --frozen`.
 
 ### 4. Capture
 
@@ -807,17 +826,23 @@ so it does not produce access-log noise. The console process runs independently:
 
 ### 3. CI
 
+**CI is now observed.** Run
+[35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999)
+(2026-09-17) is the first execution of this workflow on a runner. It is reported green by
+the maintainer — no agent re-fetched it (see the caveat in the P3 section at the end of
+this report). It exercised the **current** `main`, not the M3 code, so it does not replace
+the local evidence below; it supersedes only the `not executed` verdict.
+
 | Layer | Job | Result |
 | --- | --- | --- |
-| lint | `lint` | **not executed — no CI runner in this environment.** `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass (66 files). |
-| type | `type-check` | **not executed — no CI runner.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
-| unit | `unit` | **not executed — no CI runner.** `uv run pytest tests/unit -m unit -q` executed locally and passes (97 tests: unchanged from M2; no new unit tests in M3). |
-| integration | `integration` | **not executed — no CI runner.** `uv run pytest tests/integration -m integration -q` executed locally: 16 passed (11 baseline + 5 console). |
-| e2e | `e2e` | **not executed — no CI runner.** `uv run pytest tests/e2e -m e2e -q` executed locally: 5 passed (unchanged from M2; no e2e scope in M3). |
+| lint | `lint` | **green — run 35155542999 (current `main`, not the M3 code).** At M3: not executed — no CI runner; `uv run ruff format --check .` and `uv run ruff check .` were executed locally and pass (66 files). |
+| type | `type-check` | **green — run 35155542999 (current `main`).** At M3: not executed — no CI runner; `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit | `unit` | **green — run 35155542999 (current `main`).** At M3: not executed — no CI runner; `uv run pytest tests/unit -m unit -q` executed locally and passes (97 tests: unchanged from M2; no new unit tests in M3). |
+| integration | `integration` | **green — run 35155542999 (current `main`).** At M3: not executed — no CI runner; `uv run pytest tests/integration -m integration -q` executed locally: 16 passed (11 baseline + 5 console). |
+| e2e | `e2e` | **green — run 35155542999 (current `main`).** At M3: not executed — no CI runner; `uv run pytest tests/e2e -m e2e -q` executed locally: 5 passed (unchanged from M2; no e2e scope in M3). |
 
-No CI badge or run link exists yet: the workflow is committed but this repository has not
-been pushed, so no runner has ever executed it. The commands above are the same commands
-the workflow runs with `uv sync --frozen`.
+A run link now exists (above). The commands above are the same commands the workflow runs
+with `uv sync --frozen`.
 
 ### 4. Capture
 
@@ -1154,7 +1179,7 @@ now gitignored, reproduced with `make capture`, and only
 
 | ID | Criterion | Result | Evidence |
 | --- | --- | --- | --- |
-| ACC-M4-001 | Every acceptance item carries the four kinds of evidence | **accepted** | review of this report: every item row for M0–M4 names evidence kinds 1–4, or marks a kind `n/a` with a reason (M0 and M3 carry `n/a` for kind 4; M4 carries `n/a` for kind 4). Kind 3 is `not observed` everywhere because no CI runner is reachable from this environment — the reason is stated per layer. |
+| ACC-M4-001 | Every acceptance item carries the four kinds of evidence | **accepted** | review of this report: every item row for M0–M4 names evidence kinds 1–4, or marks a kind `n/a` with a reason (M0 and M3 carry `n/a` for kind 4; M4 carries `n/a` for kind 4). Kind 3 was `not observed` at M4 time because no CI runner was reachable from this environment; **it is now observed** — run [35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999), 2026-09-17, reported green by the maintainer, on the current `main` rather than on the M4 code. See the P3 section. |
 | ACC-M4-002 | `docs/demo-script.md` rehearsed end to end | **accepted** | 1 (`make demo` exit 0, `make probe` exit 0, `make rules` exit 0, `make capture` 14 samples, the three failure branches and the console with a live call — all above), 2 (AS log, Call-ID `73c7eaceb15aee57de78308dd015c6c9`), 3 (see the CI table), 4 (`n/a` — see §4) |
 
 ### Open items raised by this run
@@ -1307,11 +1332,17 @@ national format out` (`rule_id: R-MOB-CM-40`, `translated_number: 013800138000`)
 
 ### 3. CI
 
+**CI is now observed — superseded 2026-09-17.** Run
+[35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999) was
+reported green by the maintainer (see the caveat in the P3 section at the end of this
+report). It exercised the **current** `main`, not the P1 commit, so the local results below
+remain P1's own evidence; only the `not observed` verdict is superseded.
+
 | Layer | Job | Result |
 | --- | --- | --- |
-| lint | `lint` | **not observed.** No CI runner is reachable from this environment. Executed locally after the change: `uv run ruff format --check .` (`67 files already formatted`) and `uv run ruff check .` (`All checks passed!`). |
-| type | `type-check` | **not observed.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
-| unit / integration / e2e | `unit`, `integration`, `e2e` | **not observed.** Covered by the local run below. |
+| lint | `lint` | **green — run 35155542999 (current `main`).** At P1: **not observed.** Executed locally after the change: `uv run ruff format --check .` (`67 files already formatted`) and `uv run ruff check .` (`All checks passed!`). |
+| type | `type-check` | **green — run 35155542999 (current `main`).** At P1: **not observed.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit / integration / e2e | `unit`, `integration`, `e2e` | **green — run 35155542999 (current `main`).** At P1: **not observed.** Covered by the local run below. |
 | docker | — | **not implemented.** The `docker` job in `.github/workflows/ci.yml` is still the commented-out TODO; P1 was built and run locally only. |
 
 ```text
@@ -1552,11 +1583,17 @@ Failure branch `603`, AS structured log, Call-ID **`cd3b2b396d1e7a29074f119ee6d1
 
 ### 3. CI
 
+**CI is now observed — superseded 2026-09-17.** Run
+[35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999) was
+reported green by the maintainer (see the caveat in the P3 section at the end of this
+report). It exercised the **current** `main`, not the P2 commit, so the local results below
+remain P2's own evidence; only the `not observed` verdict is superseded.
+
 | Layer | Job | Result |
 | --- | --- | --- |
-| lint | `lint` | **not observed.** No CI runner is reachable from this environment. Executed locally after the change: `uv run ruff format --check .` (`67 files already formatted`) and `uv run ruff check .` (`All checks passed!`). |
-| type | `type-check` | **not observed.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
-| unit / integration / e2e | `unit`, `integration`, `e2e` | **not observed.** `uv run pytest tests -q` executed locally: `120 passed in 13.67s`. |
+| lint | `lint` | **green — run 35155542999 (current `main`).** At P2: **not observed.** Executed locally after the change: `uv run ruff format --check .` (`67 files already formatted`) and `uv run ruff check .` (`All checks passed!`). |
+| type | `type-check` | **green — run 35155542999 (current `main`).** At P2: **not observed.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit / integration / e2e | `unit`, `integration`, `e2e` | **green — run 35155542999 (current `main`).** At P2: **not observed.** `uv run pytest tests -q` executed locally: `120 passed in 13.67s`. |
 | docker | — | **not implemented.** The `docker` job in `.github/workflows/ci.yml` is still the commented-out TODO; the P2 stack was run locally only. |
 
 ### 4. Capture
@@ -1593,3 +1630,98 @@ perform it; the table above is the machine evidence gathered for that review.
   `100` / `180` / `200 OK` / `BYE` relay events are `DEBUG` and never reach the log stream, so
   item (b) needs either `LOG_LEVEL=DEBUG` or the Call-ID keyed trace. Not changed here: the
   compose default is deliberately quiet.
+
+## Post-M4 — P3 CI via GitHub Actions (2026-09-17)
+
+P3 (`docs/roadmap.md`) is: push the repository, let the committed workflow
+`.github/workflows/ci.yml` run, and record the run link/badge as the `AGENT.md` §4.8
+CI-result evidence. It changes no product behaviour, so no M0–M4 acceptance item was
+reopened. What it closes is the one evidence kind every earlier section of this report had
+to mark `not executed` / `not observed`; those sections have been updated above to point at
+this run, and each of them states that the run is of the **current** `main`, not of that
+milestone's code.
+
+**Maintainer action, not an agent action.** The maintainer pushed to GitHub; no agent
+pushed, and no agent observed the run (see the caveat in §3 below).
+
+### 1. Command and output
+
+The workflow is not started by a local command. It is triggered by `push` and
+`pull_request` on `main` and by `workflow_dispatch` (`.github/workflows/ci.yml`, `on:`), so
+the command is the push itself. This environment cannot show the run:
+
+```text
+$ git remote -v
+origin  git@github.com:dolanshu/3rdparty_AS_POC.git (fetch)
+origin  git@github.com:dolanshu/3rdparty_AS_POC.git (push)
+
+$ command -v gh ; echo $?
+gh: not installed
+1
+```
+
+`gh` is not installed here and `web_fetch` of the run URL timed out (twice), so the run
+could not be listed or re-fetched from this environment. The command a reviewer runs to see
+it is:
+
+```text
+$ git push origin main            # maintainer's action; triggers the workflow
+#   or: GitHub UI -> Actions -> CI -> Run workflow   (workflow_dispatch)
+#   then open the run:
+#   https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999
+```
+
+Result, as reported by the maintainer: **green** — all five layers passed.
+
+### 2. Log excerpt
+
+`n/a` — P3 runs no AS process and generates no SIP traffic, so there is no Call-ID keyed
+log to quote. The `e2e` job's reviewable artefact is the uploaded `e2e-trace`
+(`actions/upload-artifact@v4`, path `artifacts/`). The Call-ID keyed record of the same
+flow is still the locally generated `docs/specs/message-samples/` set, reproduced with
+`make capture` (gitignored; `AGENT.md` §13 forbids committing captures).
+
+### 3. CI
+
+This is the evidence P3 exists to produce — the `AGENT.md` §4.8 kind-3 CI result.
+
+| Layer | Job | Result |
+| --- | --- | --- |
+| lint | `lint` | **green — run [35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999)** |
+| type | `type-check` | **green — run [35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999)** |
+| unit | `unit` | **green — run [35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999)** |
+| integration | `integration` | **green — run [35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999)** |
+| e2e | `e2e` | **green — run [35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999)** |
+
+- Run link: https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999
+- Workflow badge (already in the `README.md` header):
+  `https://github.com/dolanshu/3rdparty_AS_POC/actions/workflows/ci.yml/badge.svg`
+
+The workflow runs `lint` and `type-check` in parallel; `unit` needs both;
+`integration` needs `unit`; `e2e` needs `integration`. Every job installs `uv` 0.12.15 and
+Python 3.10 and runs `uv sync --frozen`, which is also how the dependency lock is verified.
+
+**Caveat — what was and was not independently verified.** No agent read this run. `gh` is
+not installed in this environment, and `web_fetch` of the run URL and of the badge SVG both
+timed out (10 s, twice each), so the job list, the per-job conclusions, the durations and
+the commit SHA of run 35155542999 were **not** observed from here. Everything above beyond
+the workflow shape — which is read from the committed `.github/workflows/ci.yml` — is the
+maintainer's statement that the run was green. No job name other than those declared in the
+workflow, no duration and no commit SHA is asserted in this report.
+
+### 4. Capture
+
+`n/a` — P3 changes no wire behaviour and commits no capture. The `e2e` job uploads the call
+trace it produces as the `e2e-trace` artefact, which is the CI-side equivalent of a capture;
+it was not downloaded from this environment.
+
+### Open items raised by this run
+
+- **The run was not independently re-verified from this environment** (no `gh`; GitHub not
+  reachable). A reviewer should open the run link above and confirm the job list and
+  conclusions themselves.
+- **The `docker` job is still not implemented.** `.github/workflows/ci.yml` keeps it as a
+  commented-out TODO, so image builds are not covered by CI; the P1/P2 compose stack was
+  built and run locally only.
+- **The badge reflects the latest run of `main` only.** It is not per-milestone evidence;
+  the run link is the citable artefact.

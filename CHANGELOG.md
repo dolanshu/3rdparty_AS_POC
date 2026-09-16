@@ -82,6 +82,18 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   `mypy` and `pytest tests -q`.
 - `uv.lock` is unchanged by a mirror build: its md5 is identical before and after a build with
   `PIP_INDEX_URL` set to a mirror, and `git status` on it stays clean.
+- **P3 — CI via GitHub Actions ran green (2026-09-17, `docs/roadmap.md`).** The maintainer
+  pushed `main` and the committed workflow `.github/workflows/ci.yml` ran on a runner for the
+  first time: run
+  [35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999),
+  **green** across the five layers (`lint` and `type-check` in parallel, then `unit` →
+  `integration` → `e2e`, every job running `uv sync --frozen`). The run link is now recorded
+  as the `AGENT.md` §4.8 kind-3 CI-result evidence in `docs/acceptance/report.md`, replacing
+  the `not executed` / `not observed` verdict the M0–M4, P1 and P2 sections had to carry —
+  each of them now states that the run is of the current `main`, not of that milestone's
+  code. **Caveat:** not independently re-fetched from this environment — `gh` is not
+  installed and `web_fetch` of the run URL timed out, so no job durations or commit SHA are
+  recorded and "green" is the maintainer's statement.
 - **P2 — Manual testing gate passed (2026-09-16, `docs/roadmap.md`).** The **human sign-off
   was performed by the maintainer on 2026-09-16**; P2 is a human gate and no agent performed
   it. The machine evidence for the review was gathered from the live stack and covers all five

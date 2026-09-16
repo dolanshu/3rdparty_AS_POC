@@ -160,11 +160,14 @@ context now lives in `AGENT.md` §1 and in the ADRs.)
   concern). Still open after M1 (the model did not grow): if it grows later, move it to
   its own module and update `AGENT.md` §5 — recorded in `docs/architecture/lld.md`
   section 1.1.
-- **CI (planned via GitHub Actions, on hold).** The workflow (`.github/workflows/ci.yml`)
-  is committed and its commands were executed locally, but there is no CI runner in this
-  environment and no run/badge yet. The plan is to run CI on push via **GitHub Actions**;
-  until a run exists, the `AGENT.md` §4.8 CI-result evidence and the README CI badge remain
-  pending. **Held by maintainer decision (2026-09-16)** — not implemented now.
+- **CI (planned via GitHub Actions, on hold) — RESOLVED by P3 (2026-09-17).** The workflow
+  (`.github/workflows/ci.yml`) is committed and has now run on a runner: run
+  [35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999),
+  reported green by the maintainer across all five layers. The `AGENT.md` §4.8 CI-result
+  evidence and the README CI badge are therefore no longer pending — see the P3 entry under
+  "Next steps" and the P3 section of `docs/acceptance/report.md`. *(Original entry: the
+  workflow's commands were executed locally because there was no CI runner in this
+  environment; it was held by maintainer decision on 2026-09-16 — since lifted.)*
 - **`uv` needs a package index mirror on this machine** (`UV_DEFAULT_INDEX=...`); the
   committed lock refers to the public PyPI, so this is local-only. Verified working
   (2026-09-16): `UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple` plus
@@ -709,9 +712,28 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
     -f deploy/docker-compose.yml -f - up -d --force-recreate`); no repository file was
     changed. At `INFO` the loop is visible in the Call-ID keyed trace that the same log and
     the console read, not in the log stream.
-- **P3 — CI via GitHub Actions (held).** Push the repository and let the committed workflow run;
-  record the run link/badge as the `AGENT.md` §4.8 CI-result evidence. On hold per maintainer.
-  **[Optional · Status: Open]** (held — needs user to push to GitHub)
+- **P3 — CI via GitHub Actions.** Push the repository and let the committed workflow run;
+  record the run link/badge as the `AGENT.md` §4.8 CI-result evidence.
+  **[Optional · Status: Done]** (2026-09-17)
+
+  **Done in this conversation (2026-09-17).** The maintainer pushed `main` and the committed
+  workflow `.github/workflows/ci.yml` ran on a runner for the first time:
+  run [35155542999](https://github.com/dolanshu/3rdparty_AS_POC/actions/runs/35155542999),
+  reported **green** — all five layers (`lint` and `type-check` in parallel, then `unit` →
+  `integration` → `e2e`), every job running `uv sync --frozen`. The run link is now the
+  `AGENT.md` §4.8 kind-3 CI-result evidence, recorded in the
+  "Post-M4 — P3 CI via GitHub Actions" section of `docs/acceptance/report.md`; the M0–M4 and
+  P1/P2 CI rows of that report now point at the same run, each stating that it is the run of
+  the current `main` rather than of that milestone's code. The `README.md` header badge
+  (`.../actions/workflows/ci.yml/badge.svg`) is the same result in badge form and needed no
+  change. **Caveat:** no agent re-fetched the run — `gh` is not installed here and
+  `web_fetch` of the run URL and the badge both timed out — so no job durations or commit
+  SHA are recorded and "green" is the maintainer's statement.
+
+  **Open:** CI does not build the images — the `docker` job in `.github/workflows/ci.yml` is
+  still the commented-out TODO, so the P1/P2 compose stack has only ever been built locally.
+  The run also remains independently unverified from this environment; a reviewer should open
+  the link above.
 - **P4 — Console browser verification.** Drive the console UI in a real browser against a live
   call (e.g. Playwright) to confirm real-time rendering and the WebSocket feed (registered
   gap, carried from M3). **[Optional · Status: Open]**

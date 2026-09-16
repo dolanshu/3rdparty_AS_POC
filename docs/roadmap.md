@@ -736,7 +736,9 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   the link above.
 - **P4 — Console browser verification.** Drive the console UI in a real browser against a live
   call (e.g. Playwright) to confirm real-time rendering and the WebSocket feed (registered
-  gap, carried from M3). **[Optional · Status: Open]**
+  gap, carried from M3). **[Optional · Status: Pending]** Parked by the maintainer on
+  2026-09-17: it needs the Playwright browser toolchain (a browser download) and is not
+  required for the POC.
 - **P5 — Wheel version discovery.** Derive `as_app.__version__` from installed package metadata so
   an installed wheel is not `0.0.0+unknown` (registered gap, follow-up). **[Optional · Status:
   Done]** `src/as_app/__init__.py` now resolves `__version__` in three steps —
@@ -749,7 +751,8 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   resolved and records the one remaining caveat (a wheel installed without its metadata).
 - **P6 — sippy retransmission-timer shutdown fix.** Cancel per-transaction timers on
   `SipTransactionManager.shutdown()` to remove the rare failover test flake (registered gap,
-  deferred). **[Optional · Status: Open]**
+  deferred). **[Optional · Status: Pending]** Parked by the maintainer on 2026-09-17:
+  deferred to a separate conversation, per the maintainer.
 - **P7 — Capture clears stale samples before writing.** `tools/capture_call.py` deleted only
   `NN-*.txt` before writing a new capture, so a run that produced fewer messages than the
   previous one could leave orphaned sample files that no longer belong to the captured call.

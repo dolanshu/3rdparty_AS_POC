@@ -188,7 +188,7 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 | `docs/architecture/hld.md` | context, deployment and interface views, message flows |
 | `docs/architecture/lld.md` | modules, data structures, state machines, error codes, log fields |
 | `docs/architecture/adr/` | ADR-0001 … ADR-0006 |
-| `docs/specs/index.md`, `docs/specs/message-samples/` | normative references and message samples |
+| `docs/specs/index.md`, `docs/specs/message-samples/` | normative references and real message samples; the generated samples are gitignored, only the folder `README.md` is tracked |
 | `docs/operations/deployment.md` | topology, port matrix, health checks |
 | `docs/operations/runbook.md` | start, stop, reload rules, inspect state |
 | `docs/operations/troubleshooting.md` | symptom → cause → action |

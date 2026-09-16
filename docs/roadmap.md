@@ -649,9 +649,9 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   the AS logs; (c) the AS structured log shows the translated Request-URI and the matched rule
   name; (d) the console at `localhost:8081` renders the live message flow; (e) failure branches
   (`+999...` -> `404`, premium -> `603`) also behave correctly in the live stack. Human
-  sign-off, not an automated check. **[Required · Status: Done]** (2026-09-17)
+  sign-off, not an automated check. **[Required · Status: Done]** (2026-09-16)
 
-  **The human sign-off was performed by the maintainer on 2026-09-17.** P2 is a human gate
+  **The human sign-off was performed by the maintainer on 2026-09-16.** P2 is a human gate
   and the sign-off is the maintainer's; no agent performed or can perform it. The run below is
   the machine evidence gathered for that review, and it covers item **(e)**, which was still
   open after P1.

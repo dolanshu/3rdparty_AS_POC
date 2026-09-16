@@ -1350,7 +1350,7 @@ them), so no new capture artefact is committed for this item.
   with `SIGTERM` (which the AS handles gracefully) before `docker compose up` could bind; they
   were not restarted afterwards.
 
-## Post-M4 — P2 Manual testing gate (2026-09-17)
+## Post-M4 — P2 Manual testing gate (2026-09-16)
 
 P2 (`docs/roadmap.md`) is the maintainer's **manual testing gate**: (a) the three services
 healthy via `docker ps`; (b) a full `INVITE -> 180 -> 200 OK -> BYE` loop observable in the AS
@@ -1358,7 +1358,7 @@ logs; (c) the AS structured log showing the translated Request-URI and the match
 (d) the console at `localhost:8081` rendering the live message flow; (e) the failure branches
 (`+999...` -> `404`, premium -> `603`) behaving correctly on the live stack.
 
-**The human sign-off was performed by the maintainer on 2026-09-17.** P2 is a human gate and
+**The human sign-off was performed by the maintainer on 2026-09-16.** P2 is a human gate and
 the sign-off is theirs; no agent performed it. The evidence below is the machine record
 gathered for that review, and it covers item **(e)**, which was still open after P1.
 
@@ -1576,7 +1576,7 @@ translated `ruri=sip:013800138000@172.28.0.3:15061` of the success call.
 | P2 (d) | Console at `localhost:8081` renders the live message flow | **pass (page and feed verified; the browser view is the maintainer's)** | 1 (`GET :8081/healthz` -> `{"status":"ok","component":"console"}`, page HTTP 200 / 16754 bytes / 0 external refs; console container -> `http://as:8080/api/v1/traces` -> HTTP 200, 3 calls) |
 | P2 (e) | Failure branches `+999...` -> `404`, premium -> `603` on the live stack | **pass** | 1 (the two `docker compose run` invocations and the resulting metrics), 2 (Call-IDs `fff8f9d4d34122326a6f7ffe8f157959` / `AS-ROUTE-001` and `cd3b2b396d1e7a29074f119ee6d1b318` / `AS-ROUTE-002` / `R-BLOCK-90`), 4 (mock SIP log: `404 Not Found`, `603 Decline`) |
 
-**Human sign-off: performed by the maintainer on 2026-09-17.** No agent performed or can
+**Human sign-off: performed by the maintainer on 2026-09-16.** No agent performed or can
 perform it; the table above is the machine evidence gathered for that review.
 
 ### Open items raised by this run

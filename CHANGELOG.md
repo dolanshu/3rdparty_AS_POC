@@ -27,6 +27,9 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   a network that cannot reach PyPI overrides them for its own build, e.g.
   `PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple docker compose ... build`. The
   rationale and the verified uv behaviour are in `docs/operations/deployment.md` section 4.2.
+- The introduction deck is committed as `docs/3rdPartyAS_Poc_Introduction.pdf` (the `.pptx`
+  stays tracked beside it), and IDE / agent runtime state (`.codebuddy/`) together with
+  Office lock files (`~$*`) are untracked and ignored, so neither can dirty the working tree.
 
 ### Fixed
 
@@ -79,8 +82,8 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   `mypy` and `pytest tests -q`.
 - `uv.lock` is unchanged by a mirror build: its md5 is identical before and after a build with
   `PIP_INDEX_URL` set to a mirror, and `git status` on it stays clean.
-- **P2 — Manual testing gate passed (2026-09-17, `docs/roadmap.md`).** The **human sign-off
-  was performed by the maintainer on 2026-09-17**; P2 is a human gate and no agent performed
+- **P2 — Manual testing gate passed (2026-09-16, `docs/roadmap.md`).** The **human sign-off
+  was performed by the maintainer on 2026-09-16**; P2 is a human gate and no agent performed
   it. The machine evidence for the review was gathered from the live stack and covers all five
   items, including (e), which was still open after P1: (a) all three services `Up` in
   `docker ps`; (b)+(c) the default call, Call-ID `6d415fc865955c05162309eadd9416a5`, shows the

@@ -472,6 +472,13 @@ instructions, since a member may read a stale "hold" and a new decision in the s
 (d) when several decisions are pending, send one consolidated instruction rather than a
 stream of small ones.
 
+**Delivery is not guaranteed (learned in Post-M4).** A team message can be *dropped*, not
+just delayed — it may never arrive — and it can also arrive *twice*. Do not assume a member
+has seen an instruction merely because it was sent. Therefore: ask the member to confirm
+receipt explicitly for any critical instruction, and re-send anything that stays
+unacknowledged; expect occasional duplicate reports and reconcile them rather than treating
+them as new work.
+
 ### 14.2 Delegation policy for the Post-M4 items (P1–P7)
 
 Post-M4 work (tracked as P1–P7 in `docs/roadmap.md`) follows §14 rule 9: the main agent

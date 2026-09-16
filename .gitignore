@@ -25,6 +25,9 @@ htmlcov/
 captures/
 artifacts/
 
+# Generated sample captures (regenerate with `make capture`)
+docs/specs/message-samples/*.txt
+
 # Editors and OS
 .idea/
 .vscode/

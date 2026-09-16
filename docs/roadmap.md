@@ -738,7 +738,15 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   call (e.g. Playwright) to confirm real-time rendering and the WebSocket feed (registered
   gap, carried from M3). **[Optional · Status: Open]**
 - **P5 — Wheel version discovery.** Derive `as_app.__version__` from installed package metadata so
-  an installed wheel is not `0.0.0+unknown` (registered gap, follow-up). **[Optional · Status: Open]**
+  an installed wheel is not `0.0.0+unknown` (registered gap, follow-up). **[Optional · Status:
+  Done]** `src/as_app/__init__.py` now resolves `__version__` in three steps —
+  `importlib.metadata.version("third-party-as-poc")` first, then the repository `VERSION` file,
+  then `0.0.0+unknown` — so an installed wheel, an editable install and a bare source checkout all
+  report the real version. Three unit tests cover the resolved value, the `VERSION` fallback when
+  the metadata lookup fails and the last-resort placeholder; the existing
+  `test_runtime_version_matches_the_version_file` still passes because `VERSION`, `pyproject.toml`
+  and the installed metadata carry the same version. `docs/production-gaps.md` marks the row
+  resolved and records the one remaining caveat (a wheel installed without its metadata).
 - **P6 — sippy retransmission-timer shutdown fix.** Cancel per-transaction timers on
   `SipTransactionManager.shutdown()` to remove the rare failover test flake (registered gap,
   deferred). **[Optional · Status: Open]**

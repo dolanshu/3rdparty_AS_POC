@@ -111,6 +111,13 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ### Changed
 
+- `as_app.__version__` is now derived from the installed package metadata before the
+  repository `VERSION` file (P5, `docs/roadmap.md`): `src/as_app/__init__.py` resolves it in
+  three steps — `importlib.metadata.version("third-party-as-poc")`, then `VERSION`, then
+  `0.0.0+unknown`. An installed wheel no longer reports `0.0.0+unknown` on `/healthz` and in
+  the `application server starting` log line, because it carries distribution metadata even
+  though it ships no `VERSION` file. Three unit tests cover the resolved value, the
+  `VERSION` fallback when the metadata lookup fails, and the last-resort placeholder.
 - The generated message samples (`docs/specs/message-samples/*.txt`) are no longer tracked:
   they are removed from the index (`git rm --cached`) and matched by a new `.gitignore`
   rule, so a `make capture` run can never dirty the working tree. The folder's `README.md`

@@ -183,6 +183,19 @@ make console   # terminal 3: console on 127.0.0.1:8081
 Then open `http://127.0.0.1:8081`. The call that `make mock` placed on startup is the one
 to watch in the live flow.
 
+The call is choosable, not fixed: with no arguments `make mock` places the default
+`office-to-mobile` call (`+86216180001` -> `+8613800138000`), and `--call CALLER=CALLED` picks
+another (repeatable — one call per flag, placed in order on startup; `--repeat` loops them).
+The mock dials the AS on `127.0.0.1:5060`, so `make dev` must already be running. `make mock`
+forwards its arguments, so pass them with `ARGS`:
+
+```bash
+make mock                                            # default office-to-mobile call
+make mock ARGS="--call +86216180001=+9991234567"      # no match -> 404
+make mock ARGS="--call +86216180001=+861681234567"    # premium-rate block -> 603
+make mock ARGS="--call +86216180001=+8613800138000 --call +86216180001=+9991234567 --repeat"
+```
+
 What the UI shows: a status bar (peer state, version, uptime, call counters), the live
 message flow with direction colours, a Call-ID filter, a payload viewer, the matched rule
 highlighted, a statistics dashboard and an SVG topology view — all inline, with no

@@ -60,9 +60,9 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ### Known issues
 
-- The AS runtime version is hardcoded in `src/as_app/__init__.py` (`__version__ = "0.1.0"`),
-  so `/healthz` and the startup log do not track `VERSION`. Reported during M4; not fixed
-  because M4 must not change `src/`.
+- The AS runtime version is hardcoded in `src/as_app/__init__.py`, so `/healthz` and the
+  startup log do not track `VERSION`. Reported during M4 as a decision for the maintainer
+  (fix the code, or register the drift); not changed because M4 must not change `src/`.
 - `tests/integration/test_translation.py::test_next_hop_failover_uses_the_second_hop` is a
   rare flake (a stale sippy `timerA` retransmission firing on the shared `ED2` loop after
   `shutdown()`); the full suite is 118 passed on reruns. A fix belongs to the M2 test code.

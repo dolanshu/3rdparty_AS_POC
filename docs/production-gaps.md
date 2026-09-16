@@ -47,6 +47,12 @@ POC behaviour | production requirement | why it differs.
 | Console browser verification | The console page is fetched by an integration test but never driven by a real browser | Automated browser testing (e.g. Playwright) against a live call to verify real-time rendering, WebSocket connection and UI behaviour |
 | Console versioning | The console process reports `version: "0.1.0"` on its own health endpoint, independent of the AS version | Consistent version reporting across all three services, or a shared version source |
 
+## Additional gaps registered while building M4
+
+| Area | POC behaviour | Production requirement |
+| --- | --- | --- |
+| Test isolation | The in-process test suite runs the AS and the mock in one interpreter on one process-wide `ED2` loop. A retransmission timer (`timerA`) left scheduled by a stopped sippy `SipTransactionManager` can fire during a later test and raise `TypeError` in `transmitData`, because `SipTransactionManager.shutdown()` nulls its `global_config` without cancelling the timer. This is the root cause of the rare (~1 in 6 full-suite runs) non-deterministic failure of `test_next_hop_failover_uses_the_second_hop`. | Production runs one transaction manager per process, so the failure does not occur there. A robust in-process harness would cancel outstanding retransmission timers on `shutdown()` or isolate each stack in its own process; the flake is a test-isolation artefact rather than a signalling defect. |
+
 ## Notes
 
 - Gaps are never "forgotten features": each one is a decision with an ADR or a row in this

@@ -534,15 +534,16 @@ ADR and documentation review; tagged release.
   a process-wide singleton, so the stale timer fires during a later test. The failover test
   (which points a hop at an unbound port on purpose) is the natural trigger. Five
   consecutive full-suite reruns were green (118 passed). A fix belongs to the M2 test code.
-- **Version drift (defect, reported, not changed in M4).** `src/as_app/__init__.py`
-  hardcodes `__version__ = "0.1.0"`, so the AS `/healthz` and its startup log report
-  `0.1.0` even though `VERSION` is now `0.5.0`. The `VERSION` ↔ `pyproject.toml` pair is
-  guarded by a baseline test; `as_app.__version__` is not. See the M4 report open items.
+- **Version handling (open, pending a maintainer decision).** `src/as_app/__init__.py`
+  hardcodes the AS `__version__`, so the value served on `/healthz` and written to the
+  startup log does not track `VERSION`. The `VERSION` ↔ `pyproject.toml` pair is guarded by a
+  baseline test; `as_app.__version__` is not. Fix the code or register the drift; the
+  version-related evidence wording is held until the decision lands.
 
 **Open items:**
 
-- **Version drift in `as_app.__version__`** (above): derive it from `VERSION`, or register
-  it as an accepted gap. Reported in M4; not changed because M4 must not touch `src/`.
+- **Version handling in `as_app.__version__`** (above): derive it from `VERSION`, or register
+  it as an accepted gap. Reported in M4; pending the maintainer's decision.
 - **`deploy/docker-compose.yml` keeps `ALLOWED_PEERS: s-sbc-mock,127.0.0.1`** (carried from
   M1): container addresses are not knowable in advance, so the mock's SIP INVITEs are
   rejected in compose. Compose is validated with `docker compose config` only, never run to

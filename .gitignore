@@ -34,8 +34,8 @@ docs/specs/message-samples/*.txt
 *.swp
 .DS_Store
 
-# IDE / agent runtime state
-.codebuddy/
+# Agent team session state (per-run, machine-local)
+.codebuddy/teams/
 
 # Office temporary lock files
 ~$*

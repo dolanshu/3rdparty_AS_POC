@@ -1165,6 +1165,6 @@ committing captures). The committed samples in `docs/specs/message-samples/` are
   ADR-0002, `docs/operations/deployment.md`, `docs/operations/runbook.md` and
   `docs/specs/message-samples/README.md`; the `SBC_PEER_PORT` default in `README.md`/`lld.md`
   was corrected from `15061` to the real code default `5061`.
-- **`AGENT.md` §4.7 "release notes template"** does not exist as a separate file; the
-  per-version `CHANGELOG.md` nodes serve that purpose (maintainer to confirm or drop the
-  wording).
+- **`AGENT.md` §4.7 "release notes template" — RESOLVED in M4.** The maintainer chose to drop
+  the wording: the phrase was removed from §4.7, and the per-version `CHANGELOG.md` nodes are
+  the release notes. No separate template file is required.

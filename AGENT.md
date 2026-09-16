@@ -189,7 +189,7 @@ The mock data must look like real office data, not like a unit test fixture:
 ### 4.7 Versioning and meta files
 
 - SemVer with a `VERSION` file, `CHANGELOG.md` (keep-a-changelog style), annotated tags
-  `vX.Y.Z`, and a release notes template. Each milestone ends at a tagged version.
+  `vX.Y.Z`. Each milestone ends at a tagged version.
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `NOTICE` (third-party notices,
   including sippy's BSD-2-Clause attribution), `LICENSE`.
 - CI workflow running the gates in layers: lint, type check, unit, integration, e2e.

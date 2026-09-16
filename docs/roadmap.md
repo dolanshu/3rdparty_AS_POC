@@ -461,8 +461,10 @@ message flow; payload viewer; rule-hit display; statistics dashboard; SVG topolo
   console's browser-side JS fetches directly from the AS API URL.
 - **Console process version is `"0.1.0"`.** `src/console/main.py` `create_app` hardcodes
   `version="0.1.0"` for the console's own health endpoint. This is the console component
-  version, not the AS version — the AS version comes from `VERSION` and is served on the AS
-  health endpoint. They are independent processes with independent versions.
+  version, not the AS version. The AS version is derived from `VERSION` and served on the AS
+  health endpoint (`src/as_app/__init__.py`; corrected in M4 — before that fix it was a
+  hardcoded string that had drifted). They are independent processes with independent
+  versions.
 
 **Open items:**
 
@@ -560,9 +562,9 @@ ADR and documentation review; tagged release.
   a call.
 - **Console not browser-verified against a live call** (carried from M3; registered in
   `docs/production-gaps.md`).
-- **`AGENT.md` §4.7 names a "release notes template"** that does not exist as a separate
-  file; the per-version `CHANGELOG.md` nodes serve that purpose. Maintainer to confirm the
-  CHANGELOG counts as the template, or drop the wording.
+- **`AGENT.md` §4.7 "release notes template" — RESOLVED in M4.** The maintainer chose to drop
+  the wording; the phrase was removed from §4.7 and the per-version `CHANGELOG.md` nodes are
+  the release notes. No separate template file exists or is required.
 
 **Entry state for the next milestone:** M4 is the final milestone — there is no M5. A future
 iteration starts from the open items above and from `docs/production-gaps.md`.

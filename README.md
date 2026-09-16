@@ -8,7 +8,7 @@ Service-SBC. It performs number translation and intelligent routing for an enter
 Read `AGENT.md` first: it defines the delivery standards, the layout and the rules of
 engagement for this repository.
 
-[![CI](https://github.com/dolanshu/3rtparty_AS_POC/actions/workflows/ci.yml/badge.svg)](https://github.com/dolanshu/3rtparty_AS_POC/actions/workflows/ci.yml)
+[![CI](https://github.com/dolanshu/3rdparty_AS_POC/actions/workflows/ci.yml/badge.svg)](https://github.com/dolanshu/3rdparty_AS_POC/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10-blue)
 ![sippy](https://img.shields.io/badge/sippy-2.4.2-orange)
 ![Licence](https://img.shields.io/badge/licence-Apache--2.0-green)
@@ -35,8 +35,8 @@ engagement for this repository.
 ## Quickstart
 
 ```bash
-git clone git@github.com:dolanshu/3rtparty_AS_POC.git
-cd 3rtparty_AS_POC
+git clone git@github.com:dolanshu/3rdparty_AS_POC.git
+cd 3rdparty_AS_POC
 pip install uv          # uv 0.12.15 is what the toolchain was verified with
 uv sync                 # creates .venv from the committed uv.lock
 

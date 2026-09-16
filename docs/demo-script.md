@@ -12,7 +12,7 @@ was rehearsed for M4; the run that recorded the evidence is in
 ## 0. Setup (before the audience arrives)
 
 ```bash
-git clone <repo> && cd 3rtparty_AS_POC
+git clone <repo> && cd 3rdparty_AS_POC
 pip install uv
 uv sync
 make lint && make test

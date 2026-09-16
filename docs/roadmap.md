@@ -649,9 +649,66 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   the AS logs; (c) the AS structured log shows the translated Request-URI and the matched rule
   name; (d) the console at `localhost:8081` renders the live message flow; (e) failure branches
   (`+999...` -> `404`, premium -> `603`) also behave correctly in the live stack. Human
-  sign-off, not an automated check. **[Required · Status: Open]** — the stack P2 needs now
-  exists (P1) and its log/API evidence covers (a)–(d) as a starting point for the human review;
-  (e) is still to be exercised by hand.
+  sign-off, not an automated check. **[Required · Status: Done]** (2026-09-17)
+
+  **The human sign-off was performed by the maintainer on 2026-09-17.** P2 is a human gate
+  and the sign-off is the maintainer's; no agent performed or can perform it. The run below is
+  the machine evidence gathered for that review, and it covers item **(e)**, which was still
+  open after P1.
+
+  **Evidence (real, captured from the live stack on 2026-09-17).** The stack was brought up
+  with the documented P1 recipe (`docker compose -f deploy/docker-compose.yml up -d`; the
+  images from P1 were still cached, so no rebuild was needed).
+
+  - **(a)** `docker ps`: `third-party-as-poc-as-1` (5060/udp + 8080/tcp),
+    `third-party-as-poc-s-sbc-mock-1` (15060-15061/udp) and `third-party-as-poc-console-1`
+    (8081/tcp) all `Up`.
+  - **(b)+(c)** Success call `+86216180001` -> `+8613800138000`, Call-ID
+    **`6d415fc865955c05162309eadd9416a5`**. The AS structured log carries, in order:
+    `invite received on the trunk` -> `routing decision taken` (`rule_id: R-MOB-CM-40`) ->
+    `call translated` (`+8613800138000` -> `013800138000`, `national`) ->
+    `invite originated towards the next hop` (`s-sbc-primary`) -> `100 Trying` ->
+    `180 Ringing` -> `200 OK` -> `call released … BYE` -> `call finished`
+    (`disposition: completed`). The translated Request-URI is on the wire at the mock:
+    `core side received INVITE call_id=6d415fc865955c05162309eadd9416a5
+    ruri=sip:013800138000@172.28.0.3:15061`. An earlier run of the same stack at the
+    documented `LOG_LEVEL: INFO` produced the same decision and translation for Call-ID
+    `f55124fe232caaad5260f4504c0a2a5f`.
+  - **(d)** `GET http://127.0.0.1:8081/healthz` -> `{"status":"ok","component":"console"}`,
+    `GET http://127.0.0.1:8081/` -> HTTP 200, 16754 bytes, title `3rd-party AS Console`,
+    0 external `<script src>` / `<link href>` references, AS API URL `http://as:8080`
+    injected. The console container reaches the live feed it renders:
+    `http://as:8080/api/v1/traces` -> HTTP 200, 3 calls. The maintainer viewed the live
+    message flow at `localhost:8081` in a browser as part of their sign-off; no agent drove a
+    browser, and browser-driven verification is still P4.
+  - **(e)** Both failure branches were exercised **for real** in the live stack, each with an
+    extra mock invocation (`docker compose run -d --name … s-sbc-mock python -m
+    s_sbc_mock.main … --call CALLER=CALLED`, after `docker compose stop s-sbc-mock` freed the
+    fixed trunk address `172.28.0.3` that `ALLOWED_PEERS` names):
+    - `+9991234567` -> **`404`**, Call-ID **`fff8f9d4d34122326a6f7ffe8f157959`**:
+      `routing decision taken` (`disposition: no_match`, `rule_id: ""`) and
+      `call rejected by routing policy` (`method: 404`, `error_code: AS-ROUTE-001`,
+      `error_detail: no routing rule matched the called number`). The mock saw
+      `SIP/2.0 404 Not Found` on the trunk.
+    - `+861681234567` -> **`603`**, Call-ID **`cd3b2b396d1e7a29074f119ee6d1b318`**:
+      `routing decision taken` (`rule_id: R-BLOCK-90`, `disposition: reject`) and
+      `call rejected by routing policy` (`method: 603`, `error_code: AS-ROUTE-002`,
+      `error_detail: premium rate numbers are blocked by office policy`). The mock saw
+      `SIP/2.0 603 Decline` on the trunk.
+    - Counters after all three calls:
+      `{"calls_total":3,"calls_by_disposition":{"completed":1,"no_match":1,"rejected":1},
+      "errors_by_code":{"AS-ROUTE-001":1,"AS-ROUTE-002":1},
+      "rule_hits":{"R-MOB-CM-40":1,"R-BLOCK-90":1}}`.
+  - **Teardown.** `docker compose -f deploy/docker-compose.yml down` removed all three
+    containers and the `as-poc-trunk` network; no container, network or volume remained and
+    host ports 5060/udp, 15060-15061/udp, 8080/tcp and 8081/tcp were released.
+  - **One caveat on (b).** The `100` / `180` / `200 OK` / `BYE` relay lines are emitted at
+    `DEBUG`, so the `LOG_LEVEL: INFO` the compose file ships does not print them. They were
+    captured by recreating the stack with `LOG_LEVEL=DEBUG` for the `as` service
+    (`printf 'services:\n  as:\n    environment:\n      LOG_LEVEL: DEBUG\n' | docker compose
+    -f deploy/docker-compose.yml -f - up -d --force-recreate`); no repository file was
+    changed. At `INFO` the loop is visible in the Call-ID keyed trace that the same log and
+    the console read, not in the log stream.
 - **P3 — CI via GitHub Actions (held).** Push the repository and let the committed workflow run;
   record the run link/badge as the `AGENT.md` §4.8 CI-result evidence. On hold per maintainer.
   **[Optional · Status: Open]** (held — needs user to push to GitHub)

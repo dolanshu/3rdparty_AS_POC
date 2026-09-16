@@ -1340,11 +1340,256 @@ them), so no new capture artefact is committed for this item.
 - **`config/routing_rules.compose.yaml` duplicates the sample rule set.** The two files differ
   only in the `next_hops` catalogue addresses and nothing detects drift; registered in
   `docs/production-gaps.md` together with the build-time index re-resolution.
-- **Failure branches were not exercised in the compose stack.** P2 (the maintainer's manual
-  testing gate) still owes the by-hand check of `+999...` → `404` and premium → `603` on the
-  live stack.
+- **Failure branches were not exercised in the compose stack — RESOLVED by P2 (2026-09-17).**
+  Both branches were placed on the live compose stack: `+9991234567` → `404` / `AS-ROUTE-001`
+  (Call-ID `fff8f9d4d34122326a6f7ffe8f157959`) and `+861681234567` → `603` / `AS-ROUTE-002` /
+  rule `R-BLOCK-90` (Call-ID `cd3b2b396d1e7a29074f119ee6d1b318`). See the P2 entry below.
 - **A leftover local process stack was stopped to free the compose host ports.** The host had
   `uv run python -m as_app.main`, `... -m s_sbc_mock.main` and `... -m console.main` from an
   earlier local run holding 5060/udp, 15060–15061/udp, 8080 and 8081. They were asked to stop
   with `SIGTERM` (which the AS handles gracefully) before `docker compose up` could bind; they
   were not restarted afterwards.
+
+## Post-M4 — P2 Manual testing gate (2026-09-17)
+
+P2 (`docs/roadmap.md`) is the maintainer's **manual testing gate**: (a) the three services
+healthy via `docker ps`; (b) a full `INVITE -> 180 -> 200 OK -> BYE` loop observable in the AS
+logs; (c) the AS structured log showing the translated Request-URI and the matched rule name;
+(d) the console at `localhost:8081` rendering the live message flow; (e) the failure branches
+(`+999...` -> `404`, premium -> `603`) behaving correctly on the live stack.
+
+**The human sign-off was performed by the maintainer on 2026-09-17.** P2 is a human gate and
+the sign-off is theirs; no agent performed it. The evidence below is the machine record
+gathered for that review, and it covers item **(e)**, which was still open after P1.
+
+### 1. Command and output
+
+The stack was brought up with the documented P1 recipe; the three images built by P1 were still
+cached, so no rebuild was needed:
+
+```text
+$ docker compose -f deploy/docker-compose.yml up -d
+$ docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+NAMES                             STATUS                   PORTS
+third-party-as-poc-console-1      Up 11 seconds            0.0.0.0:8081->8081/tcp
+third-party-as-poc-s-sbc-mock-1   Up 14 seconds            0.0.0.0:15060-15061->15060-15061/udp
+third-party-as-poc-as-1           Up 14 seconds            0.0.0.0:5060->5060/udp, 0.0.0.0:8080->8080/tcp
+```
+
+The mock places its default `office-to-mobile` call on start-up, so no further command is
+needed for (b)/(c). Console and internal API from the host:
+
+```text
+$ curl -s http://127.0.0.1:8081/healthz
+{"status":"ok","component":"console"}                    # HTTP 200
+$ curl -s -o /dev/null -w "http_status=%{http_code} bytes=%{size_download}\n" http://127.0.0.1:8081/
+http_status=200 bytes=16754                              # title "3rd-party AS Console", 0 external refs
+$ curl -s http://127.0.0.1:8080/healthz
+{"status":"ok","version":"0.5.0","uptime_seconds":30.322,"rule_set_loaded":true}
+$ curl -s http://127.0.0.1:8080/api/v1/metrics
+{"calls_total":1,"calls_by_disposition":{"completed":1},"errors_by_code":{},
+ "rule_hits":{"R-MOB-CM-40":1},
+ "peer_status":{"172.28.0.3:15060:trunk":"reachable","s-sbc-primary:172.28.0.3:15061":"reachable"}}
+```
+
+The console container reaches the feed it renders from inside the compose network (the same
+request the page's browser-side JS makes):
+
+```text
+$ docker exec third-party-as-poc-console-1 python -c "...urllib... http://as:8080/api/v1/traces..."
+http 200 calls 3
+['cd3b2b396d1e7a29074f119ee6d1b318', 'fff8f9d4d34122326a6f7ffe8f157959',
+ '6d415fc865955c05162309eadd9416a5']
+```
+
+**(e) — the two failure branches, placed on the live stack.** `ALLOWED_PEERS` names the mock's
+fixed trunk address `172.28.0.3`, so an extra mock invocation has to come from that address:
+the mock service is stopped first (freeing the address) and the call is placed with
+`docker compose run`:
+
+```text
+$ docker compose -f deploy/docker-compose.yml stop s-sbc-mock
+$ docker compose -f deploy/docker-compose.yml run -d --name p2-nomatch s-sbc-mock \
+      python -m s_sbc_mock.main --listen-address 172.28.0.3 --listen-port 15061 \
+      --as-address 172.28.0.2 --as-port 5060 --call '+86216180001=+9991234567'
+# mock sees, on the trunk:  SIP/2.0 404 Not Found     Call-ID: fff8f9d4d34122326a6f7ffe8f157959
+
+$ docker compose -f deploy/docker-compose.yml run -d --name p2-premium s-sbc-mock \
+      python -m s_sbc_mock.main --listen-address 172.28.0.3 --listen-port 15061 \
+      --as-address 172.28.0.2 --as-port 5060 --call '+86216180001=+861681234567'
+# mock sees, on the trunk:  SIP/2.0 603 Decline       Call-ID: cd3b2b396d1e7a29074f119ee6d1b318
+
+$ curl -s http://127.0.0.1:8080/api/v1/metrics
+{"calls_total":3,"calls_by_disposition":{"completed":1,"no_match":1,"rejected":1},
+ "errors_by_code":{"AS-ROUTE-001":1,"AS-ROUTE-002":1},
+ "rule_hits":{"R-MOB-CM-40":1,"R-BLOCK-90":1}, "peer_status":{...:"reachable"}}
+
+$ docker rm -f p2-nomatch p2-premium
+```
+
+Teardown, and the check that nothing was left behind:
+
+```text
+$ docker compose -f deploy/docker-compose.yml down
+Container third-party-as-poc-s-sbc-mock-1 Removed
+Container third-party-as-poc-console-1 Removed
+Container third-party-as-poc-as-1 Removed
+Network as-poc-trunk Removed
+$ docker ps -a | grep third-party   -> no containers
+$ docker network ls | grep as-poc   -> no network
+$ docker volume ls  | grep as-poc   -> no volume
+$ ss -lunp | grep -E ':(5060|15060|15061)\b'   -> udp free
+$ ss -ltnp | grep -E ':(8080|8081)\b'          -> tcp free
+```
+
+Gates after the change (documentation only — no `src/` change, `uv.lock` untouched, md5
+`ab102d7433c54d02557c380cee9435d4` before and after):
+
+```text
+$ uv run ruff format --check .   -> 67 files already formatted
+$ uv run ruff check .            -> All checks passed!
+$ uv run mypy                    -> Success: no issues found in 20 source files
+$ uv run pytest tests -q         -> 120 passed in 13.67s
+```
+
+**One caveat on (b).** The `100` / `180` / `200 OK` / `BYE` relay lines are emitted at `DEBUG`,
+and the compose file ships `LOG_LEVEL: INFO`, so the documented recipe does not print them.
+They were captured with the `as` service recreated at `LOG_LEVEL=DEBUG`:
+
+```text
+$ printf 'services:\n  as:\n    environment:\n      LOG_LEVEL: DEBUG\n' \
+    | docker compose -f deploy/docker-compose.yml -f - up -d --force-recreate
+```
+
+No repository file was changed by this — the override came from stdin. At `INFO` the same loop
+is present in the Call-ID keyed trace (`GET /api/v1/traces/{call_id}`) that the console reads,
+just not in the log stream.
+
+### 2. Log excerpt
+
+Success call, AS structured log (`LOG_LEVEL=DEBUG`), Call-ID
+**`6d415fc865955c05162309eadd9416a5`** — the full loop and, in `call translated`, the
+translated number and the matched rule name (**c**):
+
+```text
+{"timestamp": "2026-09-16T21:42:53+0000", "level": "info", "module": "call_controller",
+ "call_id": "6d415fc865955c05162309eadd9416a5", "direction": "in", "peer": "172.28.0.3:15060",
+ "event": "invite received on the trunk", "method": "INVITE", "called_number": "+8613800138000"}
+{"timestamp": "2026-09-16T21:42:53+0000", "level": "info", "module": "call_controller",
+ "call_id": "6d415fc865955c05162309eadd9416a5", "direction": "internal", "peer": "-",
+ "event": "routing decision taken", "rule_id": "R-MOB-CM-40", "disposition": "route",
+ "called_number": "+8613800138000", "translated_number": "013800138000"}
+{"timestamp": "2026-09-16T21:42:53+0000", "level": "info", "module": "call_controller",
+ "call_id": "6d415fc865955c05162309eadd9416a5", "direction": "internal", "peer": "-",
+ "event": "call translated", "rule_id": "R-MOB-CM-40", "called_number": "+8613800138000",
+ "translated_number": "013800138000", "target_format": "national",
+ "next_hops": "s-sbc-primary,s-sbc-failover"}
+{"timestamp": "2026-09-16T21:42:53+0000", "level": "info", "module": "call_controller",
+ "call_id": "6d415fc865955c05162309eadd9416a5", "direction": "out", "peer": "172.28.0.3:15061",
+ "event": "invite originated towards the next hop", "method": "INVITE",
+ "called_number": "013800138000", "next_hop": "s-sbc-primary", "rule_id": "R-MOB-CM-40"}
+{"timestamp": "2026-09-16T21:42:53+0000", "level": "debug", "module": "call_controller",
+ "call_id": "6d415fc865955c05162309eadd9416a5", "direction": "in", "peer": "172.28.0.3:15061",
+ "event": "100 Trying on the next-hop leg", "method": "100", "leg": "next_hop"}
+{"timestamp": "2026-09-16T21:42:53+0000", "level": "debug", "module": "call_controller",
+ "call_id": "6d415fc865955c05162309eadd9416a5", "direction": "in", "peer": "172.28.0.3:15061",
+ "event": "180 Ringing on the next-hop leg", "method": "180", "leg": "next_hop"}
+{"timestamp": "2026-09-16T21:42:53+0000", "level": "debug", "module": "call_controller",
+ "call_id": "6d415fc865955c05162309eadd9416a5", "direction": "out", "peer": "172.28.0.3:15060",
+ "event": "180 Ringing relayed to the trunk leg", "method": "180", "leg": "trunk"}
+{"timestamp": "2026-09-16T21:42:53+0000", "level": "debug", "module": "call_controller",
+ "call_id": "6d415fc865955c05162309eadd9416a5", "direction": "in", "peer": "172.28.0.3:15061",
+ "event": "200 OK on the next-hop leg", "method": "200", "leg": "next_hop"}
+{"timestamp": "2026-09-16T21:42:53+0000", "level": "debug", "module": "call_controller",
+ "call_id": "6d415fc865955c05162309eadd9416a5", "direction": "in", "peer": "172.28.0.3:15061",
+ "event": "call released on the next-hop leg", "method": "BYE", "leg": "next_hop"}
+{"timestamp": "2026-09-16T21:42:53+0000", "level": "info", "module": "call_controller",
+ "call_id": "6d415fc865955c05162309eadd9416a5", "direction": "internal", "peer": "-",
+ "event": "call finished", "disposition": "completed"}
+```
+
+The translated Request-URI as received by the mock's core side (same Call-ID):
+
+```text
+2026-09-16 21:42:53,040 INFO s_sbc_mock.uas core side received INVITE \
+  call_id=6d415fc865955c05162309eadd9416a5 ruri=sip:013800138000@172.28.0.3:15061 \
+  called=013800138000
+```
+
+Failure branch `404`, AS structured log, Call-ID **`fff8f9d4d34122326a6f7ffe8f157959`**:
+
+```text
+{"timestamp": "2026-09-16T21:43:40+0000", "level": "info", "module": "call_controller",
+ "call_id": "fff8f9d4d34122326a6f7ffe8f157959", "direction": "in", "peer": "172.28.0.3:15060",
+ "event": "invite received on the trunk", "method": "INVITE", "called_number": "+9991234567"}
+{"timestamp": "2026-09-16T21:43:40+0000", "level": "info", "module": "call_controller",
+ "call_id": "fff8f9d4d34122326a6f7ffe8f157959", "direction": "internal", "peer": "-",
+ "event": "routing decision taken", "rule_id": "", "disposition": "no_match",
+ "called_number": "+9991234567", "translated_number": ""}
+{"timestamp": "2026-09-16T21:43:40+0000", "level": "warning", "module": "call_controller",
+ "call_id": "fff8f9d4d34122326a6f7ffe8f157959", "direction": "out", "peer": "172.28.0.3:15060",
+ "event": "call rejected by routing policy", "method": "404",
+ "error_code": "AS-ROUTE-001", "sip_status": "404",
+ "error_detail": "no routing rule matched the called number", "rule_id": ""}
+```
+
+Failure branch `603`, AS structured log, Call-ID **`cd3b2b396d1e7a29074f119ee6d1b318`**:
+
+```text
+{"timestamp": "2026-09-16T21:44:02+0000", "level": "info", "module": "call_controller",
+ "call_id": "cd3b2b396d1e7a29074f119ee6d1b318", "direction": "in", "peer": "172.28.0.3:15060",
+ "event": "invite received on the trunk", "method": "INVITE", "called_number": "+861681234567"}
+{"timestamp": "2026-09-16T21:44:02+0000", "level": "info", "module": "call_controller",
+ "call_id": "cd3b2b396d1e7a29074f119ee6d1b318", "direction": "internal", "peer": "-",
+ "event": "routing decision taken", "rule_id": "R-BLOCK-90", "disposition": "reject",
+ "called_number": "+861681234567", "translated_number": ""}
+{"timestamp": "2026-09-16T21:44:02+0000", "level": "warning", "module": "call_controller",
+ "call_id": "cd3b2b396d1e7a29074f119ee6d1b318", "direction": "out", "peer": "172.28.0.3:15060",
+ "event": "call rejected by routing policy", "method": "603",
+ "error_code": "AS-ROUTE-002", "sip_status": "603",
+ "error_detail": "premium rate numbers are blocked by office policy", "rule_id": "R-BLOCK-90"}
+```
+
+### 3. CI
+
+| Layer | Job | Result |
+| --- | --- | --- |
+| lint | `lint` | **not observed.** No CI runner is reachable from this environment. Executed locally after the change: `uv run ruff format --check .` (`67 files already formatted`) and `uv run ruff check .` (`All checks passed!`). |
+| type | `type-check` | **not observed.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit / integration / e2e | `unit`, `integration`, `e2e` | **not observed.** `uv run pytest tests -q` executed locally: `120 passed in 13.67s`. |
+| docker | — | **not implemented.** The `docker` job in `.github/workflows/ci.yml` is still the commented-out TODO; the P2 stack was run locally only. |
+
+### 4. Capture
+
+`n/a` — P2 changes no wire behaviour and commits no capture (`AGENT.md` section 13). The
+message-level evidence is the mock's SIP log quoted above: `SIP/2.0 404 Not Found` for the
+no-match call and `SIP/2.0 603 Decline` for the premium call, each with its Call-ID, plus the
+translated `ruri=sip:013800138000@172.28.0.3:15061` of the success call.
+
+### Item results
+
+| Item | Criterion | Result | Evidence |
+| --- | --- | --- | --- |
+| P2 (a) | `as` / `s-sbc-mock` / `console` all healthy via `docker ps` | **pass** | 1 (`docker ps`: all three `Up` with the documented port matrix) |
+| P2 (b) | Full `INVITE -> 180 -> 200 OK -> BYE` loop in the AS logs | **pass** | 2 (Call-ID `6d415fc865955c05162309eadd9416a5`, `LOG_LEVEL=DEBUG`), 1 (the `LOG_LEVEL=DEBUG` recreate command; at the shipped `INFO` the loop is in the trace, not the log stream — see the caveat in §1) |
+| P2 (c) | Structured log shows the translated Request-URI and the matched rule name | **pass** | 2 (`call translated`: `rule_id: R-MOB-CM-40`, `+8613800138000` -> `013800138000`; mock `ruri=sip:013800138000@172.28.0.3:15061`), 4 (mock log line) |
+| P2 (d) | Console at `localhost:8081` renders the live message flow | **pass (page and feed verified; the browser view is the maintainer's)** | 1 (`GET :8081/healthz` -> `{"status":"ok","component":"console"}`, page HTTP 200 / 16754 bytes / 0 external refs; console container -> `http://as:8080/api/v1/traces` -> HTTP 200, 3 calls) |
+| P2 (e) | Failure branches `+999...` -> `404`, premium -> `603` on the live stack | **pass** | 1 (the two `docker compose run` invocations and the resulting metrics), 2 (Call-IDs `fff8f9d4d34122326a6f7ffe8f157959` / `AS-ROUTE-001` and `cd3b2b396d1e7a29074f119ee6d1b318` / `AS-ROUTE-002` / `R-BLOCK-90`), 4 (mock SIP log: `404 Not Found`, `603 Decline`) |
+
+**Human sign-off: performed by the maintainer on 2026-09-17.** No agent performed or can
+perform it; the table above is the machine evidence gathered for that review.
+
+### Open items raised by this run
+
+- **Browser-driven console verification is still open (P4).** The console page and the feed it
+  consumes were verified over HTTP, and the maintainer viewed the live flow at `localhost:8081`
+  as part of their sign-off, but no automated browser drove the UI. P4 remains open.
+- **Placing a non-default call on the compose stack needs the mock's fixed address.**
+  `ALLOWED_PEERS: 172.28.0.3` names the mock's static trunk IP, so an extra invocation has to
+  come from that address: `docker compose stop s-sbc-mock` first, then `docker compose run`
+  with `--listen-address 172.28.0.3`. Worth a line in `docs/operations/runbook.md` if failure
+  branches are demonstrated again.
+- **The AS log level hides the relay lines.** At the shipped `LOG_LEVEL: INFO` the
+  `100` / `180` / `200 OK` / `BYE` relay events are `DEBUG` and never reach the log stream, so
+  item (b) needs either `LOG_LEVEL=DEBUG` or the Call-ID keyed trace. Not changed here: the
+  compose default is deliberately quiet.

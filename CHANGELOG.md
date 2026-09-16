@@ -79,6 +79,20 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   `mypy` and `pytest tests -q`.
 - `uv.lock` is unchanged by a mirror build: its md5 is identical before and after a build with
   `PIP_INDEX_URL` set to a mirror, and `git status` on it stays clean.
+- **P2 — Manual testing gate passed (2026-09-17, `docs/roadmap.md`).** The **human sign-off
+  was performed by the maintainer on 2026-09-17**; P2 is a human gate and no agent performed
+  it. The machine evidence for the review was gathered from the live stack and covers all five
+  items, including (e), which was still open after P1: (a) all three services `Up` in
+  `docker ps`; (b)+(c) the default call, Call-ID `6d415fc865955c05162309eadd9416a5`, shows the
+  full `INVITE -> 100 -> 180 -> 200 OK -> BYE` loop in the AS structured log with
+  `call translated` (`rule_id: R-MOB-CM-40`, `+8613800138000` -> `013800138000`) and the
+  translated Request-URI `sip:013800138000@172.28.0.3:15061` on the wire; (d) the console
+  answers `GET :8081/healthz` and serves its page (HTTP 200, 16754 bytes, no external
+  references) and reaches `http://as:8080/api/v1/traces`; (e) both failure branches were placed
+  on the live stack — `+9991234567` -> `404` / `AS-ROUTE-001` / `no_match`
+  (Call-ID `fff8f9d4d34122326a6f7ffe8f157959`) and `+861681234567` -> `603` / `AS-ROUTE-002` /
+  `R-BLOCK-90` (Call-ID `cd3b2b396d1e7a29074f119ee6d1b318`). `docker compose down` left no
+  container, network or volume behind. Evidence in `docs/acceptance/report.md`.
 
 ### Changed
 

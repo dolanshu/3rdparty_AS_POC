@@ -459,6 +459,15 @@ revert (adding a dependency, changing a schema, deleting code, committing); (c) 
 turn has already run, expect to revert the member's uncommitted work and have it re-do,
 because the message that would have prevented it was never seen in time.
 
+**Operating with the lag (main-agent practice).** Treat every message as asynchronous and
+possibly late: (a) send decisions when the member is idle — it normally reports at the end
+of a turn, so reply then; (b) expect a decision sent just after the member finished to be
+read only on its next turn, so re-affirm and have it apply the change if it already produced
+a result; (c) make corrections self-contained and mark them as superseding earlier
+instructions, since a member may read a stale "hold" and a new decision in the same turn;
+(d) when several decisions are pending, send one consolidated instruction rather than a
+stream of small ones.
+
 ## 15. Roadmap
 
 **Status board: `docs/roadmap.md`.** That file is the live record of scope, status,

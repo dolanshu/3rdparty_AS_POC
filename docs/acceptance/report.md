@@ -1180,3 +1180,171 @@ now gitignored, reproduced with `make capture`, and only
 - **`AGENT.md` §4.7 "release notes template" — RESOLVED in M4.** The maintainer chose to drop
   the wording: the phrase was removed from §4.7, and the per-version `CHANGELOG.md` nodes are
   the release notes. No separate template file is required.
+
+## Post-M4 — P1 Docker compose demo (2026-09-16)
+
+P1 (`docs/roadmap.md`) is a Post-M4 item, not a milestone: it makes the three-service
+`docker compose` stack actually complete a call, closing the largest open delivery gap. It
+changes no product behaviour an M0–M4 acceptance item covers, so no milestone item was
+reopened. The evidence is recorded here in the four kinds this report uses, following the
+Post-M2 maintenance entry. The full narrative is in the P1 entry of `docs/roadmap.md`.
+
+### 1. Command and output
+
+The images had **never been built** before this run, so the build is part of the evidence:
+
+```text
+$ PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+      docker compose -f deploy/docker-compose.yml build
+...
+#20 [as] RUN --mount=type=cache,target=/root/.cache/uv  if [ "${PIP_INDEX_URL}" = "https://pypi.org/simple" ]; then ... fi
+#20 13.44 Installed 48 packages in 474ms
+...
+ Image third-party-as-poc-as Built
+ Image third-party-as-poc-console Built
+ Image third-party-as-poc-s-sbc-mock Built
+
+$ docker compose -f deploy/docker-compose.yml up -d
+$ docker compose -f deploy/docker-compose.yml ps
+NAME                              IMAGE                           COMMAND                  SERVICE      STATUS          PORTS
+third-party-as-poc-as-1           third-party-as-poc-as           "python -m as_app.ma…"   as           Up 54 seconds   0.0.0.0:5060->5060/udp, ... 0.0.0.0:8080->8080/tcp, ...
+third-party-as-poc-console-1      third-party-as-poc-console      "python -m console.m…"   console      Up 55 seconds   0.0.0.0:8081->8081/tcp, ...
+third-party-as-poc-s-sbc-mock-1   third-party-as-poc-s-sbc-mock   "python -m s_sbc_moc…"   s-sbc-mock   Up 54 seconds   0.0.0.0:15060-15061->15060-15061/udp, ...
+```
+
+The mock places its default `office-to-mobile` call
+(`+86216180001` → `+8613800138000`) on start-up, so no further command is needed. The mock's
+SIP message log for that call (one Call-ID, both legs):
+
+```text
+SENDING   to 172.28.0.2:5060     INVITE sip:+8613800138000@172.28.0.2 SIP/2.0   (trunk leg in)
+RECEIVED  from 172.28.0.2:5060   SIP/2.0 100 Trying
+RECEIVED  from 172.28.0.2:5060   INVITE sip:013800138000@172.28.0.3:15061 SIP/2.0   (core leg, translated R-URI)
+SENDING   to 172.28.0.2:5060     SIP/2.0 100 Trying
+SENDING   to 172.28.0.2:5060     SIP/2.0 180 Ringing
+RECEIVED  from 172.28.0.2:5060   SIP/2.0 180 Ringing
+SENDING   to 172.28.0.2:5060     SIP/2.0 200 OK
+RECEIVED  from 172.28.0.2:5060   ACK sip:172.28.0.3:15061 SIP/2.0
+RECEIVED  from 172.28.0.2:5060   SIP/2.0 200 OK
+SENDING   to 172.28.0.2:5060     ACK sip:172.28.0.2 SIP/2.0
+SENDING   to 172.28.0.2:5060     BYE sip:+86216180001@172.28.0.2 SIP/2.0
+RECEIVED  from 172.28.0.2:5060   SIP/2.0 200 OK
+RECEIVED  from 172.28.0.2:5060   BYE sip:+86216180001@172.28.0.3:15060 SIP/2.0
+SENDING   to 172.28.0.2:5060     SIP/2.0 200 OK
+```
+
+Service checks from the host, and the teardown:
+
+```text
+$ curl -s http://127.0.0.1:8081/healthz
+{"status":"ok","component":"console"}                       # HTTP 200; page GET / -> HTTP 200, 16754 bytes
+$ curl -s http://127.0.0.1:8080/healthz
+{"status":"ok","version":"0.5.0","uptime_seconds":45.498,"rule_set_loaded":true}
+$ curl -s http://127.0.0.1:8080/api/v1/metrics
+{"calls_total":1,"calls_by_disposition":{"completed":1},"errors_by_code":{},
+ "rule_hits":{"R-MOB-CM-40":1},
+ "peer_status":{"172.28.0.3:15060:trunk":"reachable","s-sbc-primary:172.28.0.3:15061":"reachable"}}
+$ docker compose -f deploy/docker-compose.yml down
+... Network as-poc-trunk Removed
+```
+
+`down` removed every container and the `as-poc-trunk` network and released the five host ports
+(5060/udp, 15060–15061/udp, 8080, 8081): no stray container, network or volume remained.
+
+Running the stack exposed three defects, all fixed in `deploy/`/`config/` with **no `src/`
+change**: the container command ran the system interpreter instead of `/app/.venv`; the build
+could not reach its packages (`uv sync --frozen` installs the `files.pythonhosted.org` URLs
+recorded in `uv.lock` and ignores the configured index — measured ≈15 kB/s from this machine);
+and the AS originated the second leg to the rule set's `127.0.0.1` hops, which are unreachable
+across containers. Details and rationale: `docs/operations/deployment.md` §4.2 and §6.
+
+### 2. Log excerpt
+
+AS structured log (`LOG_STRUCTURED=true`), Call-ID **`e48cb46795675ab0f76f5578cf5b4449`**
+(abridged to the fields that matter; the log is JSON one-line-per-event):
+
+```text
+{"timestamp": "2026-09-16T13:00:00+0000", ..., "event": "application server starting", "version": "0.5.0", "listen": "172.28.0.2:5060", "next_hop": "172.28.0.3:15061"}
+{"timestamp": "2026-09-16T13:00:00+0000", ..., "event": "startup self-check passed", "rules_file": "config/routing_rules.compose.yaml"}
+{"timestamp": "2026-09-16T13:00:00+0000", ..., "event": "rule set active", "rule_set": "sample-office-routing-compose", "rules": "17", "next_hops": "6"}
+{"timestamp": "2026-09-16T13:00:00+0000", ..., "event": "signalling stack bound", "listen": "172.28.0.2:5060", "next_hop": "172.28.0.3:15061", "allowed_peers": "172.28.0.3"}
+{"timestamp": "2026-09-16T13:00:01+0000", "module": "call_controller", "call_id": "e48cb46795675ab0f76f5578cf5b4449", "direction": "in", "peer": "172.28.0.3:15060", "event": "invite received on the trunk", "method": "INVITE", "called_number": "+8613800138000"}
+{"timestamp": "2026-09-16T13:00:01+0000", ..., "call_id": "e48cb46795675ab0f76f5578cf5b4449", "event": "routing decision taken", "rule_id": "R-MOB-CM-40", "disposition": "route", "called_number": "+8613800138000", "translated_number": "013800138000"}
+{"timestamp": "2026-09-16T13:00:01+0000", ..., "call_id": "e48cb46795675ab0f76f5578cf5b4449", "event": "call translated", "rule_id": "R-MOB-CM-40", "called_number": "+8613800138000", "translated_number": "013800138000", "target_format": "national", "next_hops": "s-sbc-primary,s-sbc-failover"}
+{"timestamp": "2026-09-16T13:00:01+0000", ..., "call_id": "e48cb46795675ab0f76f5578cf5b4449", "direction": "out", "peer": "172.28.0.3:15061", "event": "invite originated towards the next hop", "method": "INVITE", "called_number": "013800138000", "next_hop": "s-sbc-primary", "rule_id": "R-MOB-CM-40"}
+{"timestamp": "2026-09-16T13:00:02+0000", ..., "call_id": "e48cb46795675ab0f76f5578cf5b4449", "event": "call finished", "disposition": "completed"}
+```
+
+The core-leg INVITE as received by the mock's UAS — translated Request-URI, and a `Via` that is
+never `0.0.0.0`:
+
+```text
+INVITE sip:013800138000@172.28.0.3:15061 SIP/2.0
+Via: SIP/2.0/UDP 172.28.0.2:5060;rport;branch=z9hG4bK8d6112fac383948074292278774782a5
+From: <sip:+86216180001@172.28.0.2>;tag=59e4853bac541138e0669a379b357fa6
+To: <sip:013800138000@172.28.0.3>
+Call-ID: e48cb46795675ab0f76f5578cf5b4449
+CSeq: 1363193787 INVITE
+User-Agent: 3rd-party AS POC
+P-Asserted-Identity: <sip:+86216180001@ims.example.invalid>
+Privacy: none
+P-charging-vector: icid-value=poc-office-to-mobile;icid-generated-at=ims.example.invalid
+P-visited-network-id: ims.example.invalid
+Subject: office-to-mobile
+Organization: office-to-mobile
+Priority: normal
+Content-Length: 230
+```
+
+The SDP body is passed through verbatim
+(`o=- 4101 4101 IN IP4 192.0.2.10` … `m=audio 40000 RTP/AVP 0 8 101`), and the ISC headers
+survive the B2BUA hop (`P-Charging-Vector` leaves capitalised as `P-charging-vector`, the
+sippy behaviour recorded in the M1 handover notes). The same call is readable through the AS
+internal API — `GET /api/v1/traces/e48cb46795675ab0f76f5578cf5b4449` returns the Call-ID keyed
+trace: `invite received from the trunk` → `route: China Mobile subscribers, E.164 in and
+national format out` (`rule_id: R-MOB-CM-40`, `translated_number: 013800138000`) →
+`invite originated towards the next hop` → `100 Trying` → …
+
+### 3. CI
+
+| Layer | Job | Result |
+| --- | --- | --- |
+| lint | `lint` | **not observed.** No CI runner is reachable from this environment. Executed locally after the change: `uv run ruff format --check .` (`67 files already formatted`) and `uv run ruff check .` (`All checks passed!`). |
+| type | `type-check` | **not observed.** `uv run mypy` executed locally: `Success: no issues found in 20 source files`. |
+| unit / integration / e2e | `unit`, `integration`, `e2e` | **not observed.** Covered by the local run below. |
+| docker | — | **not implemented.** The `docker` job in `.github/workflows/ci.yml` is still the commented-out TODO; P1 was built and run locally only. |
+
+```text
+$ uv run ruff format --check .   -> 67 files already formatted
+$ uv run ruff check .            -> All checks passed!
+$ uv run mypy                    -> Success: no issues found in 20 source files
+$ uv run pytest tests -q         -> 120 passed in 13.32s
+```
+
+### 4. Capture
+
+`n/a` — P1 changes no wire behaviour. The SIP exchange above is the same flow the M0–M4 runs
+and `make capture` already record, reproduced over the compose network instead of loopback;
+the mock's SIP message log quoted in §1 is the record. `AGENT.md` section 13 forbids
+committing captures and the generated samples stay gitignored (`make capture` reproduces
+them), so no new capture artefact is committed for this item.
+
+### Open items raised by this run
+
+- **The public-PyPI image build path was not run to completion here.** Only the mirror build was
+  exercised (`PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`), because
+  `files.pythonhosted.org` delivers ≈15 kB/s from this machine and a single 10 MB wheel exceeds
+  uv's HTTP timeout. The default path is unchanged in kind — the Dockerfiles still run
+  `uv sync --frozen` against public PyPI when `PIP_INDEX_URL` is the default — but it is
+  **verified by inspection, not by a completed build**.
+- **`config/routing_rules.compose.yaml` duplicates the sample rule set.** The two files differ
+  only in the `next_hops` catalogue addresses and nothing detects drift; registered in
+  `docs/production-gaps.md` together with the build-time index re-resolution.
+- **Failure branches were not exercised in the compose stack.** P2 (the maintainer's manual
+  testing gate) still owes the by-hand check of `+999...` → `404` and premium → `603` on the
+  live stack.
+- **A leftover local process stack was stopped to free the compose host ports.** The host had
+  `uv run python -m as_app.main`, `... -m s_sbc_mock.main` and `... -m console.main` from an
+  earlier local run holding 5060/udp, 15060–15061/udp, 8080 and 8081. They were asked to stop
+  with `SIGTERM` (which the AS handles gracefully) before `docker compose up` could bind; they
+  were not restarted afterwards.

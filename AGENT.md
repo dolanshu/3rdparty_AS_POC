@@ -537,7 +537,8 @@ change is a maintainer decision, not a local edit.
 2. Update `docs/roadmap.md`: status, handover notes, open items and the entry state for
    the next milestone
 3. Update `CHANGELOG.md` and `VERSION`, commit with the milestone scope prefix
-   (`feat(m2): ...`), and create the tag `v<version>-m<n>`
+   (`feat(m2): ...`). Do not create the tag: tagging `v<version>-m<n>` is the
+   maintainer's step (agents do not tag)
 4. Write down anything a fresh conversation would otherwise have to re-derive —
    conversation context is not a handover artefact
 
@@ -553,5 +554,6 @@ change is a maintainer decision, not a local edit.
 - [ ] New POC shortcuts registered in `docs/production-gaps.md`
 - [ ] `AGENT.md` and `docs/README.md` updated if anything structural changed
 - [ ] Acceptance items for the milestone carried out with evidence per §4.8
-- [ ] Version bumped and tagged
+- [ ] Version bumped (the tag `v<version>-m<n>` is the maintainer's step; agents do
+      not tag)
 - [ ] No secrets, certificates or real traffic captures committed

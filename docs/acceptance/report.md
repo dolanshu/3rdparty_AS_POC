@@ -635,10 +635,10 @@ from the M1 `http.server` scaffolding to a FastAPI application served by uvicorn
 thread (ADR-0002). The console is a separate process (`src/console/`) serving a dark
 operations UI with no third-party front-end libraries.
 
-**Version field under review (M4).** The `version` values recorded in this section are the
-milestone-time values and are **pending a maintainer decision** on the AS runtime version
-source (`src/as_app/__init__.py` hardcodes `__version__` and does not track `VERSION`). They
-will be corrected once that decision lands; see the M4 section open items.
+**Corrected at M4:** the `/healthz` and startup-log `version` in this section read `0.1.0`,
+not `0.4.0`. At M3 the runtime version was hardcoded in `src/as_app/__init__.py`, so the code
+really served `0.1.0`; `0.1.0` is the honest historical value. M4 later fixed the runtime
+version source to track `VERSION` (see the M4 section).
 
 ### 1. Command and output
 
@@ -784,7 +784,7 @@ AS startup with the internal API listening (FastAPI/uvicorn on a daemon thread):
 ```text
 {"timestamp": "2026-09-16T...", "level": "info", "module": "main",
  "call_id": "-", "direction": "internal", "peer": "-",
- "event": "application server starting", "version": "0.4.0",
+ "event": "application server starting", "version": "0.1.0",
  "listen": "127.0.0.1:5060", "next_hop": "127.0.0.1:5061"}
 {"timestamp": "2026-09-16T...", "level": "info", "module": "main",
  "call_id": "-", "direction": "internal", "peer": "-",
@@ -868,14 +868,14 @@ $ uv run mypy
 Success: no issues found in 20 source files
 
 $ uv run pytest tests -q
-118 passed in 12.71s
+119 passed in 12.94s
 ```
 
 Per layer (same code):
 
 ```text
 $ uv run pytest tests/unit -m unit -q
-97 passed in 0.70s
+98 passed in 0.68s
 
 $ uv run pytest tests/integration -m integration -q
 16 passed in 10.06s
@@ -885,11 +885,13 @@ $ uv run pytest tests/e2e -m e2e -q
 ```
 
 Clean-checkout rehearsal (the DoD item "`make demo` passes from a clean checkout"): the
-committed HEAD (`7c0b687`) was cloned into a fresh directory and exercised there.
+version-fix commit (`c377fb3`) was cloned into a fresh directory and exercised there.
 
 ```text
 $ git clone . /tmp/m4_clean && cd /tmp/m4_clean
 $ cat VERSION
+0.5.0
+$ uv run python -c "import as_app; print(as_app.__version__)"
 0.5.0
 $ uv sync --frozen
 Installed 49 packages ...                                        # exit 0
@@ -902,7 +904,7 @@ released    : True
 demo result: call answered and released; number translation applied on the wire
 exit code: 0
 $ uv run pytest tests -q
-118 passed in 13.08s
+119 passed in 13.10s
 $ uv run ruff format --check .
 66 files already formatted
 $ uv run mypy
@@ -1048,9 +1050,7 @@ Console (`docs/demo-script.md` section 6), exercised with a live call this time:
 # terminal 3: make console  (console on 127.0.0.1:8081)
 
 $ curl -s http://127.0.0.1:8080/healthz
-{"status":"ok","uptime_seconds":15.663,"rule_set_loaded":true}
-  # the `version` field is omitted on purpose: the AS runtime version source is pending a
-  # maintainer decision (see the open items). The command answered status "ok".
+{"status":"ok","version":"0.5.0","uptime_seconds":15.671,"rule_set_loaded":true}
 
 $ curl -s http://127.0.0.1:8080/api/v1/metrics
 {"calls_total":1,"calls_by_disposition":{"completed":1},"errors_by_code":{},
@@ -1059,7 +1059,7 @@ $ curl -s http://127.0.0.1:8080/api/v1/metrics
 
 $ curl -s http://127.0.0.1:8080/api/v1/traces
 calls: 1
-call_ids: ['dadca2555b68ca6951ef1b68766d0981']
+call_ids: ['73c7eaceb15aee57de78308dd015c6c9']
 
 $ curl -s -o /dev/null -w "http_status=%{http_code}\n" http://127.0.0.1:8081/
 http_status=200
@@ -1069,34 +1069,36 @@ The console page (solo run) also showed the title `3rd-party AS Console`, **0** 
 `<script src>` / `<link href>` references, and the injected AS API URL
 `http://127.0.0.1:8080`.
 
-**Open, pending a maintainer decision: version handling.** `src/as_app/__init__.py`
-hardcodes the AS `__version__`, so the value served on `/healthz` and written to the startup
-log does not track `VERSION`. The maintainer is deciding whether to fix the code or to
-register the drift as an accepted gap; the version-related wording in this report is held
-until that decision lands. See the open items.
+**Version handling — fixed in M4.** `src/as_app/__init__.py` used to hardcode
+`__version__ = "0.1.0"`, so `/healthz` and the startup log served a stale version. M4 now
+derives `__version__` from the repository `VERSION` file, and the baseline test
+`test_runtime_version_matches_the_version_file` asserts it equals `VERSION` so it cannot
+drift again. The evidence above was re-taken after the fix and shows `version: "0.5.0"`
+(equal to `VERSION`). The "installed wheel does not carry `VERSION`" caveat is registered in
+`docs/production-gaps.md`.
 
 ### 2. Log excerpt
 
 The AS process from the console run above (`make dev`, `LOG_LEVEL=INFO`), Call-ID
-`dadca2555b68ca6951ef1b68766d0981`, ending with the graceful `SIGTERM` shutdown:
+`73c7eaceb15aee57de78308dd015c6c9`, ending with the graceful `SIGTERM` shutdown:
 
 ```text
-{"timestamp": "2026-09-16T07:48:11+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "application server starting", "version": "0.1.0", "listen": "127.0.0.1:5060", "next_hop": "127.0.0.1:5061"}
-{"timestamp": "2026-09-16T07:48:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "startup self-check passed", "rules_file": "config/routing_rules.yaml"}
-{"timestamp": "2026-09-16T07:48:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "rule set active", "rule_set": "sample-office-routing", "rules": "17", "next_hops": "6"}
-{"timestamp": "2026-09-16T07:48:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "signalling stack bound", "listen": "127.0.0.1:5060", "next_hop": "127.0.0.1:5061", "allowed_peers": "127.0.0.1"}
-{"timestamp": "2026-09-16T07:48:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "internal api listening", "address": "127.0.0.1:8080"}
-{"timestamp": "2026-09-16T07:48:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "sippy event loop running", "rules_file": "config/routing_rules.yaml", "reload_poll_seconds": "1.0"}
-{"timestamp": "2026-09-16T07:48:20+0800", "level": "info", "module": "call_controller", "call_id": "dadca2555b68ca6951ef1b68766d0981", "direction": "in", "peer": "127.0.0.1:15060", "event": "invite received on the trunk", "method": "INVITE", "called_number": "+8613800138000"}
-{"timestamp": "2026-09-16T07:48:20+0800", "level": "info", "module": "call_controller", "call_id": "dadca2555b68ca6951ef1b68766d0981", "direction": "internal", "peer": "-", "event": "routing decision taken", "rule_id": "R-MOB-CM-40", "disposition": "route", "called_number": "+8613800138000", "translated_number": "013800138000"}
-{"timestamp": "2026-09-16T07:48:20+0800", "level": "info", "module": "call_controller", "call_id": "dadca2555b68ca6951ef1b68766d0981", "direction": "internal", "peer": "-", "event": "call translated", "rule_id": "R-MOB-CM-40", "called_number": "+8613800138000", "translated_number": "013800138000", "target_format": "national", "next_hops": "s-sbc-primary,s-sbc-failover"}
-{"timestamp": "2026-09-16T07:48:20+0800", "level": "info", "module": "call_controller", "call_id": "dadca2555b68ca6951ef1b68766d0981", "direction": "out", "peer": "127.0.0.1:15061", "event": "invite originated towards the next hop", "method": "INVITE", "called_number": "013800138000", "next_hop": "s-sbc-primary", "rule_id": "R-MOB-CM-40"}
-{"timestamp": "2026-09-16T07:48:20+0800", "level": "info", "module": "call_controller", "call_id": "dadca2555b68ca6951ef1b68766d0981", "direction": "internal", "peer": "-", "event": "call finished", "disposition": "completed"}
-{"timestamp": "2026-09-16T07:48:35+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "shutdown complete", "reason": "signal SIGTERM", "grace_seconds": "5.0"}
+{"timestamp": "2026-09-16T08:06:09+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "application server starting", "version": "0.5.0", "listen": "127.0.0.1:5060", "next_hop": "127.0.0.1:5061"}
+{"timestamp": "2026-09-16T08:06:09+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "startup self-check passed", "rules_file": "config/routing_rules.yaml"}
+{"timestamp": "2026-09-16T08:06:09+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "rule set active", "rule_set": "sample-office-routing", "rules": "17", "next_hops": "6"}
+{"timestamp": "2026-09-16T08:06:09+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "signalling stack bound", "listen": "127.0.0.1:5060", "next_hop": "127.0.0.1:5061", "allowed_peers": "127.0.0.1"}
+{"timestamp": "2026-09-16T08:06:09+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "internal api listening", "address": "127.0.0.1:8080"}
+{"timestamp": "2026-09-16T08:06:09+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "sippy event loop running", "rules_file": "config/routing_rules.yaml", "reload_poll_seconds": "1.0"}
+{"timestamp": "2026-09-16T08:06:17+0800", "level": "info", "module": "call_controller", "call_id": "73c7eaceb15aee57de78308dd015c6c9", "direction": "in", "peer": "127.0.0.1:15060", "event": "invite received on the trunk", "method": "INVITE", "called_number": "+8613800138000"}
+{"timestamp": "2026-09-16T08:06:17+0800", "level": "info", "module": "call_controller", "call_id": "73c7eaceb15aee57de78308dd015c6c9", "direction": "internal", "peer": "-", "event": "routing decision taken", "rule_id": "R-MOB-CM-40", "disposition": "route", "called_number": "+8613800138000", "translated_number": "013800138000"}
+{"timestamp": "2026-09-16T08:06:17+0800", "level": "info", "module": "call_controller", "call_id": "73c7eaceb15aee57de78308dd015c6c9", "direction": "internal", "peer": "-", "event": "call translated", "rule_id": "R-MOB-CM-40", "called_number": "+8613800138000", "translated_number": "013800138000", "target_format": "national", "next_hops": "s-sbc-primary,s-sbc-failover"}
+{"timestamp": "2026-09-16T08:06:17+0800", "level": "info", "module": "call_controller", "call_id": "73c7eaceb15aee57de78308dd015c6c9", "direction": "out", "peer": "127.0.0.1:15061", "event": "invite originated towards the next hop", "method": "INVITE", "called_number": "013800138000", "next_hop": "s-sbc-primary", "rule_id": "R-MOB-CM-40"}
+{"timestamp": "2026-09-16T08:06:17+0800", "level": "info", "module": "call_controller", "call_id": "73c7eaceb15aee57de78308dd015c6c9", "direction": "internal", "peer": "-", "event": "call finished", "disposition": "completed"}
+{"timestamp": "2026-09-16T08:07:12+0800", "level": "info", "module": "main", "call_id": "-", "direction": "internal", "peer": "-", "event": "shutdown complete", "reason": "signal SIGTERM", "grace_seconds": "5.0"}
 ```
 
-The `version` field in the startup line above is the current hardcoded runtime value; its
-wording is **pending the maintainer's decision** on version handling (see the open items).
+The `version` field now reads `0.5.0`, equal to `VERSION`, after the M4 fix to
+`src/as_app/__init__.py` (see §1 and `docs/production-gaps.md` for the wheel caveat).
 
 ### 3. CI
 
@@ -1125,12 +1127,12 @@ committing captures). The committed samples in `docs/specs/message-samples/` are
 | DoD item | Result |
 | --- | --- |
 | Feature works end to end; `make demo` passes from a clean checkout | pass — fresh clone, `make demo` exit 0 (§1) |
-| Unit + integration + e2e tests added and green | **green on the reproducible run (118 passed on 5/5 reruns); one rare (~1 in 6) recorded flake, root-caused and not fixed in M4** (§1) |
+| Unit + integration + e2e tests added and green | **green on the reproducible run (119 passed after the version fix; the pre-fix baseline was 118 passed on 5/5 reruns); one rare (~1 in 6) recorded flake, root-caused, registered in `docs/production-gaps.md` and deferred — not fixed in M4** (§1) |
 | `ruff format`, `ruff check`, `mypy` clean | pass — 66 files formatted; 20 source files |
 | Console reflects the new capability (from M3) | pass — console exercised with a live call (§1) |
 | README and the affected documents updated | pass — see the documentation corrections (§1 and the M4 commits) |
 | Requirement IDs, acceptance items and CHANGELOG updated | pass |
-| New POC shortcuts registered in `docs/production-gaps.md` | pass — the in-process test-isolation limitation is registered there; version handling is recorded as a pending maintainer decision in the open items |
+| New POC shortcuts registered in `docs/production-gaps.md` | pass — both M4 rows are registered there: version discovery (repo-relative `VERSION`, wheel caveat) and closing a transaction manager mid-retransmission (deferred) |
 | `AGENT.md` and `docs/README.md` updated if anything structural changed | pass — no structural change; §15 wording corrected |
 | Acceptance items for the milestone carried out with evidence per §4.8 | pass — ACC-M4-001 and ACC-M4-002 |
 | Version bumped and tagged | version bumped to `0.5.0`; **tag pending the maintainer** (`v0.5.0-m4`) |
@@ -1141,18 +1143,21 @@ committing captures). The committed samples in `docs/specs/message-samples/` are
 | ID | Criterion | Result | Evidence |
 | --- | --- | --- | --- |
 | ACC-M4-001 | Every acceptance item carries the four kinds of evidence | **accepted** | review of this report: every item row for M0–M4 names evidence kinds 1–4, or marks a kind `n/a` with a reason (M0 and M3 carry `n/a` for kind 4; M4 carries `n/a` for kind 4). Kind 3 is `not observed` everywhere because no CI runner is reachable from this environment — the reason is stated per layer. |
-| ACC-M4-002 | `docs/demo-script.md` rehearsed end to end | **accepted** | 1 (`make demo` exit 0, `make probe` exit 0, `make rules` exit 0, `make capture` 14 samples, the three failure branches and the console with a live call — all above), 2 (AS log, Call-ID `dadca2555b68ca6951ef1b68766d0981`), 3 (see the CI table), 4 (`n/a` — see §4) |
+| ACC-M4-002 | `docs/demo-script.md` rehearsed end to end | **accepted** | 1 (`make demo` exit 0, `make probe` exit 0, `make rules` exit 0, `make capture` 14 samples, the three failure branches and the console with a live call — all above), 2 (AS log, Call-ID `73c7eaceb15aee57de78308dd015c6c9`), 3 (see the CI table), 4 (`n/a` — see §4) |
 
 ### Open items raised by this run
 
-- **Version handling (open, pending a maintainer decision).** The AS runtime version is
-  hardcoded in `src/as_app/__init__.py` and does not track `VERSION`, so `/healthz` and the
-  startup log serve a stale value. Decide: fix the code (derive `__version__` from `VERSION`,
-  and extend the baseline test so it cannot drift), or register the drift as an accepted gap.
-  The version-related evidence wording is held until that decision lands.
-- **Test flake (not fixed, out of M4 scope).** `test_next_hop_failover_uses_the_second_hop`
-  can fail roughly 1 run in 6; root cause in sippy's `shutdown()`/`timerA` interaction with
-  the shared `ED2` loop (see §1). A fix belongs to the M2 test code.
+- **Version handling — resolved in this milestone.** The runtime version is now derived from
+  `VERSION` (`src/as_app/__init__.py`), guarded by
+  `test_runtime_version_matches_the_version_file`, and the wheel caveat is registered in
+  `docs/production-gaps.md`. No open action.
+- **Test flake — registered and deferred (not fixed in M4).**
+  `test_next_hop_failover_uses_the_second_hop` can fail roughly 1 run in 6; the root cause is
+  sippy's `SipTransactionManager.shutdown()` cancelling `cp_timer` but not the per-transaction
+  retransmission timers (`t.teA`), so a pending `timerA` can dereference the now-`None`
+  `global_config`, together with the shared in-process `ED2` loop (see §1). Registered in
+  `docs/production-gaps.md` ("Closing a transaction manager mid-retransmission"); the fix is
+  DEFERRED to a separate conversation after M4, at the maintainer's instruction.
 - **Documentation corrected during the review:** `docs/demo-script.md` (console section now
   live; the `404` example number was wrong), `AGENT.md` §15 (stale "current phase: M0" line
   removed), `docs/requirements/functional-and-nonfunctional.md` (status column corrected to

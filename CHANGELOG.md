@@ -35,6 +35,11 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   really yields `404` / `AS-ROUTE-001` / `no_match` (found during the M4 rehearsal).
 - Documented `SBC_PEER_PORT` default corrected from `15061` to the real code default `5061`
   in `README.md` and `docs/architecture/lld.md`; `15061` is the `.env.example`/mock value.
+- The AS runtime version was hardcoded in `src/as_app/__init__.py` as `0.1.0`, so the
+  `/healthz` payload and the `application server starting` log line served a stale version
+  while `VERSION` advanced. `as_app.__version__` is now derived from the `VERSION` file, and
+  `tests/unit/test_repository_baseline.py::test_runtime_version_matches_the_version_file`
+  asserts the two agree so the runtime version cannot drift again.
 
 ### Documentation
 
@@ -51,7 +56,10 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 ### Verified
 
 - Full M4 acceptance run: `ruff format --check .` (66 files), `ruff check .`, `mypy`
-  (20 source files) and `pytest tests -q` (118 passed: 97 unit + 16 integration + 5 e2e).
+  (20 source files) and `pytest tests -q` (119 passed after the version fix:
+  98 unit + 16 integration + 5 e2e).
+- Clean-checkout rehearsal from a fresh clone of the version-fix commit: `uv sync --frozen`,
+  `uv lock --check` and `make demo` (exit 0) pass, and `as_app.__version__` reports `0.5.0`.
 - `docs/demo-script.md` rehearsed end to end: `make demo` (exit 0), `make probe` (exit 0),
   `make rules` (exit 0), `make capture` (14 samples), the three failure branches and the
   console with a live call. Evidence is in `docs/acceptance/report.md`.
@@ -60,12 +68,15 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ### Known issues
 
-- The AS runtime version is hardcoded in `src/as_app/__init__.py`, so `/healthz` and the
-  startup log do not track `VERSION`. Reported during M4 as a decision for the maintainer
-  (fix the code, or register the drift); not changed because M4 must not change `src/`.
 - `tests/integration/test_translation.py::test_next_hop_failover_uses_the_second_hop` is a
-  rare flake (a stale sippy `timerA` retransmission firing on the shared `ED2` loop after
-  `shutdown()`); the full suite is 118 passed on reruns. A fix belongs to the M2 test code.
+  rare (~1 in 6 runs) non-deterministic failure: `SipTransactionManager.shutdown()` cancels
+  `cp_timer` but not the per-transaction retransmission timers (`t.teA`), so a pending
+  `timerA` can dereference the now-`None` `global_config`, and the in-process tests share one
+  `ED2` loop. Registered in `docs/production-gaps.md`; the fix is **deferred** to a separate
+  conversation after M4. The suite reproduces at 119 passed.
+- The AS runtime version is read from `VERSION` through a repository-relative path, so an
+  installed wheel (which does not ship `VERSION`) reports `0.0.0+unknown`; registered in
+  `docs/production-gaps.md` as a follow-up.
 
 ### Notes
 

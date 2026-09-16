@@ -519,6 +519,11 @@ ADR and documentation review; tagged release.
   `docs/README.md`, `docs/architecture/hld.md`, `docs/architecture/lld.md`, ADR-0002,
   `docs/operations/deployment.md`, `docs/operations/runbook.md` and
   `docs/specs/message-samples/README.md`.
+- Version-drift fix (maintainer-authorised, Option A): `src/as_app/__init__.py` now derives
+  `__version__` from the `VERSION` file, and
+  `tests/unit/test_repository_baseline.py::test_runtime_version_matches_the_version_file`
+  asserts the two agree; `/healthz` and the startup log now report `0.5.0` (equal to
+  `VERSION`). The suite is 119 passed after the change.
 - Release preparation: `VERSION` → `0.5.0`; `CHANGELOG.md` `0.5.0` release notes (the
   `[Unreleased]` content folded in).
 
@@ -526,24 +531,29 @@ ADR and documentation review; tagged release.
 
 - **Tagging.** The release is prepared but not tagged (agents do not tag). The maintainer
   should create the annotated tag `v0.5.0-m4`.
-- **Known test flake (not fixed, out of M4 scope).** `tests/integration/test_translation.py`
-  `::test_next_hop_failover_uses_the_second_hop` failed in roughly 1 run in 6 with
-  `TypeError: 'NoneType' object is not subscriptable` in sippy's
+- **Known test flake — registered and DEFERRED (not fixed in M4).**
+  `tests/integration/test_translation.py::test_next_hop_failover_uses_the_second_hop` fails
+  in roughly 1 run in 6 with `TypeError: 'NoneType' object is not subscriptable` in sippy's
   `SipTransactionManager.transmitData`. Root cause: `SipTransactionManager.shutdown()`
-  nulls `global_config` but leaves a pending `timerA` retransmission scheduled, and `ED2` is
-  a process-wide singleton, so the stale timer fires during a later test. The failover test
-  (which points a hop at an unbound port on purpose) is the natural trigger. Five
-  consecutive full-suite reruns were green (118 passed). A fix belongs to the M2 test code.
-- **Version handling (open, pending a maintainer decision).** `src/as_app/__init__.py`
-  hardcodes the AS `__version__`, so the value served on `/healthz` and written to the
-  startup log does not track `VERSION`. The `VERSION` ↔ `pyproject.toml` pair is guarded by a
-  baseline test; `as_app.__version__` is not. Fix the code or register the drift; the
-  version-related evidence wording is held until the decision lands.
+  cancels `cp_timer` but not the per-transaction retransmission timers (`t.teA`), so a
+  pending `timerA` can dereference the now-`None` `global_config`; the in-process tests share
+  one process-wide `ED2` loop, so a stale timer from a stopped manager fires during a later
+  test. The failover test (which points a hop at an unbound port on purpose) is the natural
+  trigger. Five consecutive full-suite reruns were green (118 passed before the version fix,
+  119 after). Registered in `docs/production-gaps.md` ("Closing a transaction manager
+  mid-retransmission"); the fix is deferred to a separate conversation after M4, at the
+  maintainer's instruction.
+- **Version handling — FIXED in M4.** `src/as_app/__init__.py` used to hardcode
+  `__version__ = "0.1.0"`, so `/healthz` and the startup log served a stale version while
+  `VERSION` advanced. It now derives `__version__` from the repository `VERSION` file, and
+  `test_runtime_version_matches_the_version_file` guards the pair. The "an installed wheel
+  does not carry `VERSION`" caveat is registered in `docs/production-gaps.md`.
 
 **Open items:**
 
-- **Version handling in `as_app.__version__`** (above): derive it from `VERSION`, or register
-  it as an accepted gap. Reported in M4; pending the maintainer's decision.
+- **Version handling in `as_app.__version__`** (above): RESOLVED in M4 — derived from
+  `VERSION` and guarded by a test. Only the wheel follow-up remains, registered in
+  `docs/production-gaps.md`.
 - **`deploy/docker-compose.yml` keeps `ALLOWED_PEERS: s-sbc-mock,127.0.0.1`** (carried from
   M1): container addresses are not knowable in advance, so the mock's SIP INVITEs are
   rejected in compose. Compose is validated with `docker compose config` only, never run to

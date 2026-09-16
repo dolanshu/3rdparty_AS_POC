@@ -585,26 +585,36 @@ ADR and documentation review; tagged release.
 **Entry state for the next milestone:** M4 is the final milestone — there is no M5. A future
 iteration starts from the open items above and from `docs/production-gaps.md`.
 
-## Next steps (after M4)
+## Next steps (after M4) — tracked as P1–P6
 
 These are not a formal M5 — `AGENT.md` §15 still names M4 as the final milestone — but they
-are the known work to schedule. Nothing here changes the M0–M4 scope that is already done.
+are the known work to schedule, referenced as **P1–P6** (Post-M4 items) to stay distinct from
+the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already done.
 
-- **Docker compose demo (top priority).** Make the three-service stack actually complete a
+- **P1 — Docker compose demo (top priority).** Make the three-service stack actually complete a
   call: fix `ALLOWED_PEERS` (give the mock a static `ipam` address, or resolve peer names to
   addresses at start-up so the on-wire source matches), fix `SIP_LISTEN_ADDRESS` so the
   outbound `Via` is not `0.0.0.0`, build the images and run `docker compose up` to a full
   `INVITE -> 200 OK -> BYE`. This closes the largest open delivery gap (see M4 open items).
-- **CI via GitHub Actions (held).** Push the repository and let the committed workflow run;
+  **[Required · Status: Open]**
+- **P2 — Manual testing gate (after P1).** *Added by maintainer.* Before any further Post-M4
+  work, the running stack must be verified by hand: (a) `as` / `s-sbc-mock` / `console` all
+  healthy via `docker ps`; (b) a full `INVITE -> 180 -> 200 OK -> BYE` loop is observable in
+  the AS logs; (c) the AS structured log shows the translated Request-URI and the matched rule
+  name; (d) the console at `localhost:8081` renders the live message flow; (e) failure branches
+  (`+999...` -> `404`, premium -> `603`) also behave correctly in the live stack. Human
+  sign-off, not an automated check. **[Required · Status: Open]**
+- **P3 — CI via GitHub Actions (held).** Push the repository and let the committed workflow run;
   record the run link/badge as the `AGENT.md` §4.8 CI-result evidence. On hold per maintainer.
-- **Console browser verification.** Drive the console UI in a real browser against a live
+  **[Optional · Status: Open]** (held — needs user to push to GitHub)
+- **P4 — Console browser verification.** Drive the console UI in a real browser against a live
   call (e.g. Playwright) to confirm real-time rendering and the WebSocket feed (registered
-  gap, carried from M3).
-- **Wheel version discovery.** Derive `as_app.__version__` from installed package metadata so
-  an installed wheel is not `0.0.0+unknown` (registered gap, follow-up).
-- **sippy retransmission-timer shutdown fix.** Cancel per-transaction timers on
+  gap, carried from M3). **[Optional · Status: Open]**
+- **P5 — Wheel version discovery.** Derive `as_app.__version__` from installed package metadata so
+  an installed wheel is not `0.0.0+unknown` (registered gap, follow-up). **[Optional · Status: Open]**
+- **P6 — sippy retransmission-timer shutdown fix.** Cancel per-transaction timers on
   `SipTransactionManager.shutdown()` to remove the rare failover test flake (registered gap,
-  deferred).
+  deferred). **[Optional · Status: Open]**
 
 ## Conventions
 

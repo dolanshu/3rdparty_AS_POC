@@ -468,6 +468,61 @@ instructions, since a member may read a stale "hold" and a new decision in the s
 (d) when several decisions are pending, send one consolidated instruction rather than a
 stream of small ones.
 
+### 14.2 Post-M4 delegation: 组员 vs 子代理 (verified 2026-09-16)
+
+Post-M4 work (tracked as P1–P6 in `docs/roadmap.md`) follows the same delegation
+rule as milestones (§14 rule 9): the main agent plans, tracks status and reviews;
+it does **not** read/explore or edit code for these items itself.
+
+- **组员 (team-mode member) — file-write permission verified.** Use for any actual
+  implementation or file change on a P-item. Spawn in team mode (`name` supplied,
+  `mode = "acceptEdits"`) so it can edit files. Write permission was confirmed on
+  2026-09-16: a team-mode member successfully created a file in the project tree
+  (the temporary test artifact was removed afterwards).
+- **子代理 (synchronous subagent, e.g. `code-explorer`) — read-only.** Use only for
+  exploration/investigation; it cannot and must not edit files (§14.1). Never hand it
+  a P-item that requires code or config changes.
+- **Main-agent boundary.** The main agent may read `docs/roadmap.md` and plan, but
+  must not open source files to design an implementation for a P-item — that
+  investigation is delegated to the 组员. The main agent reviews the 组员's result
+  and updates the roadmap status (Open → In progress → Done).
+- **Concrete thinking is the 组员's job, not the main agent's.** The main agent must
+  not work out the implementation approach, trace the code paths, or decide how a fix
+  is built — that reasoning is delegated to the 组员. The main agent only sets scope,
+  writes a clear brief, spawns the member, and reviews the outcome. Pre-reading the
+  source and pre-designing the change (as happened in an earlier P1 attempt) is exactly
+  the failure this rule prevents: it wastes the main agent's context window and
+  second-guesses work that belongs to the member.
+
+**How to spawn the 组员 (concrete steps).** The one thing that trips people up: the
+`Task` tool has two modes, and only one of them can write files.
+
+- *Synchronous / read-only* — `Task` called with `subagent_name` (e.g. `code-explorer`)
+  and **no** `name`. Read-only, returns when done. Exploration only, never edits.
+- *Team mode / writable* — `Task` called **with** `name` (a member label). This detaches
+  the member and gives it file-editing tools. **This is the only mode allowed to
+  implement a P-item.** (The writability comes from team mode — supplying `name` — not from
+  `subagent_name`: even `code-explorer` becomes writable when spawned with `name`. Confirm
+  the exact parameter set — `subagent_name`, `team_name`, `subagent_path` — against the
+  `Task` tool schema in your session. Verified 2026-09-16: a `code-explorer` member spawned
+  with `name` + `mode="acceptEdits"` successfully created a file in the project tree.)
+
+Sequence for a P-item (verified working on 2026-09-16):
+
+1. `team_create(team_name="p1-impl", description="P1 docker compose demo")`.
+2. `Task(name="p1-dev", team_name="p1-impl", mode="acceptEdits", prompt="<P1 brief>")`.
+   `mode="acceptEdits"` auto-applies the member's edits so execution does not stall on
+   approval; the `prompt` must carry scope, DoD (§16) and that the member owns code,
+   tests and commit.
+3. Talk to it via `send_message(type="message", recipient="p1-dev", content="...")`.
+   Messages are asynchronous (read at the member's next turn boundary) — put hard
+   constraints in the spawn `prompt`, not in a follow-up (§14.1 timing notes).
+4. On completion, review its final message; once committed, `shutdown_request` then
+   `team_delete`.
+
+This rule was added after a session where the main agent mistakenly began
+exploring/planning P1 itself; that work belongs to the 组员.
+
 ## 15. Roadmap
 
 **Status board: `docs/roadmap.md`.** That file is the live record of scope, status,

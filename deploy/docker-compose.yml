@@ -16,11 +16,18 @@ services:
       dockerfile: deploy/Dockerfile.as
     command: ["python", "-m", "as_app.main"]
     environment:
-      SIP_LISTEN_ADDRESS: 0.0.0.0
+      # Address sippy advertises in the Via and Contact of every message the AS sends.
+      # It must be a stable, mutually reachable trunk address (the fixed container IP
+      # below), NOT 0.0.0.0: a 0.0.0.0 host can never be routed back to by the peer.
+      SIP_LISTEN_ADDRESS: 172.28.0.2
       SIP_LISTEN_PORT: "5060"
-      SBC_PEER_ADDRESS: s-sbc-mock
+      # Next hop for the INVITE the AS originates back to the trunk (mock UAS side).
+      SBC_PEER_ADDRESS: 172.28.0.3
       SBC_PEER_PORT: "15061"
-      ALLOWED_PEERS: s-sbc-mock,127.0.0.1
+      # Source addresses accepted on the trunk, comma separated. The mock's INVITE arrives
+      # from its fixed container IP 172.28.0.3 (see networks.trunk), so that is the only
+      # entry that passes the allowlist; anything else is rejected with 403 / AS-PEER-001.
+      ALLOWED_PEERS: 172.28.0.3
       RULES_FILE: config/routing_rules.yaml
       INTERNAL_API_ADDRESS: 0.0.0.0
       INTERNAL_API_PORT: "8080"
@@ -31,7 +38,8 @@ services:
       - "5060:5060/udp"
       - "8080:8080/tcp"
     networks:
-      - trunk
+      trunk:
+        ipv4_address: 172.28.0.2
     restart: unless-stopped
 
   s-sbc-mock:
@@ -43,11 +51,11 @@ services:
       - -m
       - s_sbc_mock.main
       - --listen-address
-      - 0.0.0.0
+      - 172.28.0.3
       - --listen-port
       - "15061"
       - --as-address
-      - as
+      - 172.28.0.2
       - --as-port
       - "5060"
     ports:
@@ -56,7 +64,8 @@ services:
       - "15060:15060/udp"
       - "15061:15061/udp"
     networks:
-      - trunk
+      trunk:
+        ipv4_address: 172.28.0.3
     restart: unless-stopped
 
   console:
@@ -77,3 +86,9 @@ services:
 networks:
   trunk:
     name: as-poc-trunk
+    # Fixed subnet and static container IPs keep SIP signalling self-consistent: the AS and
+    # the mock advertise each other's IP in Via/Contact, and ALLOWED_PEERS can name the
+    # mock's exact source IP. 0.0.0.0 would be unreachable as a peer address.
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

@@ -33,3 +33,9 @@ docs/specs/message-samples/*.txt
 .vscode/
 *.swp
 .DS_Store
+
+# IDE / agent runtime state
+.codebuddy/
+
+# Office temporary lock files
+~$*

@@ -31,11 +31,16 @@ Each milestone is executed in its own conversation.
 
 | Milestone | Status | Tag |
 | --- | --- | --- |
-| M0 — Foundation | done (2026-09-16) | pending (tagging is done by the maintainer) |
-| M1 — Signalling path | done (2026-09-16) | pending (tagging is done by the maintainer) |
-| M2 — Number translation | done (2026-09-16) | pending (tagging is done by the maintainer) |
-| M3 — Console | done (2026-09-16) | pending (tagging is done by the maintainer) |
-| M4 — Acceptance and polish | done (2026-09-16) | pending (tagging is done by the maintainer) |
+| M0 — Foundation | done (2026-09-16) | maintainer-owned |
+| M1 — Signalling path | done (2026-09-16) | maintainer-owned |
+| M2 — Number translation | done (2026-09-16) | maintainer-owned |
+| M3 — Console | done (2026-09-16) | maintainer-owned |
+| M4 — Acceptance and polish | done (2026-09-16) | maintainer-owned |
+
+**Tagging (2026-09-16).** Milestone tags are the maintainer's step (agents do not tag).
+The maintainer has created some milestone tags in their clone; the **remaining tags are
+deferred — do not create them for now**. At write time this checkout carried no tags, so
+verify a tag against the maintainer's clone before assuming it exists.
 
 ## Environment (verified 2026-09-16)
 
@@ -155,9 +160,11 @@ context now lives in `AGENT.md` §1 and in the ADRs.)
   concern). Still open after M1 (the model did not grow): if it grows later, move it to
   its own module and update `AGENT.md` §5 — recorded in `docs/architecture/lld.md`
   section 1.1.
-- **No CI runner in this environment**: the workflow is committed and its commands were
-  executed locally, but no CI badge or run link exists yet. A green run should be recorded
-  in `docs/acceptance/report.md` when the repository is pushed.
+- **CI (planned via GitHub Actions, on hold).** The workflow (`.github/workflows/ci.yml`)
+  is committed and its commands were executed locally, but there is no CI runner in this
+  environment and no run/badge yet. The plan is to run CI on push via **GitHub Actions**;
+  until a run exists, the `AGENT.md` §4.8 CI-result evidence and the README CI badge remain
+  pending. **Held by maintainer decision (2026-09-16)** — not implemented now.
 - **`uv` needs a package index mirror on this machine** (`UV_DEFAULT_INDEX=...`); the
   committed lock refers to the public PyPI, so this is local-only.
 - **Unused runtime dependencies**: sippy pulls in `rtpsynth`, `g722`, `flask` and
@@ -556,10 +563,12 @@ ADR and documentation review; tagged release.
 - **Version handling in `as_app.__version__`** (above): RESOLVED in M4 — derived from
   `VERSION` and guarded by a test. Only the wheel follow-up remains, registered in
   `docs/production-gaps.md`.
-- **`deploy/docker-compose.yml` keeps `ALLOWED_PEERS: s-sbc-mock,127.0.0.1`** (carried from
-  M1): container addresses are not knowable in advance, so the mock's SIP INVITEs are
-  rejected in compose. Compose is validated with `docker compose config` only, never run to
-  a call.
+- **Docker compose demo is the largest open delivery gap (scheduled as the next step after
+  M4; not started).** `deploy/docker-compose.yml` keeps `ALLOWED_PEERS: s-sbc-mock,127.0.0.1`
+  (carried from M1): container addresses are not knowable in advance, so the mock's SIP
+  INVITEs are rejected in compose. `SIP_LISTEN_ADDRESS: 0.0.0.0` also puts `Via: 0.0.0.0` on
+  outbound messages. Compose is validated with `docker compose config` only, never built or
+  run to a completed call. See "Next steps" for the planned work.
 - **Console not browser-verified against a live call** (carried from M3; registered in
   `docs/production-gaps.md`).
 - **`AGENT.md` §4.7 "release notes template" — RESOLVED in M4.** The maintainer chose to drop
@@ -569,10 +578,35 @@ ADR and documentation review; tagged release.
 **Entry state for the next milestone:** M4 is the final milestone — there is no M5. A future
 iteration starts from the open items above and from `docs/production-gaps.md`.
 
+## Next steps (after M4)
+
+These are not a formal M5 — `AGENT.md` §15 still names M4 as the final milestone — but they
+are the known work to schedule. Nothing here changes the M0–M4 scope that is already done.
+
+- **Docker compose demo (top priority).** Make the three-service stack actually complete a
+  call: fix `ALLOWED_PEERS` (give the mock a static `ipam` address, or resolve peer names to
+  addresses at start-up so the on-wire source matches), fix `SIP_LISTEN_ADDRESS` so the
+  outbound `Via` is not `0.0.0.0`, build the images and run `docker compose up` to a full
+  `INVITE -> 200 OK -> BYE`. This closes the largest open delivery gap (see M4 open items).
+- **CI via GitHub Actions (held).** Push the repository and let the committed workflow run;
+  record the run link/badge as the `AGENT.md` §4.8 CI-result evidence. On hold per maintainer.
+- **Console browser verification.** Drive the console UI in a real browser against a live
+  call (e.g. Playwright) to confirm real-time rendering and the WebSocket feed (registered
+  gap, carried from M3).
+- **Wheel version discovery.** Derive `as_app.__version__` from installed package metadata so
+  an installed wheel is not `0.0.0+unknown` (registered gap, follow-up).
+- **sippy retransmission-timer shutdown fix.** Cancel per-transaction timers on
+  `SipTransactionManager.shutdown()` to remove the rare failover test flake (registered gap,
+  deferred).
+
 ## Conventions
 
 - **Single source of truth:** rules live in `AGENT.md`; live status lives here; evidence
   lives in `docs/acceptance/report.md`
+- **`docs/3rdPartyAS_Poc_Introduction.pptx` is an intentional, maintained exception
+  (maintainer, 2026-09-16).** It is a demo slide deck deliberately committed for reviewer
+  demos and is **exempt from `AGENT.md` §4.2 "no binary diagrams"** guidance. It is not part
+  of the required documentation set and is intentionally absent from the README index.
 - **Commit scope:** `feat(m2): ...`, `fix(m1): ...`, `feat(m3): ...`
 - **Version and tag:** one version node per milestone, tag `v<version>-m<n>`
 - **Decisions:** recorded as ADRs in `docs/architecture/adr/`, referenced from code

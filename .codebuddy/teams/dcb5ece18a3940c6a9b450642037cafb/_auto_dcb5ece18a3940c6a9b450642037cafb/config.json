@@ -1,0 +1,25 @@
+{
+  "name": "_auto_dcb5ece18a3940c6a9b450642037cafb",
+  "mainConversationId": "dcb5ece18a3940c6a9b450642037cafb",
+  "workspacePath": "/home/shudong/project/3rtparty_AS_POC",
+  "createdAt": "2026-09-16T12:02:24.083Z",
+  "options": {
+    "workspacePath": "/home/shudong/project/3rtparty_AS_POC",
+    "isAutoTeam": true
+  },
+  "isAutoTeam": true,
+  "members": [
+    {
+      "memberId": "p1-dev@_auto_dcb5ece18a3940c6a9b450642037cafb",
+      "name": "p1-dev",
+      "role": "Execute roadmap item P1 docker compose demo",
+      "sessionId": "66bedbff681640009a9ea45d637dd899"
+    },
+    {
+      "memberId": "author-credit@_auto_dcb5ece18a3940c6a9b450642037cafb",
+      "name": "author-credit",
+      "role": "Credit the author across repo metadata",
+      "sessionId": "e6912f4364e947cd8e4dc3f9713b8559"
+    }
+  ]
+}

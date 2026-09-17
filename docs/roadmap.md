@@ -760,6 +760,29 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   directory always holds exactly the messages of the most recent capture (found during the
   post-M4 demo-steps review). **[Required · Status: Done]**
 
+## Phase 2 — P8a … P11 (status pointers only)
+
+**The detailed plan lives in `docs/phase2-plan.md`.** That document is the single detailed
+source for Phase 2: the strategic decisions and their rationale, the work sequence with each
+item's prerequisites and known collisions, the repository and branch strategy, and the
+handover protocol.
+
+**This section is a pointer only and must not duplicate that content.** Two copies of a plan
+drift exactly the way `config/routing_rules.yaml` and `config/routing_rules.compose.yaml`
+do, and that drift is already a registered production gap.
+
+| Item | Status | Branch / repository |
+| --- | --- | --- |
+| P8a — sippy retransmission-timer shutdown fix | not started (blocker for P9.5) | `fix/sippy-retransmission-timer` |
+| P8 — anti-fraud AS (second use case) | not started (branch created, empty) | `feat/anti-fraud-as` |
+| P9 — chained demo (SBC → AS-1 → AS-2 → core) | not started | `feat/chained-as-demo` |
+| P9.5 — read-only capacity probe | not started | `feat/capacity-probe` |
+| P10 — platform extraction | not started | new repository |
+| P11 — platform verification (TLS + capacity harness) | not started | new repository |
+
+Per-item status and handover notes are kept in `docs/phase2-plan.md`, which every Phase 2
+conversation reads on entry and updates on exit (`AGENT.md` §15).
+
 ## Conventions
 
 - **Single source of truth:** rules live in `AGENT.md`; live status lives here; evidence

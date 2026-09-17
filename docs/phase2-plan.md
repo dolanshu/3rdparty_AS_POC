@@ -1,0 +1,398 @@
+# Phase 2 plan — second AS use case and the generic AS platform
+
+- **Status:** accepted (planning artefact, no implementation yet)
+- **Date:** 2026-09-18
+- **Owner:** project maintainer
+- **Related:** `AGENT.md` §2, §14.3, §15 · `docs/roadmap.md` · `docs/production-gaps.md` · `docs/specs/index.md`
+
+## 1. Purpose and scope of this document
+
+The POC is complete: M0–M4 are done and the post-M4 items P1–P7 are closed except P4
+(browser verification, parked) and P6 (sippy retransmission-timer shutdown, see P8a below).
+This document records **what comes next and why**.
+
+It is written as a **handover artefact**. `AGENT.md` §15 requires that a fresh conversation
+must not have to re-derive what an earlier one decided, and states plainly that
+*"conversation context is not a handover artefact"*. Every decision below therefore carries
+its rationale, not just its outcome. A conversation that starts a Phase 2 work item should
+read `AGENT.md`, `docs/README.md`, **the section of this document for that item**, and the
+acceptance criteria — and then be able to start.
+
+**Single source of truth.** This document is the *only* detailed source for Phase 2.
+`docs/roadmap.md` carries one status line per item and links here; it does **not** duplicate
+the content. Two copies of a plan drift apart exactly the way
+`config/routing_rules.yaml` and `config/routing_rules.compose.yaml` do, and that drift is
+already registered as a production gap. Do not repeat that mistake.
+
+**Out of scope here:** the state of M0–M4 and P1–P7 (see `docs/roadmap.md`), and anything
+already recorded in `docs/production-gaps.md`.
+
+## 2. Strategic decisions
+
+### D1 — The purpose is a portfolio piece, not a product
+
+**Decision.** The repository exists to demonstrate capability to architecture reviewers and
+to operator-side and employer audiences. Display value outranks functional completeness.
+
+**Rationale.** `AGENT.md` §1 already states *"This project exists to be reviewed."* The
+investment profile of the repository — the document chain, the ADRs, the acceptance
+evidence, the production gap register — is the shape of something built to be reviewed, not
+of something built to be sold. Number translation itself has weak commercial logic: every
+S-CSCF/SBC vendor and every enterprise PBX already ships it, so no operator would buy a
+standalone third-party number-translation AS. What the repository sells is the engineering,
+not the feature.
+
+**Consequence.** Every later decision is judged on display value and on what it adds to the
+platform story, never on production completeness for its own sake.
+
+### D2 — Direction: second use case first, then the platform
+
+**Decision.** Build a second AS use case, then extract the common skeleton into a generic
+platform. Rejected: completing the production gap register to turn this into a commercial
+product; and building the platform directly from the single existing sample.
+
+**Rationale.** Abstraction is induction and needs at least two instances. Extracting a
+framework from one sample produces a framework shaped like that sample — here, like number
+translation — which is a different thing from a framework shaped like an AS. `AGENT.md` §12
+forbids exactly this (*"no abstraction added because production would need it"*). Building
+the second use case first also means the skeleton is exercised twice before it is
+generalised, which is what makes the generalisation credible.
+
+### D3 — The gap register is repositioned, not abandoned
+
+**Decision.** The production gap register is **not** a backlog to be completed. Selected
+items are adopted only when they **feed the platform**: either as an input that reveals what
+the abstraction must support, or as an output that proves the abstraction was right.
+
+**Rationale.** Completing all ~24 registered gaps is months of engineering that adds almost
+no display value — a reviewer does not become excited by the presence of TLS support — and
+it would turn a clean POC into a half-finished product, which is the worst of both shapes.
+Reframing the question from *"is this needed in production?"* to *"does this drive or verify
+the platform?"* turns the register from dead weight into a source of requirements.
+
+**Consequence.** Two categories, and the distinction matters for sequencing:
+
+- **Discovery inputs** — must run *before* the abstraction, because the answer is not known
+  until measured: the capacity probe (P9.5).
+- **Verification outputs** — run *after* the abstraction, to prove it was right: TLS (P11).
+  Trunk TLS is already fully specified in the gap register, so building it early would teach
+  nothing new; its value is in demonstrating that transport really is pluggable.
+
+### D4 — Second use case: anti-fraud / unwanted-call AS
+
+**Decision.** The second AS inspects the **calling** party and returns a **verdict**, not a
+rewrite. Inputs: caller reputation, a per-caller call-rate window, and block/allow lists.
+Outputs: allow (relay unchanged) or reject.
+
+**Rationale — the selection criterion was orthogonality, not novelty.** The first use case
+has an exact shape: *stateless · single-leg · pure rewrite* (decide once, rewrite the
+Request-URI and number format). A second use case with the same shape would give two
+isomorphic samples and the abstraction would come out wrong. This one introduces three
+dimensions the first has none of:
+
+| Dimension | Number translation | Anti-fraud AS |
+| --- | --- | --- |
+| State | none, per-INVITE only | **cross-call** (rate window, reputation decay) |
+| Data source | the rule file | **external** list/reputation source |
+| Decision result | rewrite the Request-URI | **reject** or allow — no rewrite at all |
+
+Judged against topic interest as well, unwanted calls are the dominant abuse problem for
+operators worldwide, so the use case carries its own narrative.
+
+**ADR-0006 is a hard filter.** The service is signalling only. Every use case needing a
+media plane — IVR, auto-attendant, recording, transcoding, conferencing, DTMF — is excluded
+without discussion, because adopting one would overturn ADR-0006 and the whole no-RTP design
+around it.
+
+### D5 — Rejection is `608 Rejected` (RFC 8688), without `Call-Info`
+
+**Decision.** Reject with **608**, not 603 and not 607. No `Call-Info` header is sent. The
+mock SBC's UAC side must send `Feature-Caps: *;+sip.608` in its INVITE. On the allow path
+the INVITE is relayed with **no added header**; the suspicion score is exposed only through
+metrics, trace and console.
+
+**Rationale.** RFC 8688 (Standards Track, December 2019) defines 608 and states in §3 that
+the intermediary *"could be a back-to-back user agent (B2BUA) or a SIP Proxy"* — precisely
+this AS.
+
+- **607 Unwanted (RFC 8197)** means a **human** at the target UAS marked the call unwanted.
+  This AS is an automated decision, so 607 would misattribute it. RFC 8688 draws the
+  distinction deliberately, because *"in some jurisdictions, this distinction is important."*
+- **603 Decline** was rejected: it means the called party declined, and it loses the
+  information that an automated anti-fraud engine made the decision. It would also be unable
+  to answer the reviewer's question *"why not 608?"*.
+
+**`Call-Info` is omitted lawfully, not by cutting a corner.** RFC 8688 §3.1 makes
+`Call-Info` mandatory only when *"there are no indicators the calling party will use the
+contents … for malicious purposes"*, and §6 states that operators *"may wish to configure
+their response to only include a `Call-Info` header field for INVITE … that pass validation
+by STIR"*, because handing a suspected-abusive caller a contact address gives that caller a
+vector for attacking the intermediary. Calls rejected by this AS are by definition the
+suspected-abusive ones, so omitting `Call-Info` is what §6 recommends. The `jCard`/`JWS`
+redress mechanism is therefore deferred to an optional enhancement (see §7).
+
+**`Feature-Caps` protects ADR-0006.** RFC 8688 §3.4 requires that when the UAC has *not*
+declared `sip.608`, the intermediary **MUST play an announcement** — which this
+signalling-only service cannot do. §3.4 also states that *"if the UAC indicates support for
+608 and the intermediary issues a 608, life is good"*. Having the mock UAC declare
+`Feature-Caps: *;+sip.608` therefore keeps the AS media-free. A real S-SBC that does not
+declare it would require media; that is a registered gap, not a hidden defect.
+
+**Allow path adds no header.** No standard signalling mechanism exists for marking a
+suspicious-but-allowed call other than STIR's `verstat`, which is out of scope (D4). Adding
+a proprietary header would break the verbatim pass-through rule of ADR-0006 for no
+normative gain. The verdict is still observable — through counters, the Call-ID keyed trace
+and the console — so no information is lost, only kept off the wire.
+
+**STIR/SHAKEN is out of scope.** RFC 8224 verification needs certificate chains,
+attestation handling and `Identity` header parsing. RFC 8688 is a parallel and complementary
+mechanism that does not depend on it. Excluding it is a scope decision, not a defect, and
+the ADR for the use case must say so explicitly because a reviewer will ask.
+
+### D6 — Two independent AS processes; the chained demo comes before the abstraction
+
+**Decision.** The anti-fraud AS is a **separate process** with its own rules, ports and
+console feed. Both AS instances are demonstrated independently first. A chained topology
+(`SBC → AS-1 → AS-2 → core`) is built **before** the platform work starts, not after.
+
+**Rationale.** Independent processes are the architecturally real shape: in IMS, several AS
+instances are triggered in sequence by iFC priority over ISC (3GPP TS 24.229). It also gives
+the abstraction a genuine second instance — independent process, independent decision logic,
+shared skeleton — which is what the platform story needs.
+
+The chained demo exists to **generate friction deliberately**. Driving both AS instances in
+one path is what exposes the parts of the skeleton that are secretly number-translation
+specific, and that friction is the highest-quality input the abstraction can get. Without
+it, the abstraction is driven by reading code instead of by real collisions.
+
+### D7 — Public throughout, one branch per work item
+
+**Decision.** The repository stays public. Each Phase 2 item is developed on its own branch
+and merged into `main` only when the item's own definition of done is met.
+
+**Rationale.** Under D1 visibility is the point; going private for months would produce
+nothing. But `main` must always be demonstrable: `AGENT.md` §4.7 requires a green CI badge,
+§4.2 a complete document set, §16 that `make demo` passes from a clean checkout, and §4.8
+that *"an acceptance item without evidence is not accepted"*. Work in progress on `main`
+would temporarily violate all of these, and a reviewer may arrive at any moment.
+
+A plan may live on `main` (it is a plan, not an unfinished implementation); an **ADR for
+unimplemented behaviour may not** — its *consequences* section cannot be validated before
+the code exists, so it would describe functionality that is not there.
+
+### D8 — Split the repositories in two stages
+
+**Decision.** The anti-fraud AS is built **in this repository**. The platform is extracted
+into a **new repository**; this repository then becomes the platform's reference
+implementation and first user.
+
+**Rationale.** Stage one belongs here because the anti-fraud AS reuses the mock S-BC, the
+console, the three-layer test scaffolding, the whole document set and the ADRs — moving it
+out would mean copying all of that. It also keeps one visible story of evolution. Stage two
+belongs in a new repository because the platform needs its own identity to be referenced and
+cited independently, and because the fact that *"this platform is used by two different AS
+implementations"* — the strongest evidence that the abstraction was right — requires two
+repositories to exist.
+
+**Change the standard, do not lower it.** The new repository must not copy all 24 documents
+of `docs/` here. It is a **library**, not a running service, so the operations set
+(`deployment` / `runbook` / `troubleshooting`) does not apply; what it needs instead is an
+API reference, an integration guide and a compatibility matrix. Copying the application
+document set would create two drifting copies; shipping none would produce a low-standard
+artefact. Switching to the standard that fits a library is neither.
+
+**Not adopted:** converting this repository into a uv workspace monorepo. It would keep one
+CI and one document set, but it would overturn the fixed top-level layout of `AGENT.md` §4.1.
+
+### D9 — Cross-call state: in-process, and never in the call controller
+
+**Decision.** Anti-fraud state lives in a **process-level module**, strictly separate from
+the per-call `CallController`. In-memory only for now; restart loses it. Redis is **deferred
+to the platform** as the second implementation of a pluggable state store.
+
+**Rationale.** The most likely mistake is to put the rate window inside `CallController`,
+because `apply_call_policy()` is a convenient existing hook. `CallController` is instantiated
+**per call**, so a window held there would always contain exactly one entry: the logic would
+fail silently, and single-call unit tests would still pass. Naming the ownership boundary now
+is cheaper than debugging it later.
+
+In-memory keeps the property this repository values most — a clean checkout reaches
+`make demo` fully offline with no external service, the same principle behind the
+dependency-free console and the fixed-ipam compose network. Making the store *replaceable*
+now would be premature abstraction (`AGENT.md` §12); a clean class boundary is enough, and
+the platform will do the generalisation once two implementations are actually wanted.
+
+### D10 — Two enhancement items, one of each kind
+
+**Decision.** Adopt **TLS** (verification output) and a **small call-load capacity harness**
+(discovery input). CDR was considered as a candidate and **not** adopted for now.
+
+**Rationale.** TLS gives the platform a second real pluggable dimension (transport), which
+matters because a single sample — the state store — cannot support a claim that anything is
+"pluggable". The capacity harness targets the one area this repository has explicitly
+forbidden rather than merely left undone: `AGENT.md` §2 says *"No performance or capacity
+work … no benchmarking claims"* and the gap register says `Capacity | Not measured`. Filling
+a hole shows more than building on flat ground.
+
+**The harness must not publish benchmark numbers.** sippy's `ED2.loop()` is single-threaded
+and blocking and the transport is UDP, so absolute figures will look weak next to any
+commercial SBC, and publishing them invites questions about hardware, kernel and UDP buffer
+sizing. Its purpose is a **regression baseline and a way to discover the capacity boundary**
+— it is a measurement capability of the platform, not a performance claim. See §8 for the
+scope change this requires.
+
+## 3. Work sequence
+
+`AGENT.md` §15 names M4 as the final milestone and there is no M5, so Phase 2 continues the
+**P** numbering of the post-M4 items.
+
+### P8a — Fix the sippy retransmission-timer shutdown (blocker)
+
+- **Goal.** Cancel per-transaction retransmission timers in
+  `SipTransactionManager.shutdown()`, removing the `TypeError` in `transmitData`.
+- **Why now.** Currently a ~1-in-6 flake in
+  `test_next_hop_failover_uses_the_second_hop`. P9.5 is a hard blocker: a load run generates
+  exactly the conditions — many concurrent transactions and frequent retransmissions — that
+  turn 1-in-6 into deterministic failure.
+- **Notes.** `shutdown()` cancels its own `cp_timer` but not `t.teA`. The in-process tests
+  share one process-wide `ED2` loop, so a stale timer from a stopped manager fires during a
+  later test.
+- **Type.** Bug fix. Independent branch, mergeable on its own; it makes `main` strictly more
+  stable.
+
+### P8 — Anti-fraud AS
+
+- **Goal.** A second, independently runnable AS process implementing D4, D5 and D9.
+- **Prerequisites.** New ADR (use-case choice, 608 rationale, state ownership). A probe
+  confirming that sippy emits an arbitrary 6xx through the existing
+  `CCEventFail((status, phrase, None))` path — 404 and 603 are already proven, 608 is not.
+  Adding `Feature-Caps: *;+sip.608` to the mock UAC's INVITE.
+- **Known collisions.** The reject path is **UAS behaviour, not B2BUA**: no second leg is
+  originated. `CallController` currently assumes `uaA` and `uaO` always both exist (M1
+  design), so this item **changes the skeleton itself**.
+- **Also.** New `AS-FRAUD-*` error codes in `src/as_app/errors.py`, following the existing
+  `AS-CFG-* / AS-RULE-* / AS-ROUTE-* / AS-PEER-*` model. Port and rule-file isolation for a
+  second AS (see §7). Console coverage per `AGENT.md` §16.
+
+### P9 — Chained demo
+
+- **Goal.** `SBC → AS-1 (anti-fraud) → AS-2 (number translation) → core`, running and
+  demonstrated.
+- **Implementation note.** No iFC emulation is needed in the mock: pointing AS-1's next hop
+  at AS-2's listen address is enough, which is a `next_hops` catalogue change.
+- **Deliberate output.** The friction this surfaces — what in the skeleton turned out to be
+  number-translation specific — is the primary input to P10 and must be written down here.
+- **Known issue.** Two B2BUAs in series produce **two different Call-IDs**; cross-AS
+  correlation is a real problem, not a cosmetic one.
+
+### P9.5 — Read-only capacity probe
+
+- **Goal.** Discover where the capacity boundary is. **Do not change the skeleton** — add a
+  load generator plus observation only.
+- **Prerequisites.** P8a merged.
+- **Output.** The constraints found (concurrency ceiling, back-pressure behaviour, what
+  blocks the event loop) become inputs to P10 and are registered as gaps.
+- **Explicitly not:** any published calls-per-second or latency figure (D10).
+
+### P10 — Platform extraction (new repository)
+
+- **Goal.** Extract the skeleton shared by both AS instances into a library; both become its
+  users; this repository becomes the reference implementation.
+- **Inputs.** Three genuine drivers: pluggable state store (P8), skeleton friction (P9),
+  capacity/back-pressure constraints (P9.5).
+- **Constraints.** This is a structural refactor of `src/as_app/` and therefore requires an
+  explicitly approved plan under `AGENT.md` §14.3 — it must not be done incidentally. The
+  new repository follows a library standard, not this repository's application standard
+  (D8).
+
+### P11 — Platform verification: TLS and the capacity harness
+
+- **Goal.** On the platform: a pluggable transport with UDP and TLS implementations, and a
+  capacity harness as a first-class capability.
+- **Prerequisites.** A probe of sippy's TLS support — `AGENT.md` §14 forbids assuming.
+  Certificates self-signed with a generation script; **no private key is ever committed**
+  (`AGENT.md` §9).
+
+## 4. Repository and branch strategy
+
+| Item | Branch | Repository |
+| --- | --- | --- |
+| P8a timer fix | `fix/sippy-retransmission-timer` | this one |
+| P8 anti-fraud AS | `feat/anti-fraud-as` (already created, empty) | this one |
+| P9 chained demo | `feat/chained-as-demo` | this one |
+| P9.5 capacity probe | `feat/capacity-probe` | this one |
+| P10 platform extraction | new branch here, output is a new repository | new repository |
+| P11 TLS + harness | branches in the new repository | new repository |
+
+`main` always stays demonstrable: `make demo` passes, CI is green, and no document describes
+behaviour that is not implemented (D7).
+
+## 5. Handover protocol for Phase 2
+
+Each item runs in **its own conversation**, following `AGENT.md` §15:
+
+1. Read `AGENT.md`.
+2. Read `docs/README.md`.
+3. Read **the section of this document for that item** (§3), plus the decisions it cites.
+4. Read `docs/acceptance/criteria.md` for the acceptance items the conversation owns.
+
+Before the conversation ends:
+
+1. Run the definition of done (`AGENT.md` §16) and record evidence per §4.8.
+2. Update **this document** — item status, what was learned, and the entry state for the
+   next item. Update the `docs/roadmap.md` status line as well; it is a pointer only.
+3. Update `CHANGELOG.md` and `VERSION`; commit; **do not tag** — tagging is the
+   maintainer's step.
+4. Write down anything a fresh conversation would otherwise re-derive.
+
+Execution follows `AGENT.md` §14.2: the main agent plans and tracks status and delegates
+implementation to a team-mode member (`mode = "acceptEdits"`); it does not implement.
+
+## 6. Carried-forward technical constraints
+
+Facts about sippy and this codebase that cost real effort to discover and that every Phase 2
+item inherits. All were established by running the stack, not by assumption.
+
+- **`ED2.loop()` blocks the main thread** and must stay there (`AGENT.md` §6). Never perform
+  blocking work inside a sippy callback — including any state-store or list lookup on the
+  call path. Existing precedent for doing this correctly: rule reload is driven from a
+  loop-owned timer (`RULE_RELOAD_POLL_SECONDS`) so file I/O never blocks the stack.
+- **`ED2` and `SipConf` are process-wide singletons.** A third sippy application must pin its
+  own identity the way `_as_sip_identity` (call controller) and `_trunk_identity` (mock UAC)
+  do, or messages will carry the wrong `Via`.
+- **`SipGenericHF.getCanName()` capitalises only the first letter**, so
+  `P-Charging-Vector` leaves the AS as `P-charging-vector`. Any new compact-form header must
+  be probed, not assumed.
+- **Port collision.** Both AS instances default to `SIP_LISTEN_PORT` 5060; running two at
+  once locally requires explicit isolation.
+- **Rule-file drift.** `config/routing_rules.yaml` and `config/routing_rules.compose.yaml`
+  already differ only by address and are synchronised by hand. Adding a second AS turns two
+  copies into four. Prefer expanding the address from the environment at load time rather
+  than maintaining another copy.
+- **Chained Call-IDs.** Two B2BUAs in series mean two Call-IDs; correlation across AS
+  instances has to be solved, not assumed away (P9).
+
+## 7. Open items and registered gaps
+
+Not blocking, but each must be handled rather than discovered mid-implementation.
+
+1. **`README.md` first sentence** still says the AS *"performs number translation and
+   intelligent routing"*. It stops being true when a second use case lands, and it is the
+   front door of the repository.
+2. **Configuration multiplication** — see §6. Resolve in P8, not later.
+3. **`CallController` two-leg assumption** must be relaxed for the UAS-only reject path (P8).
+4. **Probe sippy's 608 support** before relying on it (P8 prerequisite).
+5. **Probe sippy's TLS support** before P11.
+6. **New gaps to register** as they are accepted: no `jCard`/`JWS` redress mechanism (D5);
+   a real UAC that does not declare `sip.608` would require a media announcement (D5);
+   cross-call state is in-memory and lost on restart (D9); capacity findings (P9.5).
+
+## 8. Decisions requiring maintainer approval
+
+Two changes to the rules themselves. Neither may be applied incidentally.
+
+1. **`AGENT.md` §2 scope change.** *"No performance or capacity work … no benchmarking
+   claims"* must be relaxed to permit a capacity harness while **continuing to forbid
+   published benchmark figures** (D10).
+2. **`AGENT.md` §14.3 approval.** Extracting the skeleton in P10 is a structural refactor and
+   requires an explicitly approved plan before any code moves.

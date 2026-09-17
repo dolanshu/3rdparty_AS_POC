@@ -6,10 +6,20 @@ name: CI
 # uv.lock is not in sync with pyproject.toml.
 
 on:
+  # Documentation-only changes skip the gates: there is no code, dependency or
+  # configuration change for them to verify. `paths-ignore` only skips a run when
+  # *every* changed file matches, so a commit that also touches src/, tests/,
+  # config/ or deploy/ still runs the full five layers.
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
   workflow_dispatch:
 
 concurrency:

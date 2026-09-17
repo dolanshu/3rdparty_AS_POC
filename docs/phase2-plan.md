@@ -207,20 +207,51 @@ CI and one document set, but it would overturn the fixed top-level layout of `AG
 ### D9 — Cross-call state: in-process, and never in the call controller
 
 **Decision.** Anti-fraud state lives in a **process-level module**, strictly separate from
-the per-call `CallController`. In-memory only for now; restart loses it. Redis is **deferred
-to the platform** as the second implementation of a pluggable state store.
+the per-call `CallController`. In-memory only for now; restart loses it. **Redis is deferred
+to P11**, where it becomes the second implementation of the platform's pluggable state store.
 
-**Rationale.** The most likely mistake is to put the rate window inside `CallController`,
-because `apply_call_policy()` is a convenient existing hook. `CallController` is instantiated
-**per call**, so a window held there would always contain exactly one entry: the logic would
-fail silently, and single-call unit tests would still pass. Naming the ownership boundary now
-is cheaper than debugging it later.
+**Rationale — ownership first.** The most likely mistake is to put the rate window inside
+`CallController`, because `apply_call_policy()` is a convenient existing hook.
+`CallController` is instantiated **per call**, so a window held there would always contain
+exactly one entry: the logic would fail silently, and single-call unit tests would still
+pass. Naming the ownership boundary now is cheaper than debugging it later.
 
-In-memory keeps the property this repository values most — a clean checkout reaches
+**Why Redis was proposed, and why it is not adopted here.** An external store is the
+*production-correct* answer: state survives a restart and can be shared by several AS
+instances, and it would have given the platform a real pluggability driver. The concrete
+proposal was a Redis service in `docker compose` with the demo becoming docker-only. Three
+costs outweighed it:
+
+1. **`make demo` would stop being the golden path.** `AGENT.md` §10 puts it above feature
+   work (*"If that breaks, fixing it outranks adding features"*), §16 makes it the first
+   definition-of-done item, and it is the README's front door and the M4 acceptance
+   evidence.
+2. **The test pyramid and CI would depend on an external service.** Integration and e2e run
+   in-process: `tests/conftest.py`'s `TrunkPair` fixture binds ephemeral UDP ports and shares
+   one `ED2` loop, so external state means both layers need a live Redis — and CI has **no
+   docker job** (`.github/workflows/ci.yml` still carries it as a commented-out TODO; see P3
+   in `docs/roadmap.md`). The anti-fraud logic would become unverifiable in CI and the
+   five-green-layers asset would be lost.
+3. **sippy's threading constraint.** `ED2.loop()` blocks the main thread and `AGENT.md` §6
+   forbids blocking work inside a sippy callback, so a synchronous Redis lookup on the call
+   path would stall the whole SIP stack. It needs the same treatment as rule reload — driven
+   from a loop-owned timer instead.
+
+The dual-track compromise (in-memory for `make demo` and CI, Redis for `docker compose`) was
+considered and rejected **for stage one**: it builds two store implementations before the
+decision logic exists, and P8's effort belongs in the verdict algorithm — the rate window,
+reputation decay and list matching — not in container orchestration. The dual-track split
+reappears in P11, once the abstraction gives it a reason to exist.
+
+**Do not solve "restart loses state" early.** That limitation is not merely a defect to
+tolerate: it is part of the argument for why the platform must offer a pluggable state
+store. Closing it in P8 would remove one of the reasons P10 exists.
+
+In-memory also keeps the property this repository values most — a clean checkout reaches
 `make demo` fully offline with no external service, the same principle behind the
 dependency-free console and the fixed-ipam compose network. Making the store *replaceable*
 now would be premature abstraction (`AGENT.md` §12); a clean class boundary is enough, and
-the platform will do the generalisation once two implementations are actually wanted.
+P11 does the generalisation once two implementations are actually wanted.
 
 ### D10 — Two enhancement items, one of each kind
 
@@ -305,13 +336,23 @@ scope change this requires.
   new repository follows a library standard, not this repository's application standard
   (D8).
 
-### P11 — Platform verification: TLS and the capacity harness
+### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 
-- **Goal.** On the platform: a pluggable transport with UDP and TLS implementations, and a
-  capacity harness as a first-class capability.
+- **Goal.** Prove the abstraction was right by adding a **second implementation** of each
+  pluggable dimension, plus a capacity capability:
+  - **transport** — UDP (existing) and TLS;
+  - **state store** — in-memory (existing) and **Redis**, the item deferred by D9;
+  - **capacity harness** — a first-class load capability (D10).
+- **Why Redis lands here and not in P8.** Under D3 it is a *verification output*, not a
+  discovery input: the need for an external state store is already known, so building it
+  early would teach nothing new. Its value is in demonstrating that the state store really
+  is pluggable, which requires the abstraction to exist first. This is also where the
+  "restart loses state" gap registered in P8 is finally closed.
 - **Prerequisites.** A probe of sippy's TLS support — `AGENT.md` §14 forbids assuming.
   Certificates self-signed with a generation script; **no private key is ever committed**
-  (`AGENT.md` §9).
+  (`AGENT.md` §9). Redis runs as a `docker compose` service and **in-memory stays the
+  default**, so `make demo`, the three test layers and CI keep running with no external
+  service.
 
 ## 4. Repository and branch strategy
 
@@ -385,7 +426,8 @@ Not blocking, but each must be handled rather than discovered mid-implementation
 5. **Probe sippy's TLS support** before P11.
 6. **New gaps to register** as they are accepted: no `jCard`/`JWS` redress mechanism (D5);
    a real UAC that does not declare `sip.608` would require a media announcement (D5);
-   cross-call state is in-memory and lost on restart (D9); capacity findings (P9.5).
+   cross-call state is in-memory and lost on restart (D9 — closed in P11 by the Redis
+   store); capacity findings (P9.5).
 
 ## 8. Decisions requiring maintainer approval
 

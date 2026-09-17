@@ -48,8 +48,9 @@ platform story, never on production completeness for its own sake.
 ### D2 — Direction: second use case first, then the platform
 
 **Decision.** Build a second AS use case, then extract the common skeleton into a generic
-platform. Rejected: completing the production gap register to turn this into a commercial
-product; and building the platform directly from the single existing sample.
+platform. Rejected: completing the production gap register into a commercial product (D3
+reframes that option rather than dropping it); building the platform directly from the single
+existing sample; and abandoning this line of work for an unrelated project in another domain.
 
 **Rationale.** Abstraction is induction and needs at least two instances. Extracting a
 framework from one sample produces a framework shaped like that sample — here, like number
@@ -57,6 +58,13 @@ translation — which is a different thing from a framework shaped like an AS. `
 forbids exactly this (*"no abstraction added because production would need it"*). Building
 the second use case first also means the skeleton is exercised twice before it is
 generalised, which is what makes the generalisation credible.
+
+**Why not start something unrelated instead?** The fourth option considered was to stop and
+begin an unrelated project in a different domain. That is a *breadth* strategy and it
+conflicts with D1: a portfolio piece gains more from visible depth in one domain than from a
+second shallow artefact, and everything already accumulated here — the document chain, the
+ADRs, the acceptance evidence, a working three-service stack — would be abandoned rather
+than compounded.
 
 ### D3 — The gap register is repositioned, not abandoned
 
@@ -106,15 +114,18 @@ around it.
 
 ### D5 — Rejection is `608 Rejected` (RFC 8688), without `Call-Info`
 
-**Decision.** Reject with **608**, not 603 and not 607. No `Call-Info` header is sent. The
-mock SBC's UAC side must send `Feature-Caps: *;+sip.608` in its INVITE. On the allow path
-the INVITE is relayed with **no added header**; the suspicion score is exposed only through
-metrics, trace and console.
+**Decision.** Reject with **608** — not 403, not 603, not 607. No `Call-Info` header is
+sent. The mock SBC's UAC side must send `Feature-Caps: *;+sip.608` in its INVITE. On the
+allow path the INVITE is relayed with **no added header**; the suspicion score is exposed
+only through metrics, trace and console.
 
 **Rationale.** RFC 8688 (Standards Track, December 2019) defines 608 and states in §3 that
 the intermediary *"could be a back-to-back user agent (B2BUA) or a SIP Proxy"* — precisely
 this AS.
 
+- **403 Forbidden** was rejected as semantically generic: it says "not permitted" without
+  saying *who* decided or *why*, so it discards the one piece of information this AS exists
+  to produce — that an automated anti-fraud engine made the decision.
 - **607 Unwanted (RFC 8197)** means a **human** at the target UAS marked the call unwanted.
   This AS is an automated decision, so 607 would misattribute it. RFC 8688 draws the
   distinction deliberately, because *"in some jurisdictions, this distinction is important."*
@@ -256,7 +267,8 @@ P11 does the generalisation once two implementations are actually wanted.
 ### D10 — Two enhancement items, one of each kind
 
 **Decision.** Adopt **TLS** (verification output) and a **small call-load capacity harness**
-(discovery input). CDR was considered as a candidate and **not** adopted for now.
+(discovery input). **CDR** was the strongest candidate not taken; it stays a *candidate*,
+not a rejection — see the last paragraph of this section.
 
 **Rationale.** TLS gives the platform a second real pluggable dimension (transport), which
 matters because a single sample — the state store — cannot support a claim that anything is
@@ -264,6 +276,18 @@ matters because a single sample — the state store — cannot support a claim t
 forbidden rather than merely left undone: `AGENT.md` §2 says *"No performance or capacity
 work … no benchmarking claims"* and the gap register says `Capacity | Not measured`. Filling
 a hole shows more than building on flat ground.
+
+**Why CDR was not taken, and why it may come back.** CDR generation is the only
+**cross-cutting** candidate: metrics, tracing and CDRs are things every AS needs that are not
+the business logic itself, and a cross-cutting framework is the most convincing thing a
+platform can offer — more convincing than any single feature. It was not taken because two
+enhancement items are enough for one stage, and because the capacity harness targets a hole
+rather than flat ground (D3). None of that reasoning devalues CDR, so **it should be
+reconsidered at P10/P11**, where "what does every AS get for free" is exactly the question
+the platform must answer.
+
+Recorded explicitly so that a later conversation does not read "not adopted" as "considered
+and found wanting" — the same failure mode that would have hidden the Redis reasoning (D9).
 
 **The harness must not publish benchmark numbers.** sippy's `ED2.loop()` is single-threaded
 and blocking and the transport is UDP, so absolute figures will look weak next to any

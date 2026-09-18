@@ -54,6 +54,24 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   PyPI. With the public default the build still runs `uv sync --frozen`, so a stale lock fails
   the build as before. `UV_HTTP_TIMEOUT` is raised to 180 s and the uv download cache is a
   BuildKit cache mount, so a slow link no longer fails the build outright.
+- Stopping the AS no longer leaves per-transaction retransmission timers armed (P8a,
+  `docs/phase2-plan.md` §3). sippy's `SipTransactionManager.shutdown()` cancels its own
+  `cp_timer` and releases the UDP sockets but **not** the timers each transaction owns, and
+  it drops the tables those timers hang from — so an INVITE still awaiting an answer kept
+  retransmitting into a manager whose `global_config` was already `None`, raising
+  `TypeError: 'NoneType' object is not subscriptable` in `transmitData`. Because `ED2` is a
+  process-wide singleton, that stale timer fired during later, unrelated tests: it printed a
+  traceback in **every** integration run and was the root cause of the rare (~1 in 6) random
+  failure of `test_next_hop_failover_uses_the_second_hop`, the natural trigger being the
+  failover test's own unreachable first hop. `AsStack.stop()` now cancels what the process
+  armed before sippy's own shutdown: every `teA`…`teG` timer still scheduled
+  (`as_app.sip_adapter.cancel_transaction_timers`) and every per-call no-answer timer
+  (`TrunkCallMap.dispose()` → `CallController.dispose()`), which was a second instance of
+  the same bug — it survived the manager and raised the identical `TypeError` through
+  `sendResponse`. sippy itself is untouched. This also closes the gap row "Closing a
+  transaction manager mid-retransmission" (`docs/production-gaps.md`); the remaining caveat
+  — in-flight transactions are cancelled rather than drained, so no final response reaches
+  the peer — is recorded there.
 - `tools/capture_call.py` now clears every previously generated sample in
   `docs/specs/message-samples/` (everything except that folder's `README.md`) before writing
   a new capture. It previously removed only `NN-*.txt`, so a capture that produced fewer
@@ -75,6 +93,14 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ### Verified
 
+- **P8a repeat-run evidence (2026-09-18, real commands).** Before the fix, every
+  `pytest tests/integration -q -s` run printed at least one `TypeError` traceback from
+  `SipTransactionManager.transmitData` (5/5 sampled runs carried 1–2), while 64 consecutive
+  integration-layer runs produced no red test at all — the defect is deterministic, the 1-in-6
+  *failure* is its timing-dependent consequence. After the fix: **32 consecutive integration
+  runs, 0 failures and 0 `TypeError` tracebacks**, `pytest tests -q` → 128 passed, and all
+  four gates green. The new regression test deterministically fails when the cancellation is
+  removed: `AssertionError: 2 timer(s) still armed on a stopped transaction manager`.
 - Compose demo run (2026-09-16, real output): `docker compose -f deploy/docker-compose.yml
   up -d` brought all three services `Up`; the mock's default call completed with Call-ID
   `e48cb46795675ab0f76f5578cf5b4449`, the AS log showing `invite received on the trunk` →

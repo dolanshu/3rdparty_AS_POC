@@ -751,8 +751,27 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   resolved and records the one remaining caveat (a wheel installed without its metadata).
 - **P6 — sippy retransmission-timer shutdown fix.** Cancel per-transaction timers on
   `SipTransactionManager.shutdown()` to remove the rare failover test flake (registered gap,
-  deferred). **[Optional · Status: Pending]** Parked by the maintainer on 2026-09-17:
-  deferred to a separate conversation, per the maintainer.
+  deferred). **[Optional · Status: Done]** (2026-09-18, executed as **P8a** in
+  `docs/phase2-plan.md` §3 on branch `fix/sippy-retransmission-timer`)
+
+  **Done in this conversation (2026-09-18).** `AsStack.stop()` now cancels everything the
+  stack armed before sippy's own `shutdown()` runs:
+  `as_app.sip_adapter.cancel_transaction_timers()` walks both transaction tables
+  (`tclient`, `tserver`) of the manager and cancels each `teA`…`teG` timer still scheduled,
+  and `TrunkCallMap.dispose()` cancels the per-call no-answer timers of the calls that are
+  still waiting for a next hop. sippy itself is untouched — it is an installed dependency.
+
+  **Evidence (real commands, real output; details in the P8a section of
+  `docs/acceptance/report.md`).** Before the fix every `pytest tests/integration -q -s`
+  run printed at least one
+  `TypeError: 'NoneType' object is not subscriptable` from `SipTransactionManager.transmitData`
+  (5/5 sampled runs had 1–2 occurrences) — the defect was deterministic; the *test failure*
+  was the rare outcome (0 failures in 64 consecutive integration-layer runs, so the flake
+  itself did not recur during this collection). After the fix: **32 consecutive integration
+  runs green, 0 failures, 0 `TypeError` tracebacks**, plus 128 passed for the whole three-layer
+  suite and all four gates green. The gap row "Closing a transaction manager
+  mid-retransmission" in `docs/production-gaps.md` is resolved, with one caveat recorded
+  (in-flight transactions are cancelled, not drained: no final response reaches the peer).
 - **P7 — Capture clears stale samples before writing.** `tools/capture_call.py` deleted only
   `NN-*.txt` before writing a new capture, so a run that produced fewer messages than the
   previous one could leave orphaned sample files that no longer belong to the captured call.
@@ -773,7 +792,7 @@ do, and that drift is already a registered production gap.
 
 | Item | Status | Branch / repository |
 | --- | --- | --- |
-| P8a — sippy retransmission-timer shutdown fix | not started (blocker for P9.5) | `fix/sippy-retransmission-timer` |
+| P8a — sippy retransmission-timer shutdown fix | done (2026-09-18) | `fix/sippy-retransmission-timer` |
 | P8 — anti-fraud AS (second use case) | not started (branch created, empty) | `feat/anti-fraud-as` |
 | P9 — chained demo (SBC → AS-1 → AS-2 → core) | not started | `feat/chained-as-demo` |
 | P9.5 — read-only capacity probe | not started | `feat/capacity-probe` |

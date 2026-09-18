@@ -9,7 +9,7 @@
 | `main.py` | Process entry point: settings, logging, signal handlers, self-check, rule set, then the sippy event loop. `AsStack` owns `SipConf` + `SipTransactionManager` + `ED2.loop()` and shuts the loop down from a loop-owned timer |
 | `bootstrap.py` | `AsSettings` (pydantic-settings), port availability probe, `run_startup_self_check`, `ShutdownController`, signal handler installation |
 | `call_controller.py` | Call Control Logic: `CallController` relays sippy events between the trunk leg (`uaA`) and the next-hop leg (`uaO`) and owns the translation seam; `TrunkCallMap` is the trunk entry point and enforces the peer allowlist; both record counters, trace and dispositions |
-| `sip_adapter.py` | The only place (with `call_controller.py`) that touches sippy objects; plain-data view `TrunkMessage` / `CallLeg`, Request-URI helpers, peer allowlist, `PASSTHROUGH_HEADERS` |
+| `sip_adapter.py` | The only place (with `call_controller.py`) that touches sippy objects; plain-data view `TrunkMessage` / `CallLeg`, Request-URI helpers, peer allowlist, `PASSTHROUGH_HEADERS`, and `cancel_transaction_timers()` — the per-transaction timer cancellation the shutdown path runs |
 | `errors.py` | `AsErrorCode` (identifier, SIP status, message) and `AsError` with structured log fields |
 | `routing/rules.py` | Pydantic model of the rules file, YAML loading, validation, `RuleSet`, `RuleSetStore` with reload detection |
 | `routing/engine.py` | Pure functions: number format classification, translation, rule matching, decision |
@@ -141,6 +141,16 @@ start -> load settings -> configure logging -> install signal handlers
 
 Signal handlers only *request* shutdown; the loop decides when to stop, because
 `ED2.loop()` cannot be interrupted from a handler.
+
+**Teardown order matters.** `AsStack.stop()` cancels what the process itself armed before
+it hands anything to sippy: the loop poll timers, then the per-call no-answer timers
+(`TrunkCallMap.dispose()`), then every per-transaction timer still scheduled on the
+transaction manager (`as_app.sip_adapter.cancel_transaction_timers()`), and only then
+`SipTransactionManager.shutdown()`. sippy's own `shutdown()` releases the sockets and
+cancels its cache-purge timer but **not** the timers the transactions own, and it drops the
+tables they hang from — so anything left armed fires into a manager whose `global_config`
+is already `None`. The cancellation therefore has to run first. See the resolved gap row
+"Closing a transaction manager mid-retransmission" in `docs/production-gaps.md`.
 
 ### 3.3 Number translation seam
 

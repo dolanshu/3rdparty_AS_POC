@@ -1725,3 +1725,211 @@ it was not downloaded from this environment.
   built and run locally only.
 - **The badge reflects the latest run of `main` only.** It is not per-milestone evidence;
   the run link is the citable artefact.
+
+## Phase 2 — P8a sippy retransmission-timer shutdown fix (2026-09-18)
+
+Branch `fix/sippy-retransmission-timer` (branched from `main` at `7c4a417`). Item P8a in
+`docs/phase2-plan.md` §3; **not merged into `main` and not tagged** — both are the
+maintainer's steps. Acceptance item: **ACC-P8A-001** in `docs/acceptance/criteria.md`.
+
+What was verified: stopping the AS signalling stack leaves **no** per-transaction timer
+armed, so a retransmission that was pending can never outlive the transaction manager it
+belongs to. sippy 2.4.2 itself is untouched — the whole change lives in this repository's
+`src/as_app/`, so nothing under `site-packages` or `.venv` was modified and ADR-0001 needs
+no new consequence.
+
+Result: **accepted** (with the limitations recorded under *Open items* below).
+
+### 1. Command and output
+
+Verification command (ACC-P8A-001), run from the repository root on this branch:
+
+```bash
+uv run pytest tests/integration/test_signalling_path.py tests/unit/test_sip_adapter.py -q
+```
+
+Expected result: every test passes. In particular
+`test_stopping_the_stack_leaves_no_transaction_timer_armed` asserts the premise (the
+abandoned attempt towards the unreachable first hop really left a retransmission pending)
+and then asserts that no `ED2` timer owned by the manager survives `AsStack.stop()`.
+
+Real result:
+
+```text
+14 passed in 10.05s
+```
+
+Negative control (the guard is real, not vacuous): with the one call to
+`cancel_transaction_timers()` in `AsStack.stop()` commented out and everything else left
+alone, the same test fails — the source was restored immediately afterwards and re-verified
+green:
+
+```text
+E           AssertionError: 2 timer(s) still armed on a stopped transaction manager
+E           assert not [<sippy.Core.EventDispatcher.EventListener object at 0x7d33bd33ab60>,
+                        <sippy.Core.EventDispatcher.EventListener object at 0x7d33bd33a290>]
+```
+
+Full gate chain (real output lines, in this order):
+
+```text
+$ uv run ruff format --check .
+68 files already formatted
+$ uv run ruff check .
+All checks passed!
+$ uv run mypy
+Success: no issues found in 20 source files
+$ uv run pytest tests -q
+128 passed in 19.17s
+$ make demo
+demo result: call answered and released; number translation applied on the wire
+```
+
+`make demo` completed with **exit 0** and Call-ID
+`fd044ebb021509b7a85f5f538ed92a1e` (`+8613800138000` → `013800138000`, rule `R-MOB-CM-40`,
+14 messages on the wire, `status: 200`).
+
+Repeat-run evidence. **Before the fix** the defect was deterministic even though the *test
+failure* was rare — every integration run printed at least one `TypeError` traceback; 5/5
+sampled runs carried 1–2 occurrences:
+
+```text
+2026-09-18 20:41:56.199664 @.../pytest/__main__.py[18301] EventDispatcher2: unhandled exception when processing timeout event:
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File ".../site-packages/sippy/Core/EventDispatcher.py", line 193, in dispatchTimers
+    el.cb_func(*el.cb_params)
+  File ".../site-packages/sippy/SipTransactionManager.py", line 557, in timerA
+    self.transmitData(t.userv, t.data, t.address)
+  File ".../site-packages/sippy/SipTransactionManager.py", line 840, in transmitData
+    self.global_config['_sip_logger'].write(msg, data)
+TypeError: 'NoneType' object is not subscriptable
+----------------------------------------------------------------------
+```
+
+Reproduced with `.venv/bin/python -m pytest tests/integration -q -s` — equivalent to
+`uv run pytest tests/integration -q -s`, since the project is installed editable; the bare
+interpreter was used only to keep the repeat loop free of per-run `uv sync` overhead. In its
+purest form it reproduced 1/1 in a throwaway probe that stops a stack whose outbound INVITE
+is still unanswered and then drives the shared loop. Across **64 consecutive integration runs
+before the fix the suite stayed green 64/64** — so this collection did not observe the 1-in-6
+*failure*, only the defect behind it.
+
+**After the fix:**
+
+| Evidence | Command | Result |
+| --- | --- | --- |
+| Integration layer, repeat | 42 × `.venv/bin/python -m pytest tests/integration -q -s` | 41 green, **1 failure** — see *Open items*; `TypeError` tracebacks: **0 in all 42 runs** |
+| The previously flaky test, repeat | 30 × `pytest tests/integration/test_translation.py::test_next_hop_failover_uses_the_second_hop -q -s` | **30 green**, 0 `TypeError` tracebacks |
+| Full three-layer suite | `uv run pytest tests -q` | 128 passed |
+
+The equivalent loop a reviewer can run (it yields ≥1 traceback per run if the cancellation
+is removed from `AsStack.stop()`):
+
+```bash
+for i in $(seq 1 30); do uv run pytest tests/integration -q -s > "/tmp/p8a.$i.log" 2>&1; done
+grep -c TypeError /tmp/p8a.*.log
+```
+
+### 2. Log excerpt
+
+Call-ID **`f6b0b203d0f55828e86bd5ef60c39c81`** — the failover scenario this item exists to
+make safe, run against a real AS stack whose first hop is unreachable (structured logging on,
+real lines, verbatim):
+
+```text
+{"timestamp": "2026-09-18T21:27:30+0800", "level": "info", "module": "call_controller",
+ "call_id": "f6b0b203d0f55828e86bd5ef60c39c81", "direction": "in", "peer": "127.0.0.1:46839",
+ "event": "invite received on the trunk", "method": "INVITE", "called_number": "+8613800138000"}
+{"timestamp": "2026-09-18T21:27:30+0800", "level": "info", "module": "call_controller",
+ "call_id": "f6b0b203d0f55828e86bd5ef60c39c81", "direction": "internal", "peer": "-",
+ "event": "call translated", "rule_id": "R-MOB-40", "called_number": "+8613800138000",
+ "translated_number": "013800138000", "target_format": "national",
+ "next_hops": "s-sbc-primary,s-sbc-failover"}
+{"timestamp": "2026-09-18T21:27:30+0800", "level": "info", "module": "call_controller",
+ "call_id": "f6b0b203d0f55828e86bd5ef60c39c81", "direction": "out", "peer": "127.0.0.1:45221",
+ "event": "invite originated towards the next hop", "method": "INVITE",
+ "called_number": "013800138000", "next_hop": "s-sbc-primary", "rule_id": "R-MOB-40"}
+{"timestamp": "2026-09-18T21:27:33+0800", "level": "warning", "module": "call_controller",
+ "call_id": "f6b0b203d0f55828e86bd5ef60c39c81", "direction": "internal", "peer": "-",
+ "event": "next hop did not answer in time", "next_hop": "s-sbc-primary",
+ "error_code": "AS-PEER-002"}
+{"timestamp": "2026-09-18T21:27:33+0800", "level": "warning", "module": "call_controller",
+ "call_id": "f6b0b203d0f55828e86bd5ef60c39c81", "direction": "internal", "peer": "-",
+ "event": "next hop failed; trying failover hop", "failed_hop": "s-sbc-primary",
+ "failover_hop": "s-sbc-failover", "error_code": "AS-PEER-002"}
+{"timestamp": "2026-09-18T21:27:33+0800", "level": "info", "module": "call_controller",
+ "call_id": "f6b0b203d0f55828e86bd5ef60c39c81", "direction": "out", "peer": "127.0.0.1:48124",
+ "event": "invite originated towards the next hop", "method": "INVITE",
+ "called_number": "013800138000", "next_hop": "s-sbc-failover", "rule_id": "R-MOB-40"}
+{"timestamp": "2026-09-18T21:27:34+0800", "level": "info", "module": "call_controller",
+ "call_id": "f6b0b203d0f55828e86bd5ef60c39c81", "direction": "internal", "peer": "-",
+ "event": "call finished", "disposition": "completed"}
+EVIDENCE call f6b0b203d0f55828e86bd5ef60c39c81 released=True
+EVIDENCE stack stopped
+EVIDENCE timers still owned by the stopped manager: 0
+```
+
+The last three lines come from the throwaway probe that drove the shared loop for another
+3 s **after** `AsStack.stop()`: the call completed, the stack stopped cleanly, no timer was
+left scheduled on the stopped manager, and `ED2` printed nothing.
+
+**Why there is no structured log line for the defect itself.** The failure is a timer
+callback that runs when there is no call state left to key it by, so it never reaches the
+structured log: before the fix it appeared only as the raw `ED2` dump quoted in section 1.
+That absence is why the defect survived review — the log looks clean while the process is
+not.
+
+### 3. CI
+
+**CI has not run on this branch.** Nothing was pushed: `git push` — including pushing this
+branch — requires maintainer approval in this conversation and was not requested
+(`AGENT.md` §13). The committed workflow `.github/workflows/ci.yml` would run the five
+layers on push, but no run exists for `fix/sippy-retransmission-timer`, and the `README.md`
+badge reflects the latest run of `main`, not of this branch. Everything in this section was
+executed locally with real commands and real output; nothing here is a CI conclusion.
+
+### 4. Capture
+
+`n/a` — deliberately, and not an omission. This fix changes no wire behaviour: no SIP
+message, header or body is added, removed or altered, and while the stack is running no
+retransmission is suppressed earlier or later than RFC 3261 allows. A capture of the
+failover flow would be byte-identical before and after, which is why no pcap is cited and
+none was fabricated. The wire-level evidence for the surrounding call is reproduced with
+`make capture` (`docs/specs/message-samples/`, generated and gitignored — `AGENT.md` §13
+forbids committing captures); `make demo` above is the same flow with narration.
+
+### Item results
+
+| ID | Result |
+| --- | --- |
+| ACC-P8A-001 | **accepted** — 14 passed; the guard fails without the fix; 30/30 repeat runs of the previously flaky test green with no `TypeError` traceback |
+
+### Open items raised by this run
+
+- **One integration-layer failure occurred in the 42 after-fix runs, and it is not this
+  fix's.** Run 16 failed in `test_counters_health_endpoint_and_graceful_shutdown` with
+  `http.client.BadStatusLine: GET /healthz HTTP/1.1` while polling the health endpoint of
+  the AS subprocess; the same test then passed **20/20** in isolation. Nothing in this item
+  touches startup, the health endpoint or HTTP. Observation worth registering: the test
+  allocates the internal API's **TCP** port with a helper that probes for a free **UDP**
+  port (`_free_udp_port()` in `tests/integration/test_signalling_path.py`), so nothing
+  guarantees the TCP port is free — a stray listener answers the HTTP request with something
+  that is not HTTP. Left untouched here as it is outside P8a's scope; it is a candidate row
+  for `docs/production-gaps.md` or a follow-up item.
+- **The mock S-SBC carries the same latent pattern.** `SMockApplication.stop()` calls sippy's
+  `SipTransactionManager.shutdown()` directly for its two managers. It was left unchanged
+  because no run showed either manager leaving a timer armed — in every suite here the mock's
+  legs complete — but a future item whose mock call is never answered (for example the P9.5
+  load probe) would meet exactly what P8a fixed on the AS side. Recorded in
+  `docs/phase2-plan.md` §3 (P8a, point 5) instead of being assumed away.
+- **The 1-in-6 failure was never observed.** Datasets: 64 pre-fix and 42 post-fix
+  integration runs, plus 30 post-fix runs of the failover test alone. The *defect* reproduced
+  in every pre-fix run (≥1 `TypeError` each); the red-test outcome did not recur in any of
+  them, so this run can confirm the cause is gone but cannot reproduce the original failure
+  rate.
+- **Version and release node.** `VERSION`, `pyproject.toml` and `uv.lock` were bumped to
+  `0.5.1` (`uv lock --check` passes; the lock diff is the single project-version line, still
+  on public PyPI). The P8a entries were added to the existing `[Unreleased]` node rather than
+  opening a `[0.5.1]` node, because `[Unreleased]` already carries the P1–P7 work; folding
+  that node into a dated `0.5.1` release is a maintainer decision.

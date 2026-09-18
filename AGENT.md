@@ -385,11 +385,22 @@ Additional expectations:
   when the maintainer has asked for it **in that conversation**. An agent does not push as
   part of "finishing" a task, and must not treat an approval given for earlier work as
   covering later work. Changes to the git configuration (for example `git remote set-url`)
-  need the same explicit approval. Related: agents do not create tags — see §15.
+  need the same explicit approval. Related: agents do not create tags — see §15; branches are
+  governed by the same principle (next rule).
+- **Agents do not create branches without the maintainer's explicit approval given in that
+  conversation.** The same applies to renaming, deleting and pushing a branch. Work happens
+  **on the branch the maintainer names or has approved** — an agent never decides where work
+  lives. *Why this rule exists:* on 2026-09-18 an agent created
+  `fix/sippy-retransmission-timer` on its own initiative; that work was legitimate only
+  because the maintainer later approved landing it, and the gap is now closed. **Every branch
+  must have a stated purpose and an end condition** — what it is for, and what finishes it
+  (merged, released, abandoned). A branch with no purpose or no end condition is not created,
+  which is also why an empty branch must not be left sitting around.
 - **Nothing enters `main` without the maintainer's explicit approval given in that
   conversation.** `main` is the maintainer's, not the agents': not a commit, not a merge,
   not a cherry-pick, not a history rewrite, not a file — however small and however obviously
-  correct it looks. All agent work happens on branches. The approval is **per change and
+  correct it looks. All agent work happens on **the branch the maintainer names or approves**
+  (rule above). The approval is **per change and
   non-transferable**: an approval given for earlier work does not authorise later work, and
   "finishing a task" is not an implicit approval. Anything found to have entered `main`
   without that approval is to be found and taken back — report it to the maintainer and
@@ -466,8 +477,11 @@ To spawn a writing member:
      `team_create` only to pre-create a named team or to group several members, then pass
      its `team_name`.
    - `prompt`: the milestone brief. State the scope, the opening ritual (§15 handover
-     protocol), the DoD (§16), and that the member owns the code, tests, docs and commit
-     — **not** the tag: tagging is the maintainer's step (agents do not tag).
+     protocol), the DoD (§16), **the branch the member works on — named explicitly**, and
+     that the member owns the code, tests, docs and commit — **not** the tag: tagging is the
+     maintainer's step (agents do not tag). Creating a branch is not part of implementing a
+     milestone: if the named branch does not exist, the member stops and asks instead of
+     creating one (§13).
    - `mode`: `"acceptEdits"`. This auto-accepts the member's file edits so execution does
      not stall waiting for per-edit approval. (Use `"bypassPermissions"` only when shell
      commands need auto-approval too; otherwise prefer the narrower `"acceptEdits"`.)

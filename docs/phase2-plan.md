@@ -394,6 +394,35 @@ scope change this requires.
 `main` always stays demonstrable: `make demo` passes, CI is green, and no document describes
 behaviour that is not implemented (D7).
 
+### Main audit ruling — 2026-09-18
+
+Under `AGENT.md` §13, verifying what is on `main` belongs in the closing handover. On
+2026-09-18 the maintainer reviewed every commit on `main` since 2026-09-17 and confirmed that
+all of them are legitimate. They fall into three groups: Phase 1 work (the P1–P7 items and
+their documentation), the Phase 2 plan itself, and CI / repository hygiene. P1–P7 was Phase 1
+content and therefore belongs on `main`; the Phase 2 plan is **specially authorised** because
+it must carry the plans for both the second AS and the platform; the CI change is Phase 1 work.
+
+**`b8ef30c` is within that authorisation.** The Phase 2 plan commit also touched
+`docs/README.md`, `docs/roadmap.md` and `docs/specs/index.md`. Those edits are index and
+navigation pointers that hang the plan into the documentation map; they introduce no
+unimplemented behaviour. The maintainer explicitly approved them, so **no revert is
+required** — recorded here so that a later audit does not raise them again.
+
+**No unauthorised entry was found**, so nothing had to be taken back under the §13 approval
+rule. Two accepted deltas are recorded because an audit would otherwise "discover" them:
+
+1. The two documentation commits `b461f80` and `d07b564` (the phantom-reference corrections)
+   were committed onto `fix/sippy-retransmission-timer` instead of `main`, because two agents
+   shared one working tree while that branch was checked out. `main` therefore still carries
+   the four wrong `§14.3` cross-references (three in this document, one in `docs/roadmap.md`)
+   and the wrong `§14.6` reference in `tools/README.md`. Under §13 nothing enters `main`
+   without approval, so they stay on the branch and will only reach `main` if that branch is
+   merged; the maintainer accepted the cost.
+2. `main` is ahead of `origin/main` by the unpushed rules commits (`61cab03`: the §13
+   approval rule and the §14.1 one-writing-agent rule). Pushing is the maintainer's step, not
+   an agent's (§13).
+
 ## 5. Handover protocol for Phase 2
 
 Each item runs in **its own conversation**, following `AGENT.md` §15:

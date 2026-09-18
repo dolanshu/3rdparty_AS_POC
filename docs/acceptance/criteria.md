@@ -58,3 +58,9 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | --- | --- | --- | --- | --- |
 | ACC-M4-001 | Every acceptance item carries the four kinds of evidence | review of `docs/acceptance/report.md` | no item without evidence | REQ-NF-007 |
 | ACC-M4-002 | `docs/demo-script.md` rehearsed end to end | `make demo` | the narrated flow completes | REQ-NF-008 |
+
+## Phase 2 — P8a sippy retransmission-timer shutdown (executed 2026-09-18)
+
+| ID | Criterion | Verification command | Expected result | Requirement |
+| --- | --- | --- | --- | --- |
+| ACC-P8A-001 | Stopping the signalling stack leaves no per-transaction timer armed, so a retransmission that was pending can never outlive its transaction manager | `uv run pytest tests/integration/test_signalling_path.py tests/unit/test_sip_adapter.py -q` | every test passes; `test_stopping_the_stack_leaves_no_transaction_timer_armed` first asserts that the abandoned first-hop INVITE really left a pending retransmission and then asserts that no `ED2` timer owned by the manager survives `AsStack.stop()`. Removing the cancellation makes it fail with `AssertionError: 2 timer(s) still armed on a stopped transaction manager` | REQ-F-011, REQ-NF-004 |

@@ -28,16 +28,18 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from ipaddress import ip_address
-from typing import Final
+from typing import Any, Final
 
 from as_app.errors import AsError, AsErrorCode
 from as_app.routing.rules import NextHop
 
 __all__ = [
     "PASSTHROUGH_HEADERS",
+    "TRANSACTION_TIMER_NAMES",
     "CallLeg",
     "TrunkMessage",
     "build_request_uri",
+    "cancel_transaction_timers",
     "extract_called_number",
     "is_allowed_peer",
 ]
@@ -69,6 +71,21 @@ PASSTHROUGH_HEADERS: Final[tuple[str, ...]] = (
     "subject",
     "organization",
     "priority",
+)
+
+#: The per-transaction timer attributes of sippy's ``SipTransaction``, named after the
+#: timer roles in its own code: ``teA`` retransmits a request (and a final response on a
+#: server transaction), ``teB``…``teG`` bound how long a transaction is kept alive
+#: (RFC 3261 section 17). Every one of them is owned by the transaction, not by the
+#: manager, so ``SipTransactionManager.shutdown()`` cancels none of them.
+TRANSACTION_TIMER_NAMES: Final[tuple[str, ...]] = (
+    "teA",
+    "teB",
+    "teC",
+    "teD",
+    "teE",
+    "teF",
+    "teG",
 )
 
 
@@ -113,6 +130,48 @@ class TrunkMessage:
     source_address: str = "-"
     headers: dict[str, str] = field(default_factory=dict)
     body: str = ""
+
+
+def cancel_transaction_timers(transaction_manager: Any) -> int:
+    """Cancel every per-transaction timer of a sippy transaction manager.
+
+    ``SipTransactionManager.shutdown()`` cancels only its own cache-purge timer
+    (``cp_timer``) and releases the UDP sockets, so every timer a transaction still owns
+    stays armed in the process-wide ``ED2`` loop, which nothing stops with the manager.
+    Such a timer fires into a manager whose ``global_config`` is already ``None`` and
+    raises ``TypeError: 'NoneType' object is not subscriptable`` in ``transmitData`` —
+    which is exactly why a retransmission that was pending when a manager stopped could
+    break an unrelated test sharing the same loop. Cancelling them first makes the
+    shutdown complete.
+
+    It has to happen *before* ``shutdown()``: that call drops the transaction tables the
+    timers hang from, so afterwards there is nothing left to walk.
+
+    A server transaction only carries the timer attributes its own branch of RFC 3261
+    uses, so a missing attribute is skipped rather than treated as an error. An attribute
+    left pointing at a timer that has already fired is skipped too: ``ED2`` nulls the
+    callback when a timer has run, so the timer is dead and only the reference remains.
+
+    Args:
+        transaction_manager: A sippy ``SipTransactionManager``, live or already stopped.
+
+    Returns:
+        The number of timers cancelled, ``0`` when nothing was pending.
+    """
+    cancelled = 0
+    for table_name in ("tclient", "tserver"):
+        transactions = getattr(transaction_manager, table_name, None)
+        if not transactions:
+            continue
+        for transaction in list(transactions.values()):
+            for timer_name in TRANSACTION_TIMER_NAMES:
+                timer = getattr(transaction, timer_name, None)
+                if timer is None or getattr(timer, "cb_func", None) is None:
+                    continue
+                timer.cancel()
+                setattr(transaction, timer_name, None)
+                cancelled += 1
+    return cancelled
 
 
 def extract_called_number(request_uri: str) -> str:

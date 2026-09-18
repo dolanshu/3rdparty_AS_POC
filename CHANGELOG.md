@@ -54,14 +54,58 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   PyPI. With the public default the build still runs `uv sync --frozen`, so a stale lock fails
   the build as before. `UV_HTTP_TIMEOUT` is raised to 180 s and the uv download cache is a
   BuildKit cache mount, so a slow link no longer fails the build outright.
+- Stopping the AS no longer leaves per-transaction retransmission timers armed (P8a,
+  `docs/phase2-plan.md` §3). sippy's `SipTransactionManager.shutdown()` cancels its own
+  `cp_timer` and releases the UDP sockets but **not** the timers each transaction owns, and
+  it drops the tables those timers hang from — so an INVITE still awaiting an answer kept
+  retransmitting into a manager whose `global_config` was already `None`, raising
+  `TypeError: 'NoneType' object is not subscriptable` in `transmitData`. Because `ED2` is a
+  process-wide singleton, that stale timer fired during later, unrelated tests: it printed a
+  traceback in **every** integration run and was the root cause of the rare (~1 in 6) random
+  failure of `test_next_hop_failover_uses_the_second_hop`, the natural trigger being the
+  failover test's own unreachable first hop. `AsStack.stop()` now cancels what the process
+  armed before sippy's own shutdown: every `teA`…`teG` timer still scheduled
+  (`as_app.sip_adapter.cancel_transaction_timers`) and every per-call no-answer timer
+  (`TrunkCallMap.dispose()` → `CallController.dispose()`), which was a second instance of
+  the same bug — it survived the manager and raised the identical `TypeError` through
+  `sendResponse`. sippy itself is untouched. This also closes the gap row "Closing a
+  transaction manager mid-retransmission" (`docs/production-gaps.md`); the remaining caveat
+  — in-flight transactions are cancelled rather than drained, so no final response reaches
+  the peer — is recorded there.
 - `tools/capture_call.py` now clears every previously generated sample in
   `docs/specs/message-samples/` (everything except that folder's `README.md`) before writing
   a new capture. It previously removed only `NN-*.txt`, so a capture that produced fewer
   messages than the previous run could leave orphaned sample files behind. The directory now
   always holds exactly the messages of the most recent capture (P7, `docs/roadmap.md`).
+- Four documents cited an `AGENT.md` section that does not exist. They now cite the places
+  that actually carry the rules they meant: `docs/roadmap.md` (the M1 open item on scope
+  conflict) cites the `AGENT.md` §15 handover protocol, which is where *"a milestone
+  conversation may not change scope that belongs to another milestone"* lives;
+  `docs/phase2-plan.md` (the `Related:` header, the P10 constraints, and §8 item 2, whose
+  heading is now *"`AGENT.md` §14 rule 3 approval (no unconfirmed refactors)"*) cites
+  `AGENT.md` §14 rule 3, which already forbids deleting code, rewriting large files or
+  restructuring directories without an explicit, approved plan, with the §8 lead-in
+  corrected to match — only item 1 changes a rule, item 2 is an approval an existing rule
+  requires; and `tools/README.md` ("Rules for new tools", §14.6) cites `AGENT.md` §14 rule 6
+  (report honestly), which is the rule *"Do not claim passed tests, verified behaviour or
+  working calls that were not executed"*. Documentation only; `AGENT.md` itself is
+  unchanged.
 
 ### Verified
 
+- **P8a evidence (2026-09-18, real commands; two separate measurements, not merged).**
+  *The defect* is deterministic: 5/5 `pytest tests/integration -q -s` runs before the fix
+  printed at least one `TypeError` traceback from `SipTransactionManager.transmitData` (four
+  runs 1, one run 2). *The flake* is not: 64 consecutive `pytest tests/integration -q` runs
+  before the fix were **64 green, 0 failures**, so the 1-in-6 failure did not recur and was
+  never reproduced — only its cause was. After the fix, with the same commands: **0 `TypeError`
+  tracebacks in 42 `-q -s` runs** (41 green; the one failure is a different, unrelated test —
+  see `docs/acceptance/report.md`), **30/30 `-q` runs green** with the command identical to
+  the 64 pre-fix runs, and **30/30** runs of
+  `test_next_hop_failover_uses_the_second_hop` green. `pytest tests -q` → 128 passed and all
+  four gates are green. **The primary guard is the deterministic regression test, not the
+  repeat loop**: it fails on every run when the cancellation is removed
+  (`AssertionError: 2 timer(s) still armed on a stopped transaction manager`).
 - Compose demo run (2026-09-16, real output): `docker compose -f deploy/docker-compose.yml
   up -d` brought all three services `Up`; the mock's default call completed with Call-ID
   `e48cb46795675ab0f76f5578cf5b4449`, the AS log showing `invite received on the trunk` →

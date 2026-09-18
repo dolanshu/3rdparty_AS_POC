@@ -3,7 +3,7 @@
 - **Status:** accepted (planning artefact, no implementation yet)
 - **Date:** 2026-09-18
 - **Owner:** project maintainer
-- **Related:** `AGENT.md` §2, §14.3, §15 · `docs/roadmap.md` · `docs/production-gaps.md` · `docs/specs/index.md`
+- **Related:** `AGENT.md` §2, §14 rule 3, §15 · `docs/roadmap.md` · `docs/production-gaps.md` · `docs/specs/index.md`
 
 ## 1. Purpose and scope of this document
 
@@ -316,6 +316,79 @@ scope change this requires.
   later test.
 - **Type.** Bug fix. Independent branch, mergeable on its own; it makes `main` strictly more
   stable.
+- **Status: done (2026-09-18)** on `fix/sippy-retransmission-timer` (branched from `main`
+  at `7c4a417`). Acceptance item **ACC-P8A-001** with evidence in
+  `docs/acceptance/report.md`. **Not merged and not tagged** — both are the maintainer's
+  steps (§4, `AGENT.md` §13).
+- **Deviation from §5 (version and CHANGELOG), maintainer decision 2026-09-18.** This
+  handover protocol asks a Phase 2 conversation to "update `CHANGELOG.md` and `VERSION`";
+  P8a deliberately does not. `VERSION`, `pyproject.toml` and `uv.lock` stay at **`0.5.0`**
+  and every P8a entry stays under the existing **`[Unreleased]`** heading — no dated
+  release node is opened. Reasons, so a fresh conversation does not have to re-derive them:
+  no Phase 2 item has been merged into `main` yet (D7: an item is merged only when its own
+  definition of done is met, and the maintainer confirmed that nothing goes to `main` at
+  this point), and `CHANGELOG.md` line 7 states *"one version node per milestone"* — P8a is
+  not a milestone, it is a Phase 2 item. The version and its release node are created when
+  the item actually lands on `main`. A `0.5.1` node must **not** be opened for this branch
+  while it is unmerged.
+
+**Done in this conversation (2026-09-18).** Nothing under `site-packages` changed: sippy
+stills ship the defect, and the repository cancels what it armed itself, from its own
+`src/as_app/` — so no monkey-patching and therefore no ADR-0001 consequence to reopen.
+
+- `as_app/sip_adapter.py` — `cancel_transaction_timers(manager)` walks both transaction
+  tables (`tclient`, `tserver`) and cancels every `teA`…`teG` timer that is still
+  scheduled, returning how many it cancelled. It has to run **before**
+  `SipTransactionManager.shutdown()`, because that call drops the very tables the timers
+  hang from.
+- `as_app/main.py` — `AsStack.stop()` calls it, then `SipTransactionManager.shutdown()`
+  exactly as before. This is the whole production `SIGTERM` path, so a real AS process
+  that stops mid-retransmission no longer throws on the way out.
+- `as_app/call_controller.py` — `TrunkCallMap.dispose()` → `CallController.dispose()`
+  cancels the per-call **no-answer timer** as well. It was a second instance of the same
+  bug found while probing: it survives the manager, fires into `_sip_tm` being `None` and
+  raises the identical `TypeError` through `sendResponse`. Fixing the transaction timers
+  alone would have left this one standing.
+- Tests: 4 unit tests (`tests/unit/test_sip_adapter.py`) cover the cancellation itself —
+  every armed timer cancelled once, idempotent second pass, an already fired timer is not
+  counted, an already shut-down manager does not raise — and one integration test
+  (`test_stopping_the_stack_leaves_no_transaction_timer_armed`) fails the moment the
+  cancellation is removed, with `AssertionError: 2 timer(s) still armed on a stopped
+  transaction manager`. That makes the guard deterministic rather than a repeat-the-flake
+  lottery.
+
+**What was learned — how sippy owns its timers (every later item inherits this).**
+
+1. **The timers do not belong to the manager.** `SipTransactionManager.shutdown()` cancels
+   `cp_timer`, shuts the UDP server down and then assigns `None` to `global_config`,
+   `tclient`, `tserver`, `l1rcache`, `l2rcache`, `req_cb` and `req_consumers`. Anything
+   that still holds a transaction fires into those `None`s. The transaction objects carry
+   the timers (`teA`…`teG`) and nothing else refers to them, so **whoever stops a manager
+   must walk its tables first** — there is no manager-level "cancel everything".
+2. **`ED2` is the real owner of the schedule.** A `Timeout` is an `EventListener` pushed
+   onto a heap that lives for the life of the process, not of the manager. Cancelling sets
+   `cb_func = None` and leaves the entry in the heap; the loop skips it later. This is why
+   the defect crossed test boundaries at all, and it is also the way to assert about it:
+   `[el for el in ED2.tlisteners if el.cb_func is not None and el.cb_func.__self__ is manager]`
+   is the authoritative list of what a manager is still scheduled to do.
+3. **`timerA` re-arms itself.** `timerA()` doubles `t.tout` and creates the next `Timeout`
+   from inside the callback, so cancelling once is enough only because `cancel()` runs
+   before the next scheduled round; the chain has no other stop condition than `timerB`
+   cancelling it (32 s by default). A client transaction towards an unreachable hop is
+   therefore armed for **32 seconds** after the INVITE, whatever the application thinks it
+   has given up on. P9.5 (a load run against unreachable hops) inherits exactly this
+   population of armed timers.
+4. **sippy swallows the exception.** `ED2.dispatchTimers()` catches everything a timer
+   callback raises and prints it with `dump_exception()`. That is why this never crashed a
+   single test deterministically: it costs one printed traceback per surviving timer, and
+   only *sometimes* perturbs a later assertion. **A printed traceback in the middle of the
+   suite is a defect, not noise** — worth remembering for every later item, because this
+   class of failure does not turn red on its own.
+5. **The second leak was application-owned.** Anything the repository arms with `Timeout`
+   (rule reload poll, shutdown poll, the controller's no-answer timer) outlives the objects
+   it was created for unless the owner cancels it. P8 adds a second AS process with its own
+   rule reload and — per D9 — its own cross-call windows, so this scales with every new
+   timer: **arm it where you can cancel it, and cancel it from the stop path**.
 
 ### P8 — Anti-fraud AS
 
@@ -330,6 +403,16 @@ scope change this requires.
 - **Also.** New `AS-FRAUD-*` error codes in `src/as_app/errors.py`, following the existing
   `AS-CFG-* / AS-RULE-* / AS-ROUTE-* / AS-PEER-*` model. Port and rule-file isolation for a
   second AS (see §7). Console coverage per `AGENT.md` §16.
+- **Entry state (set by P8a, 2026-09-18).** `main` is expected to carry the timer fix, so
+  the shutdown path this item inherits is clean: `AsStack.stop()` cancels what the stack
+  armed, including the per-call no-answer timers, and sippy's `shutdown()` already does its
+  own part. Two things follow for a **second AS process**: its own timers must be cancelled
+  from its own stop path (see *how sippy owns its timers*, point 5, in P8a above), and the
+  reject path is UAS-only — it never originates a leg, so this item adds **no** new
+  transaction towards a next hop and therefore no new retransmission population. The
+  capacity-relevant consequence of P8a is for **P9.5**: the client transactions towards
+  unreachable hops stay armed for `timerB` = 32 s regardless of what the application gives
+  up on, which is what a load run must expect to find.
 
 ### P9 — Chained demo
 
@@ -358,9 +441,9 @@ scope change this requires.
 - **Inputs.** Three genuine drivers: pluggable state store (P8), skeleton friction (P9),
   capacity/back-pressure constraints (P9.5).
 - **Constraints.** This is a structural refactor of `src/as_app/` and therefore requires an
-  explicitly approved plan under `AGENT.md` §14.3 — it must not be done incidentally. The
-  new repository follows a library standard, not this repository's application standard
-  (D8).
+  explicitly approved plan under `AGENT.md` §14 rule 3 (no unconfirmed refactors) — it
+  must not be done incidentally. The new repository follows a library standard, not this
+  repository's application standard (D8).
 
 ### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 
@@ -483,13 +566,27 @@ Not blocking, but each must be handled rather than discovered mid-implementation
    a real UAC that does not declare `sip.608` would require a media announcement (D5);
    cross-call state is in-memory and lost on restart (D9 — closed in P11 by the Redis
    store); capacity findings (P9.5).
+7. **Test-harness port allocation — registered by P8a (2026-09-18), not fixed.**
+   `_free_udp_port()` in `tests/integration/test_signalling_path.py` allocates the internal
+   API's **TCP** port by probing **UDP**, which guarantees nothing about TCP; a poll of
+   `/healthz` then hit a non-HTTP listener and failed with
+   `http.client.BadStatusLine: GET /healthz HTTP/1.1` (1 failure in 42 integration runs,
+   20/20 green in isolation, 0 `TypeError` tracebacks in the same 42 runs, so it is not the
+   timer defect it was found beside). Row in `docs/production-gaps.md`. **Follow-up item,
+   not part of P8a** (`AGENT.md` §14 rule 4): probe with `SOCK_STREAM` for a TCP port, or
+   let the server bind port `0` and report the port it received. Whoever picks it up should
+   also make the health poll distinguish "not up yet" from "something else is listening" —
+   P9.5 will run far more processes in one host and will meet this much more often.
 
 ## 8. Decisions requiring maintainer approval
 
-Two changes to the rules themselves. Neither may be applied incidentally.
+One change to the rules themselves, plus one approval that an existing rule already
+requires. Neither may be treated as incidental.
 
 1. **`AGENT.md` §2 scope change.** *"No performance or capacity work … no benchmarking
    claims"* must be relaxed to permit a capacity harness while **continuing to forbid
    published benchmark figures** (D10).
-2. **`AGENT.md` §14.3 approval.** Extracting the skeleton in P10 is a structural refactor and
-   requires an explicitly approved plan before any code moves.
+2. **`AGENT.md` §14 rule 3 approval (no unconfirmed refactors).** Extracting the skeleton in
+   P10 is a structural refactor, and that rule already requires an explicit, approved plan
+   **before any code moves**. It is listed here so the plan is put to the maintainer
+   deliberately rather than assumed.

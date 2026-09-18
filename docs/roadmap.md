@@ -289,11 +289,11 @@ connected.
 
 - **Scope conflict with the M1 task description (reported, not resolved).** The M1 brief
   asked for four un-skipped e2e cases. `AGENT.md` section 15 puts the `404` and `603`
-  error branches in **M2 — Number translation**, and section 14.3 forbids a milestone
-  conversation from taking scope from another milestone. M1 therefore delivers the
-  complete call and the caller-abandonment (`CANCEL`) case, and leaves
-  `test_unmatched_number_is_answered_with_404` and `test_blocked_number_is_answered_with_603`
-  skipped with an explicit M2 reason. **Maintainer decision needed** if they should be
+  error branches in **M2 — Number translation**, and the `AGENT.md` §15 handover
+  protocol forbids a milestone conversation from taking scope from another milestone.
+  M1 therefore delivers the complete call and the caller-abandonment (`CANCEL`) case, and
+  leaves `test_unmatched_number_is_answered_with_404` and
+  `test_blocked_number_is_answered_with_603` skipped with an explicit M2 reason. **Maintainer decision needed** if they should be
   pulled into M1.
 - **`ALLOWED_PEERS` in `deploy/docker-compose.yml` still contains a service name**
   (`s-sbc-mock,127.0.0.1`). Container addresses are assigned at run time, so a name can
@@ -751,8 +751,30 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   resolved and records the one remaining caveat (a wheel installed without its metadata).
 - **P6 — sippy retransmission-timer shutdown fix.** Cancel per-transaction timers on
   `SipTransactionManager.shutdown()` to remove the rare failover test flake (registered gap,
-  deferred). **[Optional · Status: Pending]** Parked by the maintainer on 2026-09-17:
-  deferred to a separate conversation, per the maintainer.
+  deferred). **[Optional · Status: Done]** (2026-09-18, executed as **P8a** in
+  `docs/phase2-plan.md` §3 on branch `fix/sippy-retransmission-timer`)
+
+  **Done in this conversation (2026-09-18).** `AsStack.stop()` now cancels everything the
+  stack armed before sippy's own `shutdown()` runs:
+  `as_app.sip_adapter.cancel_transaction_timers()` walks both transaction tables
+  (`tclient`, `tserver`) of the manager and cancels each `teA`…`teG` timer still scheduled,
+  and `TrunkCallMap.dispose()` cancels the per-call no-answer timers of the calls that are
+  still waiting for a next hop. sippy itself is untouched — it is an installed dependency.
+
+  **Evidence (real commands, real output; details in the P8a section of
+  `docs/acceptance/report.md`).** Two measurements, kept apart because they say different
+  things. *The defect was deterministic*: every `pytest tests/integration -q -s` run printed
+  at least one `TypeError: 'NoneType' object is not subscriptable` from
+  `SipTransactionManager.transmitData` (5/5 sampled runs, 1–2 occurrences each). *The flake
+  did not recur*: 64 consecutive `pytest tests/integration -q` runs were 64 green, 0 failures,
+  so this collection never saw the 1-in-6 failure, only its cause. After the fix, same
+  commands: **0 `TypeError` tracebacks in 42 `-q -s` runs** (41 green — the single failure is
+  an unrelated health-endpoint test, see the report), **30/30 `-q` runs green**, **30/30**
+  runs of the failover test green, `pytest tests -q` → 128 passed, all four gates green. The
+  primary guard is the **deterministic** regression test (it fails on every run when the
+  cancellation is removed), not the repeat loop. The gap row "Closing a transaction manager
+  mid-retransmission" in `docs/production-gaps.md` is resolved, with one caveat recorded
+  (in-flight transactions are cancelled, not drained: no final response reaches the peer).
 - **P7 — Capture clears stale samples before writing.** `tools/capture_call.py` deleted only
   `NN-*.txt` before writing a new capture, so a run that produced fewer messages than the
   previous one could leave orphaned sample files that no longer belong to the captured call.
@@ -773,7 +795,7 @@ do, and that drift is already a registered production gap.
 
 | Item | Status | Branch / repository |
 | --- | --- | --- |
-| P8a — sippy retransmission-timer shutdown fix | not started (blocker for P9.5) | `fix/sippy-retransmission-timer` |
+| P8a — sippy retransmission-timer shutdown fix | done (2026-09-18) | `fix/sippy-retransmission-timer` |
 | P8 — anti-fraud AS (second use case) | not started (branch created, empty) | `feat/anti-fraud-as` |
 | P9 — chained demo (SBC → AS-1 → AS-2 → core) | not started | `feat/chained-as-demo` |
 | P9.5 — read-only capacity probe | not started | `feat/capacity-probe` |

@@ -402,16 +402,29 @@ stills ship the defect, and the repository cancels what it armed itself, from it
 ### P8 — Anti-fraud AS
 
 - **Goal.** A second, independently runnable AS process implementing D4, D5 and D9.
-- **Prerequisites.** New ADR (use-case choice, 608 rationale, state ownership). A probe
-  confirming that sippy emits an arbitrary 6xx through the existing
-  `CCEventFail((status, phrase, None))` path — 404 and 603 are already proven, 608 is not.
-  Adding `Feature-Caps: *;+sip.608` to the mock UAC's INVITE.
+- **First steps.** *(Renamed from "Prerequisites": these are P8's own first tasks, not a
+  separate preliminary phase — the old wording invited exactly that misreading.)*
+  **1. Bring the branch up to `main`'s tip before anything else.** Done on 2026-09-18:
+  `feat/anti-fraud-as` was fast-forwarded from `d0d0501` to `ebe5a17`, the release that
+  reconciles `VERSION` and `CHANGELOG` (`0.5.1`). A branch left at `d0d0501` still carries
+  `VERSION` = `0.5.0` and no `[0.5.1]` CHANGELOG node, so the first commit made on it would
+  fight the release reconciliation instead of building on it — which is what happened on
+  2026-09-18 and was fixed the same day. **2. The new ADR.** A new ADR — **`0007`**, the next
+  free number since `0001`–`0006` exist (`docs/architecture/adr/0007-*.md`) — covering the
+  use-case choice, the `608` rationale and state ownership. **3. A sippy probe.** Confirm
+  that sippy emits an arbitrary 6xx through the existing `CCEventFail((status, phrase,
+  None))` path — 404 and 603 are already proven, 608 is not — and add
+  `Feature-Caps: *;+sip.608` to the mock UAC's INVITE.
 - **Known collisions.** The reject path is **UAS behaviour, not B2BUA**: no second leg is
   originated. `CallController` currently assumes `uaA` and `uaO` always both exist (M1
   design), so this item **changes the skeleton itself**.
 - **Also.** New `AS-FRAUD-*` error codes in `src/as_app/errors.py`, following the existing
   `AS-CFG-* / AS-RULE-* / AS-ROUTE-* / AS-PEER-*` model. Port and rule-file isolation for a
   second AS (see §7). Console coverage per `AGENT.md` §16.
+- **Acceptance.** P8 creates its own **`ACC-P8-*`** items in `docs/acceptance/criteria.md`.
+  That file has no `ACC-P8-*` row today — only the `P8a` section (`ACC-P8A-001`) — so nothing
+  is inherited and the items are P8's to add. `AGENT.md` §11 and §16 require them, each with
+  evidence per §4.8, before the item is done.
 - **Entry state (set by P8a, 2026-09-18).** `main` is expected to carry the timer fix, so
   the shutdown path this item inherits is clean: `AsStack.stop()` cancels what the stack
   armed, including the per-call no-answer timers, and sippy's `shutdown()` already does its
@@ -518,6 +531,40 @@ rule. Two accepted deltas are recorded because an audit would otherwise "discove
    rules commits (`61cab03`: the §13 approval rule and the §14.1 one-writing-agent rule).
    The maintainer then pushed them: `origin/main` and tag `v0.5.1` both point at `d0d0501`.
    Pushing remains the maintainer's step, not an agent's (§13).
+
+### Known and accepted — maintainer rulings of 2026-09-18
+
+Five findings were reviewed on 2026-09-18 and the maintainer ruled that each is **known and
+accepted**: deliberately left as it is, not an oversight, and not to be "helpfully" corrected
+by a later agent. They are recorded here, in one place, so that a future audit meets the
+ruling instead of re-opening the finding. *(The paragraph above records the state **before**
+the release reconciliation; item 5 below is where `v0.5.1` ends up.)*
+
+1. **The three `## Phase 2 — P8a …` section headings stay as they are.** They are
+   `docs/roadmap.md:786`, `docs/acceptance/report.md:1729` and
+   `docs/acceptance/criteria.md:62`, and their wording is deliberate.
+2. **The release-convention text is left unchanged.** `CHANGELOG.md:7` and
+   `docs/roadmap.md:817` still read *"one version node per milestone; … tag
+   `v<version>-m<n>`"*, even though the non-milestone `v0.5.1` tag now exists. The maintainer
+   chose not to reword them.
+3. **The generic `AGENT.md` §14 citation in P11's TLS prerequisite is left unchanged.** P11
+   in §3 cites `AGENT.md` §14 without a rule number; the nit is known and deliberately not
+   fixed.
+4. **The remote tag `0.5.0` carries no `v` prefix** while the local tags do. Known and left
+   alone.
+5. **The annotated tag `v0.5.1` was moved from `d0d0501` to `ebe5a17` and created by an
+   agent**, on the maintainer's explicit **one-off** exception to `AGENT.md` §13/§15 (agents
+   do not create tags). **It is not a precedent.** The full record lives in the tag object
+   itself (`git tag -n99 v0.5.1`); it is cross-referenced here, not repeated.
+
+### Documentation location and branch base — maintainer ruling of 2026-09-18
+
+Phase 2 documentation — **this plan and `docs/roadmap.md`** — stays on `main`. Each Phase 2
+item's branch **fast-forwards to `main`'s tip when the item starts** (see P8's *First steps*
+in §3) and carries its own documentation updates with it when it lands. The maintainer
+considered keeping the plan on a long-lived `phase2` branch and **rejected** it, because
+`main` would then be stale for the whole of Phase 2 — exactly what D1 and D7 exist to
+prevent. Recorded so that the question is not re-litigated.
 
 ## 5. Handover protocol for Phase 2
 

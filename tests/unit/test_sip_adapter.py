@@ -16,13 +16,39 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 
 from as_app.errors import AsError, AsErrorCode
 from as_app.routing.rules import NextHop
-from as_app.sip_adapter import build_request_uri, extract_called_number, is_allowed_peer
+from as_app.sip_adapter import (
+    build_request_uri,
+    cancel_transaction_timers,
+    extract_called_number,
+    is_allowed_peer,
+)
 
 pytestmark = pytest.mark.unit
+
+
+def _fake_timer() -> Any:
+    """Build a stand-in for one sippy ``EventListener`` timer.
+
+    Returns:
+        A namespace with ``cb_func`` (non-``None`` while armed) and ``cancels`` (how often
+        :meth:`cancel` was called). Cancelling clears ``cb_func`` exactly the way
+        ``ED2``'s own listener does, so an already dead timer is recognisable.
+    """
+    timer: Any = SimpleNamespace(cb_func=object(), cancels=0)
+
+    def cancel() -> None:
+        timer.cancels += 1
+        timer.cb_func = None
+
+    timer.cancel = cancel
+    return timer
 
 
 def test_user_part_is_extracted_from_a_sip_uri() -> None:
@@ -56,6 +82,54 @@ def test_ipv6_next_hop_is_bracketed() -> None:
     """An IPv6 next hop is bracketed as required by RFC 3261 section 19.1."""
     hop = NextHop(name="v6", address="2001:db8::1", port=5060)
     assert build_request_uri("110", hop) == "sip:110@[2001:db8::1]:5060;transport=udp"
+
+
+def test_every_transaction_timer_is_cancelled_before_a_shutdown() -> None:
+    """Stopping a manager cancels the timers of both transaction tables.
+
+    sippy's own ``shutdown()`` leaves these armed, which is what lets a retransmission
+    dereference a torn-down stack (P8a).
+    """
+    client_timers = {"teA": _fake_timer(), "teB": _fake_timer()}
+    # A server transaction only carries the timers its own RFC 3261 branch uses.
+    server_timers = {"teA": _fake_timer(), "teD": _fake_timer()}
+    client = SimpleNamespace(**client_timers)
+    server = SimpleNamespace(**server_timers)
+    manager = SimpleNamespace(tclient={"invite": client}, tserver={"invite": server})
+
+    assert cancel_transaction_timers(manager) == 4
+
+    for timer in (*client_timers.values(), *server_timers.values()):
+        assert timer.cancels == 1, "every armed timer is cancelled exactly once"
+        assert timer.cb_func is None
+    # The transactions drop their references so nothing can re-arm them either.
+    assert client.teA is None and client.teB is None
+    assert server.teA is None and server.teD is None
+
+
+def test_a_second_cancellation_finds_nothing_left_to_do() -> None:
+    """Cancelling twice is safe; the second pass reports timers already fired."""
+    client = SimpleNamespace(teA=_fake_timer())
+    manager = SimpleNamespace(tclient={"invite": client}, tserver={})
+
+    assert cancel_transaction_timers(manager) == 1
+    assert cancel_transaction_timers(manager) == 0
+
+
+def test_a_timer_that_has_already_fired_is_not_counted() -> None:
+    """A one-shot timer whose callback ``ED2`` already ran is dead, not pending."""
+    fired = _fake_timer()
+    fired.cancel()
+    manager = SimpleNamespace(tclient={"invite": SimpleNamespace(teA=fired)}, tserver={})
+
+    assert cancel_transaction_timers(manager) == 0
+    assert fired.cancels == 1  # sippy already cancelled it when it fired
+
+
+def test_a_manager_that_was_already_shut_down_is_tolerated() -> None:
+    """``shutdown()`` nulls the transaction tables; walking it must not raise."""
+    assert cancel_transaction_timers(SimpleNamespace(tclient=None, tserver=None)) == 0
+    assert cancel_transaction_timers(SimpleNamespace()) == 0
 
 
 def test_peer_allowlist_accepts_configured_and_rejects_others() -> None:

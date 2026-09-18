@@ -21,7 +21,9 @@ What is exercised here:
 - a request from an address outside ``ALLOWED_PEERS`` is answered with ``403`` and
   ``AS-PEER-001`` before any call state is created (``AGENT.md`` section 9);
 - the process exposes counters and a health endpoint and shuts down cleanly on
-  ``SIGTERM``.
+  ``SIGTERM``;
+- stopping the stack leaves no per-transaction retransmission timer armed in the shared
+  sippy loop (P8a: a pending retransmission used to outlive its transaction manager).
 
 Ports are allocated dynamically; nothing here touches 5060.
 """
@@ -38,10 +40,11 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from as_app.sip_adapter import PASSTHROUGH_HEADERS
+from as_app.sip_adapter import PASSTHROUGH_HEADERS, TRANSACTION_TIMER_NAMES
 from s_sbc_mock.uac import CallScenario
 
 pytestmark = pytest.mark.integration
@@ -49,6 +52,38 @@ pytestmark = pytest.mark.integration
 #: A second loopback address, used as a source the AS has not been told to trust.
 #: ``127.0.0.0/8`` is loopback on Linux, so it needs no extra interface (RFC 6890).
 FOREIGN_TRUNK_ADDRESS = "127.0.0.2"
+
+#: A rule set whose first next hop is an unbound port and whose second hop is left for
+#: the test to point at the mock. The call only completes because the controller fails
+#: over, and the abandoned attempt towards the first hop is what leaves a transaction
+#: retransmitting — the exact condition that used to survive a shutdown (P8a).
+_FAILOVER_DOCUMENT = """
+version: 1
+name: shutdown-test
+next_hops:
+  - name: s-sbc-primary
+    address: 127.0.0.1
+    port: {unbound_port}
+    priority: 1
+  - name: s-sbc-failover
+    address: 127.0.0.1
+    port: {core_port}
+    priority: 2
+rules:
+  - rule_id: R-MOB-40
+    priority: 100
+    description: China Mobile, failover to the second hop
+    match:
+      called_prefixes: ["+86138"]
+      number_format: e164
+    action:
+      kind: route
+      translate:
+        to_format: national
+        strip_prefix: "+86"
+        prepend: "0"
+      next_hops: [s-sbc-primary, s-sbc-failover]
+"""
 
 _HEADER_LINE = re.compile(r"^([A-Za-z0-9.\-]+):[ \t]*(.*)$")
 
@@ -292,3 +327,161 @@ def _wait_for_health(api_port: int, timeout_seconds: float = 15.0) -> bool:
         except OSError:
             time.sleep(0.1)
     return False
+
+
+def _armed_transaction_timers(manager: Any) -> list[Any]:
+    """Return the per-transaction timers still armed on a transaction manager.
+
+    Args:
+        manager: A sippy ``SipTransactionManager``.
+
+    Returns:
+        One entry per transaction timer that has neither fired nor been cancelled.
+        ``ED2`` nulls the callback of a timer once it has run, which is how a cancelled
+        or already fired timer is told apart from a pending one.
+    """
+    armed: list[Any] = []
+    for table_name in ("tclient", "tserver"):
+        transactions = getattr(manager, table_name, None) or {}
+        for transaction in transactions.values():
+            for timer_name in TRANSACTION_TIMER_NAMES:
+                timer = getattr(transaction, timer_name, None)
+                if timer is not None and getattr(timer, "cb_func", None) is not None:
+                    armed.append(timer)
+    return armed
+
+
+def _armed_loop_timers(manager: Any) -> list[Any]:
+    """Return the shared-loop timers still owned by one transaction manager.
+
+    Args:
+        manager: A sippy ``SipTransactionManager``.
+
+    Returns:
+        The ``ED2`` listeners whose callback still belongs to that manager. This is the
+        authoritative view: sippy's own shutdown clears its registries, so only the
+        event loop can tell whether anything of the manager is still scheduled.
+    """
+    from sippy.Core.EventDispatcher import ED2
+
+    return [
+        listener
+        for listener in ED2.tlisteners
+        if listener.cb_func is not None and getattr(listener.cb_func, "__self__", None) is manager
+    ]
+
+
+def test_stopping_the_stack_leaves_no_transaction_timer_armed(tmp_path: Path) -> None:
+    """Nothing owned by a stopped transaction manager stays scheduled (P8a).
+
+    The call first fails over from an unreachable next hop, so the AS has an INVITE
+    client transaction that nobody answered — one that keeps retransmitting for as long
+    as RFC 3261 timer B allows. Stopping the stack has to cancel that retransmission:
+    ``SipTransactionManager.shutdown()`` releases the UDP sockets and drops its own
+    registries but cancels only its cache-purge timer, so any surviving timer fires into
+    a manager whose ``global_config`` is ``None``. In the test suite, where one process
+    shares one ``ED2`` loop, that stale timer is what made later tests fail at random.
+
+    Args:
+        tmp_path: Per-test temporary directory for the generated rules file.
+    """
+    from sippy.Core.EventDispatcher import ED2
+    from sippy.Time.Timeout import Timeout
+
+    from as_app.bootstrap import AsSettings
+    from as_app.main import AsStack
+    from as_app.observability.tracing import SipMessageRecorder
+    from s_sbc_mock.main import MockConfig, SMockApplication
+
+    unbound_port = _free_udp_port()
+    as_port = _free_udp_port()
+    core_port = _free_udp_port()
+    trunk_port = _free_udp_port()
+    api_port = _free_udp_port()
+    rules_path = tmp_path / "failover_rules.yaml"
+    rules_path.write_text(
+        _FAILOVER_DOCUMENT.format(unbound_port=unbound_port, core_port=core_port),
+        encoding="utf-8",
+    )
+    settings = AsSettings(
+        _env_file=None,
+        sip_listen_address="127.0.0.1",
+        sip_listen_port=as_port,
+        sbc_peer_address="127.0.0.1",
+        sbc_peer_port=core_port,
+        allowed_peers=["127.0.0.1"],
+        rules_file=rules_path,
+        internal_api_address="127.0.0.1",
+        internal_api_port=api_port,
+        log_payloads=False,
+    )
+    stack = AsStack(settings, sip_logger=SipMessageRecorder())
+    stack.start()
+    mock = SMockApplication(
+        MockConfig(
+            listen_address="127.0.0.1",
+            listen_port=core_port,
+            as_address="127.0.0.1",
+            as_port=as_port,
+        ),
+        sip_logger=SipMessageRecorder(),
+        uac_local_port=trunk_port,
+    )
+    mock.start()
+    try:
+        call_id = mock.uac.place_call(
+            CallScenario(
+                name="failover",
+                calling_number="+86216180001",
+                called_number="+8613800138000",
+                ring_seconds=0.1,
+                talk_seconds=0.1,
+            )
+        )
+        outcome = mock.uac.outcome_for(call_id)
+        assert outcome is not None
+        state: dict[str, bool] = {"done": False}
+        deadline = time.monotonic() + 15.0
+
+        def poll() -> None:
+            if (mock.uac.outcome_for(call_id) or outcome).released or time.monotonic() >= deadline:
+                state["done"] = True
+                ED2.breakLoop()
+
+        call_timer = Timeout(poll, 0.02, -1)
+        try:
+            ED2.loop(timeout=15.0)
+        finally:
+            call_timer.cancel()
+        assert state["done"], f"failover call {call_id} did not finish within the timeout"
+
+        # Premise of the regression: the attempt towards the unreachable hop is still
+        # retransmitting when the stack stops. Without it the test below would pass even
+        # if the cancellation did nothing at all.
+        manager = stack.transaction_manager
+        assert manager is not None
+        pending = _armed_transaction_timers(manager)
+        assert pending, "the abandoned first-hop INVITE left no pending retransmission"
+
+        stack.stop()
+        armed_after_stop = _armed_loop_timers(manager)
+        assert not armed_after_stop, (
+            f"{len(armed_after_stop)} timer(s) still armed on a stopped transaction manager"
+        )
+
+        # Drive the shared loop past the instants at which the retransmission would have
+        # fired, so nothing is left merely because it has not run yet.
+        def settle() -> None:
+            ED2.breakLoop()
+
+        settle_timer = Timeout(settle, 1.5, 1)
+        try:
+            ED2.loop(timeout=4.0)
+        finally:
+            settle_timer.cancel()
+        assert not _armed_loop_timers(manager), (
+            "a transaction timer was re-armed after the manager had been shut down"
+        )
+    finally:
+        stack.stop()
+        mock.stop()

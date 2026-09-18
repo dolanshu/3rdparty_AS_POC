@@ -401,6 +401,18 @@ Additional expectations:
   `feat` · `fix` · `docs` · `refactor` · `test` · `chore` · `build`
 - **Pre-commit gate (all green)**: `ruff format --check`, `ruff check`, `mypy`,
   `pytest` (all three layers).
+- **No hook skipping.** Hook-skipping flags — `--no-verify`, `--no-gpg-sign` and any
+  equivalent — must not be used. A hook is part of the gate, not an obstacle: if a hook
+  blocks a commit, report it and fix the cause instead of bypassing it. The rule is stated
+  explicitly so that the next occurrence is not a judgement call. (A `--no-verify` commit was
+  attempted once in this repository, on 2026-09-18; no hooks existed, so nothing was actually
+  skipped — the rule exists so that the next time does not depend on that accident.)
+- **The local gate is not CI.** The pre-commit gate above runs **locally, before the
+  commit**; CI (`.github/workflows/ci.yml`) runs on a runner **after a push**. The two are
+  different evidence, and a local re-run must never be presented as a CI result: the §4.8
+  kind-3 evidence is the CI run itself (badge, link or artefact). The precedent is
+  `docs/acceptance/report.md`, whose P3 section records "green" as the maintainer's report
+  precisely because no agent could fetch the run.
 - **Behaviour changes update the documentation chain**: requirement (`REQ-*`) → design
   (HLD/LLD) → interface specification and message samples → acceptance item →
   CHANGELOG. A behaviour change that does not walk this chain is incomplete.

@@ -785,23 +785,25 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
 
 ## Phase 2 — P8a … P11 (status pointers only)
 
-**The detailed plan lives in `docs/phase2-plan.md`.** That document is the single detailed
-source for Phase 2: the strategic decisions and their rationale, the work sequence with each
-item's prerequisites and known collisions, the repository and branch strategy, and the
-handover protocol.
+**The detailed plan lives in `docs/phase2-plan.md` on the `phase2` branch.** That document is
+the single detailed source for Phase 2: the strategic decisions and their rationale, the work
+sequence with each item's prerequisites and known collisions, the repository and branch
+strategy, and the handover protocol. `phase2` is the long-lived Phase 2 integration branch —
+the copy of `docs/phase2-plan.md` on `main` is a stub pointing at it, and Phase 2 status and
+plan are read and edited on `phase2`, never here.
 
 **This section is a pointer only and must not duplicate that content.** Two copies of a plan
 drift exactly the way `config/routing_rules.yaml` and `config/routing_rules.compose.yaml`
 do, and that drift is already a registered production gap.
 
-Phase 2 item status, entry states and handover notes live in `docs/phase2-plan.md` §3. This
-board deliberately does not duplicate them — the reason is the paragraph above, and the table
-that used to sit here had already drifted twice (it showed P8a as "not started" after the
-plan recorded it done, and its P8a row named `fix/sippy-retransmission-timer`, a branch
-deleted on 2026-09-18).
+Phase 2 item status, entry states and handover notes live in `docs/phase2-plan.md` §3 **on
+the `phase2` branch**. This board deliberately does not duplicate them — the reason is the
+paragraph above, and the table that used to sit here had already drifted twice (it showed P8a
+as "not started" after the plan recorded it done, and its P8a row named
+`fix/sippy-retransmission-timer`, a branch deleted on 2026-09-18).
 
-Per-item status and handover notes are kept in `docs/phase2-plan.md`, which every Phase 2
-conversation reads on entry and updates on exit (`AGENT.md` §15).
+Per-item status and handover notes are kept in `docs/phase2-plan.md` **on `phase2`**, which
+every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
 
 ## Conventions
 

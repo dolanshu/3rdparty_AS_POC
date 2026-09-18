@@ -46,5 +46,5 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `docs/demo-script.md` | ready | The 5–10 minute narrated demo; every section runs today, the console included |
 | `docs/demo-steps.md` | ready | The one-page copy-pasteable command checklist for the demo |
 | `docs/roadmap.md` | ready | Milestone status, handover notes, open items |
-| `docs/phase2-plan.md` | ready | Phase 2: strategic decisions, the P8a–P11 work sequence, repository and branch strategy. The single detailed source for what follows P1–P7 — `docs/roadmap.md` links here instead of duplicating it |
+| `docs/phase2-plan.md` | ready | Phase 2: strategic decisions, the P8a–P11 work sequence, repository and branch strategy. The single detailed source for what follows P1–P7 — `docs/roadmap.md` links here instead of duplicating it. **The full text lives on the `phase2` branch**; the copy on `main` is a stub that points there |
 | `CHANGELOG.md` / `VERSION` | ready | Version history and the current version |

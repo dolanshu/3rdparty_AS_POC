@@ -3,7 +3,7 @@
 - **Status:** accepted (planning artefact, no implementation yet)
 - **Date:** 2026-09-18
 - **Owner:** project maintainer
-- **Related:** `AGENT.md` §2, §14.3, §15 · `docs/roadmap.md` · `docs/production-gaps.md` · `docs/specs/index.md`
+- **Related:** `AGENT.md` §2, §14 rule 3, §15 · `docs/roadmap.md` · `docs/production-gaps.md` · `docs/specs/index.md`
 
 ## 1. Purpose and scope of this document
 
@@ -356,9 +356,9 @@ scope change this requires.
 - **Inputs.** Three genuine drivers: pluggable state store (P8), skeleton friction (P9),
   capacity/back-pressure constraints (P9.5).
 - **Constraints.** This is a structural refactor of `src/as_app/` and therefore requires an
-  explicitly approved plan under `AGENT.md` §14.3 — it must not be done incidentally. The
-  new repository follows a library standard, not this repository's application standard
-  (D8).
+  explicitly approved plan under `AGENT.md` §14 rule 3 (no unconfirmed refactors) — it
+  must not be done incidentally. The new repository follows a library standard, not this
+  repository's application standard (D8).
 
 ### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 
@@ -455,10 +455,13 @@ Not blocking, but each must be handled rather than discovered mid-implementation
 
 ## 8. Decisions requiring maintainer approval
 
-Two changes to the rules themselves. Neither may be applied incidentally.
+One change to the rules themselves, plus one approval that an existing rule already
+requires. Neither may be treated as incidental.
 
 1. **`AGENT.md` §2 scope change.** *"No performance or capacity work … no benchmarking
    claims"* must be relaxed to permit a capacity harness while **continuing to forbid
    published benchmark figures** (D10).
-2. **`AGENT.md` §14.3 approval.** Extracting the skeleton in P10 is a structural refactor and
-   requires an explicitly approved plan before any code moves.
+2. **`AGENT.md` §14 rule 3 approval (no unconfirmed refactors).** Extracting the skeleton in
+   P10 is a structural refactor, and that rule already requires an explicit, approved plan
+   **before any code moves**. It is listed here so the plan is put to the maintainer
+   deliberately rather than assumed.

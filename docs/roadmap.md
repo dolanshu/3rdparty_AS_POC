@@ -289,11 +289,11 @@ connected.
 
 - **Scope conflict with the M1 task description (reported, not resolved).** The M1 brief
   asked for four un-skipped e2e cases. `AGENT.md` section 15 puts the `404` and `603`
-  error branches in **M2 — Number translation**, and section 14.3 forbids a milestone
-  conversation from taking scope from another milestone. M1 therefore delivers the
-  complete call and the caller-abandonment (`CANCEL`) case, and leaves
-  `test_unmatched_number_is_answered_with_404` and `test_blocked_number_is_answered_with_603`
-  skipped with an explicit M2 reason. **Maintainer decision needed** if they should be
+  error branches in **M2 — Number translation**, and the `AGENT.md` §15 handover
+  protocol forbids a milestone conversation from taking scope from another milestone.
+  M1 therefore delivers the complete call and the caller-abandonment (`CANCEL`) case, and
+  leaves `test_unmatched_number_is_answered_with_404` and
+  `test_blocked_number_is_answered_with_603` skipped with an explicit M2 reason. **Maintainer decision needed** if they should be
   pulled into M1.
 - **`ALLOWED_PEERS` in `deploy/docker-compose.yml` still contains a service name**
   (`s-sbc-mock,127.0.0.1`). Container addresses are assigned at run time, so a name can

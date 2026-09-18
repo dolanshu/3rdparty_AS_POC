@@ -318,6 +318,17 @@ scope change this requires.
   at `7c4a417`). Acceptance item **ACC-P8A-001** with evidence in
   `docs/acceptance/report.md`. **Not merged and not tagged** — both are the maintainer's
   steps (§4, `AGENT.md` §13).
+- **Deviation from §5 (version and CHANGELOG), maintainer decision 2026-09-18.** This
+  handover protocol asks a Phase 2 conversation to "update `CHANGELOG.md` and `VERSION`";
+  P8a deliberately does not. `VERSION`, `pyproject.toml` and `uv.lock` stay at **`0.5.0`**
+  and every P8a entry stays under the existing **`[Unreleased]`** heading — no dated
+  release node is opened. Reasons, so a fresh conversation does not have to re-derive them:
+  no Phase 2 item has been merged into `main` yet (D7: an item is merged only when its own
+  definition of done is met, and the maintainer confirmed that nothing goes to `main` at
+  this point), and `CHANGELOG.md` line 7 states *"one version node per milestone"* — P8a is
+  not a milestone, it is a Phase 2 item. The version and its release node are created when
+  the item actually lands on `main`. A `0.5.1` node must **not** be opened for this branch
+  while it is unmerged.
 
 **Done in this conversation (2026-09-18).** Nothing under `site-packages` changed: sippy
 stills ship the defect, and the repository cancels what it armed itself, from its own
@@ -524,6 +535,17 @@ Not blocking, but each must be handled rather than discovered mid-implementation
    a real UAC that does not declare `sip.608` would require a media announcement (D5);
    cross-call state is in-memory and lost on restart (D9 — closed in P11 by the Redis
    store); capacity findings (P9.5).
+7. **Test-harness port allocation — registered by P8a (2026-09-18), not fixed.**
+   `_free_udp_port()` in `tests/integration/test_signalling_path.py` allocates the internal
+   API's **TCP** port by probing **UDP**, which guarantees nothing about TCP; a poll of
+   `/healthz` then hit a non-HTTP listener and failed with
+   `http.client.BadStatusLine: GET /healthz HTTP/1.1` (1 failure in 42 integration runs,
+   20/20 green in isolation, 0 `TypeError` tracebacks in the same 42 runs, so it is not the
+   timer defect it was found beside). Row in `docs/production-gaps.md`. **Follow-up item,
+   not part of P8a** (`AGENT.md` §14 rule 4): probe with `SOCK_STREAM` for a TCP port, or
+   let the server bind port `0` and report the port it received. Whoever picks it up should
+   also make the health poll distinguish "not up yet" from "something else is listening" —
+   P9.5 will run far more processes in one host and will meet this much more often.
 
 ## 8. Decisions requiring maintainer approval
 

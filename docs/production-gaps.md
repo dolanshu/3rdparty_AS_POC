@@ -62,6 +62,12 @@ POC behaviour | production requirement | why it differs.
 | Rule set drift between environments | Nothing detects that the two POC rule files have diverged; only review catches it. | Validate every environment's rule set against one canonical source (generate, or schema-check that they differ only in the address fields). |
 | Build-time package index | The Dockerfiles accept an optional package-index build argument (`PIP_INDEX_URL` / `UV_DEFAULT_INDEX`, so a build behind a slow or filtered network works). A non-default index makes uv re-resolve inside the image — a build-time, image-local `uv.lock` rewrite that keeps the pinned versions but re-resolves them from that index. The committed `uv.lock` always stays on public PyPI. | Build in an environment with the canonical index (or a mirror that is guaranteed identical), and verify the image with a reproducible provenance/SBOM step rather than trusting a build-time re-resolution. |
 
+## Additional gaps registered while building P8a (2026-09-18)
+
+| Area | POC behaviour | Production requirement |
+| --- | --- | --- |
+| Test port allocation | The integration tests allocate **every** port with `_free_udp_port()` in `tests/integration/test_signalling_path.py`, which binds and releases a **UDP** socket on loopback and returns that port number. UDP and TCP port spaces are independent, so the number proves nothing about TCP — including the internal API's HTTP port, which `test_counters_health_endpoint_and_graceful_shutdown` then polls. Observed once in 42 integration runs: `http.client.BadStatusLine: GET /healthz HTTP/1.1` — the connection was accepted by something that is not an HTTP server, so the health poll failed rather than waited. The same test passed 20/20 in isolation, and all 42 runs carried 0 `TypeError` tracebacks, so it is not a symptom of the P8a timer defect it was found beside. **Registered, not fixed** (`AGENT.md` §14 rule 4): the repair belongs to the test harness, not to P8a. | Allocate a port by probing the transport it will be used on — bind a `SOCK_STREAM` socket for a TCP port — and have the server bind port `0` and report the port it actually received instead of the caller guessing one. A health check must also tell "not up yet" from "something else is listening" (compare the response, not just the connection). |
+
 ## Notes
 
 - Gaps are never "forgotten features": each one is a decision with an ADR or a row in this

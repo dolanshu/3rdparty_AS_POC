@@ -1944,8 +1944,18 @@ forbids committing captures); `make demo` above is the same flow with narration.
   in any of them, so this run can confirm the cause is gone but cannot reproduce the original
   failure rate — which is exactly why the deterministic regression test, not the loop, is the
   guard.
-- **Version and release node.** `VERSION`, `pyproject.toml` and `uv.lock` were bumped to
-  `0.5.1` (`uv lock --check` passes; the lock diff is the single project-version line, still
-  on public PyPI). The P8a entries were added to the existing `[Unreleased]` node rather than
-  opening a `[0.5.1]` node, because `[Unreleased]` already carries the P1–P7 work; folding
-  that node into a dated `0.5.1` release is a maintainer decision.
+- **Version and release node — maintainer decision (2026-09-18), no `0.5.1` exists.**
+  `VERSION`, `pyproject.toml` and `uv.lock` stay at **`0.5.0`** (`uv lock --check` passes and
+  the lock is byte-identical to `main`'s, still on public PyPI), and every P8a entry stays
+  under the existing **`[Unreleased]`** heading with no dated node opened — even though
+  `docs/phase2-plan.md` §5 asks a Phase 2 conversation to update `VERSION`. The reason is
+  recorded in the P8a entry of that document so a fresh conversation does not re-derive it:
+  no Phase 2 item is merged into `main` yet (D7), and `CHANGELOG.md` line 7 says "one version
+  node per milestone" — P8a is not a milestone. Nothing in this branch was pushed, tagged or
+  merged.
+- **Test-harness port allocation — registered, not fixed.** The internal API's **TCP** port is
+  allocated by `_free_udp_port()`, which probes **UDP** and therefore guarantees nothing about
+  TCP; observed as 1 failure in 42 integration runs with
+  `http.client.BadStatusLine: GET /healthz HTTP/1.1` (20/20 green in isolation). Registered as
+  its own row in `docs/production-gaps.md` and as a follow-up in `docs/phase2-plan.md` §7
+  item 7; deliberately left unfixed here (`AGENT.md` §14 rule 4).

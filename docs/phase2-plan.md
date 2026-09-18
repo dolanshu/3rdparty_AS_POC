@@ -176,17 +176,22 @@ one path is what exposes the parts of the skeleton that are secretly number-tran
 specific, and that friction is the highest-quality input the abstraction can get. Without
 it, the abstraction is driven by reading code instead of by real collisions.
 
-### D7 — Public throughout, one branch per work item
+### D7 — Public throughout; a branch per work item only on demand
 
-**Decision.** The repository stays public. Each Phase 2 item is developed on its own branch
-and merged into **`phase2`** only when the item's own definition of done is met. Meeting that
-definition of done is **necessary but not sufficient**: the merge additionally requires the
-maintainer's explicit approval in that conversation (`AGENT.md` §13).
+**Decision.** The repository stays public. Each Phase 2 item is developed **on `phase2`**, and
+gets a branch of its own **only on demand** — when it needs to be discarded independently of
+the rest of Phase 2, or when two items have to be worked in parallel. Where an item branch does
+exist, it is cut from `phase2` and merged into `phase2` when that item's own definition of done
+is met. Meeting that definition of done is **necessary but not sufficient**: the merge
+additionally requires the maintainer's explicit approval in that conversation (`AGENT.md` §13),
+and so does creating the branch.
 
-*(Refined by the maintainer's ruling of 2026-09-19: the target of an item merge is `phase2`,
-not `main` — see §4, *Branch model and documentation location*. `main` receives exactly one
-Phase 2 merge, the final one, and that merge carries the approval above. Nothing else in
-this decision changes: `main` is still never where unfinished work lands.)*
+*(Changed by the maintainer on 2026-09-19, superseding two earlier wordings: "each Phase 2 item
+is developed on its own branch" — a per-item branch is now **on demand**, not the default — and
+"merged into `main`", the target of an item merge being `phase2`. See §4, *Branch model and
+documentation location*. `main` receives exactly one Phase 2 merge, the final one, and that
+merge carries the approval above. Nothing else in this decision changes: `main` is still never
+where unfinished work lands.)*
 
 **Rationale.** Under D1 visibility is the point; going private for months would produce
 nothing. But `main` must always be demonstrable: `AGENT.md` §4.7 requires a green CI badge,
@@ -412,9 +417,9 @@ stills ship the defect, and the repository cancels what it armed itself, from it
   **1. Bring the branch up to `main`'s tip before anything else — superseded 2026-09-19.**
   Under the branch model adopted that day, item branches are cut from `phase2` and do **not**
   chase `main` (§4, *Branch model and documentation location*); `feat/anti-fraud-as` was
-  therefore fast-forwarded to **`phase2`'s tip** instead. The rest of this paragraph is the
-  2026-09-18 record of why the branch's position mattered, kept as history. Done on
-  2026-09-18:
+  therefore fast-forwarded to **`phase2`'s tip** instead, and was deleted on 2026-09-19 —
+  **P8 is worked on `phase2`** (§4 table). The rest of this paragraph is the 2026-09-18 record
+  of why the branch's position mattered, kept as history. Done on 2026-09-18:
   `feat/anti-fraud-as` was fast-forwarded from `d0d0501` to `ebe5a17`, the release that
   reconciles `VERSION` and `CHANGELOG` (`0.5.1`). A branch left at `d0d0501` still carries
   `VERSION` = `0.5.0` and no `[0.5.1]` CHANGELOG node, so the first commit made on it would
@@ -502,11 +507,18 @@ stills ship the defect, and the repository cancels what it armed itself, from it
 | --- | --- | --- |
 | P8a timer fix | `fix/sippy-retransmission-timer` | this one |
 | **Phase 2 integration (P8–P11)** | **`phase2`** — long-lived, created once from `main` | this one |
-| P8 anti-fraud AS | `feat/anti-fraud-as` (already created, empty) — **off `phase2`**, merges into `phase2` | this one |
-| P9 chained demo | `feat/chained-as-demo` — off `phase2`, merges into `phase2` | this one |
-| P9.5 capacity probe | `feat/capacity-probe` — off `phase2`, merges into `phase2` | this one |
+| **P8 anti-fraud AS** | **`phase2`** — worked directly on the integration branch | this one |
+| P9 chained demo | `feat/chained-as-demo` — **on demand only**; otherwise worked on `phase2` | this one |
+| P9.5 capacity probe | `feat/capacity-probe` — **on demand only**; otherwise worked on `phase2` | this one |
 | P10 platform extraction | new branch off `phase2`, output is a new repository | new repository |
 | P11 TLS + harness | branches in the new repository | new repository |
+
+**Per-item branches are on demand, not the default.** An item gets a branch of its own only
+when it needs to be discarded independently of the rest of Phase 2, or when two items must be
+worked in parallel; otherwise the item is worked directly on `phase2`. **P8 is worked on
+`phase2`.** The empty `feat/anti-fraud-as` branch was deleted by the maintainer on 2026-09-19:
+under `AGENT.md` §13 every branch needs a stated purpose and an end condition, so a branch with
+neither is not left sitting around.
 
 `main` always stays demonstrable: `make demo` passes, CI is green, and no document describes
 behaviour that is not implemented (D7).
@@ -585,14 +597,16 @@ statement, not two contradictory ones.
 | --- | --- | --- |
 | Global | `main` | `AGENT.md`, `docs/README.md`, `CHANGELOG.md` / `VERSION`, the M0–M4 and P1–P7 history, releases and tags |
 | Phase | `phase2` | the canonical Phase 2 plan (`docs/phase2-plan.md`) and Phase 2 status |
-| Item | `feat/anti-fraud-as`, then `feat/chained-as-demo`, `feat/capacity-probe` | one item's implementation, tests and documentation |
+| Item | **on demand** — for example `feat/chained-as-demo`, `feat/capacity-probe` | one item's implementation, tests and documentation; created only when the item needs to be discarded independently or worked in parallel |
 
 - `phase2` is **long-lived**: created once, from `main`, while `main` still held the full
   plan, and merged into `main` **once**, when Phase 2 is stable, with the maintainer's
   approval per `AGENT.md` §13.
 - Item branches are cut from **`phase2`**, not from `main`, and merge into **`phase2`** when
   that item's own definition of done is met. Those merges are internal to Phase 2; they are
-  **not** merges into `main`.
+  **not** merges into `main`. They are **on demand, not the default**: the default is to work
+  on `phase2` itself, which is what P8 does (§4 table). Creating one needs the maintainer's
+  approval (`AGENT.md` §13).
 - **Item branches do not chase `main`.** Nothing is synced merely because `main` moved. An
   item branch moves for a reason belonging to that item, never as a reflex to upstream
   movement.
@@ -633,8 +647,8 @@ never violated either (D7's last paragraph).
 
 ## 5. Handover protocol for Phase 2
 
-Each item runs in **its own conversation, on its own branch cut from `phase2`**, following
-`AGENT.md` §15:
+Each item runs in **its own conversation, on `phase2` or on a branch cut from it when one is
+needed** (§4: per-item branches are on demand), following `AGENT.md` §15:
 
 1. Read `AGENT.md`.
 2. Read `docs/README.md`.
@@ -645,8 +659,9 @@ Each item runs in **its own conversation, on its own branch cut from `phase2`**,
 **A Phase 2 conversation reads this plan on the `phase2` branch.** Step 3 above — and step 2
 of the closing list, which updates this document — read and edit `docs/phase2-plan.md` in the
 working tree of `phase2`, or of an item branch cut from it. No branch switch is involved; that
-is the point of the model (§4, *Branch model and documentation location*). P8's branch is
-`feat/anti-fraud-as`, **branched from `phase2` and merged into `phase2`**, not into `main`.
+is the point of the model (§4, *Branch model and documentation location*). P8 has **no branch
+of its own** — it is worked directly on `phase2`; `feat/anti-fraud-as` was deleted by the
+maintainer on 2026-09-19 (§4 table).
 
 Before the conversation ends:
 

@@ -8,6 +8,8 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-18
+
 ### Added
 
 - The `docker compose` stack now completes a real call end to end (P1,

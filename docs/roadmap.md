@@ -752,7 +752,8 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
 - **P6 — sippy retransmission-timer shutdown fix.** Cancel per-transaction timers on
   `SipTransactionManager.shutdown()` to remove the rare failover test flake (registered gap,
   deferred). **[Optional · Status: Done]** (2026-09-18, executed as **P8a** in
-  `docs/phase2-plan.md` §3 on branch `fix/sippy-retransmission-timer`)
+  `docs/phase2-plan.md` §3 on branch `fix/sippy-retransmission-timer`; merged into `main` as
+  `d0d0501` and released as `v0.5.1`)
 
   **Done in this conversation (2026-09-18).** `AsStack.stop()` now cancels everything the
   stack armed before sippy's own `shutdown()` runs:
@@ -795,7 +796,7 @@ do, and that drift is already a registered production gap.
 
 | Item | Status | Branch / repository |
 | --- | --- | --- |
-| P8a — sippy retransmission-timer shutdown fix | done (2026-09-18) | `fix/sippy-retransmission-timer` |
+| P8a — sippy retransmission-timer shutdown fix (Phase 1 defect fix, closes P6) | done, released as `v0.5.1` (2026-09-18) | `fix/sippy-retransmission-timer` |
 | P8 — anti-fraud AS (second use case) | not started (branch created, empty) | `feat/anti-fraud-as` |
 | P9 — chained demo (SBC → AS-1 → AS-2 → core) | not started | `feat/chained-as-demo` |
 | P9.5 — read-only capacity probe | not started | `feat/capacity-probe` |

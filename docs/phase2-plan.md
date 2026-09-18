@@ -303,7 +303,11 @@ scope change this requires.
 `AGENT.md` §15 names M4 as the final milestone and there is no M5, so Phase 2 continues the
 **P** numbering of the post-M4 items.
 
-### P8a — Fix the sippy retransmission-timer shutdown (blocker)
+### P8a — Phase 1 defect fix: sippy retransmission-timer shutdown (landed as `v0.5.1`)
+
+**Classification (maintainer ruling, 2026-09-18).** P8a is a **Phase 1 defect fix** — it
+closes roadmap item P6 — not Phase 2 work. It is kept in this sequence only because later
+items (P8, P9.5) refer to what it established. See §8 item 3 for the ruling.
 
 - **Goal.** Cancel per-transaction retransmission timers in
   `SipTransactionManager.shutdown()`, removing the `TypeError` in `transmitData`.
@@ -316,21 +320,26 @@ scope change this requires.
   later test.
 - **Type.** Bug fix. Independent branch, mergeable on its own; it makes `main` strictly more
   stable.
-- **Status: done (2026-09-18)** on `fix/sippy-retransmission-timer` (branched from `main`
-  at `7c4a417`). Acceptance item **ACC-P8A-001** with evidence in
-  `docs/acceptance/report.md`. **Not merged and not tagged** — both are the maintainer's
-  steps (§4, `AGENT.md` §13).
-- **Deviation from §5 (version and CHANGELOG), maintainer decision 2026-09-18.** This
-  handover protocol asks a Phase 2 conversation to "update `CHANGELOG.md` and `VERSION`";
-  P8a deliberately does not. `VERSION`, `pyproject.toml` and `uv.lock` stay at **`0.5.0`**
-  and every P8a entry stays under the existing **`[Unreleased]`** heading — no dated
-  release node is opened. Reasons, so a fresh conversation does not have to re-derive them:
-  no Phase 2 item has been merged into `main` yet (D7: an item is merged only when its own
-  definition of done is met, and the maintainer confirmed that nothing goes to `main` at
-  this point), and `CHANGELOG.md` line 7 states *"one version node per milestone"* — P8a is
-  not a milestone, it is a Phase 2 item. The version and its release node are created when
-  the item actually lands on `main`. A `0.5.1` node must **not** be opened for this branch
-  while it is unmerged.
+- **Status: done, merged and released (2026-09-18)** on `fix/sippy-retransmission-timer`
+  (branched from `main` at `7c4a417`), merged into `main` as `d0d0501` and released by the
+  maintainer as tag **`v0.5.1`**. Acceptance item **ACC-P8A-001** with evidence in
+  `docs/acceptance/report.md`. Tagging itself remains the maintainer's step (§4, `AGENT.md`
+  §13).
+- **Deviation from §5 (version and CHANGELOG) — history and resolution.** This handover
+  protocol asks a Phase 2 conversation to "update `CHANGELOG.md` and `VERSION`"; while P8a
+  was unmerged it deliberately did not, to keep the release node for the landing. The
+  decision recorded at the time: `VERSION`, `pyproject.toml` and `uv.lock` remained at
+  **`0.5.0`** and every P8a entry remained under the existing **`[Unreleased]`** heading —
+  no dated release node opened — because nothing had been merged into `main` yet (D7: an
+  item is merged only when its own definition of done is met) and `CHANGELOG.md` line 7
+  states *"one version node per milestone"* (P8a is not a milestone). **Resolved
+  2026-09-18:** the item landed on `main` (`d0d0501`) and the maintainer released
+  **`v0.5.1`**, so the version trio now reads `0.5.1` and the P1–P7 and P8a entries that
+  were under `[Unreleased]` became the `[0.5.1] - 2026-09-18` release notes. The maintainer
+  also ruled that P8a is a **Phase 1 defect fix** (it closes P6), not Phase 2 work, so
+  `0.5.1` is a defect-fix release and the "one version node per milestone" convention no
+  longer matches a non-milestone `v0.5.1` tag; the maintainer chose to leave that
+  convention text unchanged (see §8).
 
 **Done in this conversation (2026-09-18).** Nothing under `site-packages` changed: sippy
 stills ship the defect, and the repository cancels what it armed itself, from its own
@@ -429,7 +438,8 @@ stills ship the defect, and the repository cancels what it armed itself, from it
 
 - **Goal.** Discover where the capacity boundary is. **Do not change the skeleton** — add a
   load generator plus observation only.
-- **Prerequisites.** P8a merged.
+- **Prerequisites.** P8a merged — **satisfied**: P6/P8a landed on `main` (`d0d0501`) and was
+  released as `v0.5.1` (2026-09-18).
 - **Output.** The constraints found (concurrency ceiling, back-pressure behaviour, what
   blocks the event loop) become inputs to P10 and are registered as gaps.
 - **Explicitly not:** any published calls-per-second or latency figure (D10).
@@ -495,16 +505,19 @@ required** — recorded here so that a later audit does not raise them again.
 **No unauthorised entry was found**, so nothing had to be taken back under the §13 approval
 rule. Two accepted deltas are recorded because an audit would otherwise "discover" them:
 
-1. The two documentation commits `b461f80` and `d07b564` (the phantom-reference corrections)
-   were committed onto `fix/sippy-retransmission-timer` instead of `main`, because two agents
-   shared one working tree while that branch was checked out. `main` therefore still carries
-   the four wrong `§14.3` cross-references (three in this document, one in `docs/roadmap.md`)
-   and the wrong `§14.6` reference in `tools/README.md`. Under §13 nothing enters `main`
-   without approval, so they stay on the branch and will only reach `main` if that branch is
-   merged; the maintainer accepted the cost.
-2. `main` is ahead of `origin/main` by the unpushed rules commits (`61cab03`: the §13
-   approval rule and the §14.1 one-writing-agent rule). Pushing is the maintainer's step, not
-   an agent's (§13).
+1. **Closed 2026-09-18.** The two documentation commits `b461f80` and `d07b564` (the
+   phantom-reference corrections) were committed onto `fix/sippy-retransmission-timer`
+   instead of `main`, because two agents shared one working tree while that branch was
+   checked out. At the time, `main` carried the four wrong `§14.3` cross-references (three
+   in this document, one in `docs/roadmap.md`) and the wrong `§14.6` reference in
+   `tools/README.md`. Under §13 nothing enters `main` without approval, so the corrections
+   waited on the branch and reached `main` when that branch was merged (`d0d0501`); the
+   maintainer accepted the delay. The corrections are now on `main`, so this ruling's
+   mention of the old cross-references is the only place they appear — as history.
+2. **Closed 2026-09-18.** At the time, `main` was ahead of `origin/main` by the unpushed
+   rules commits (`61cab03`: the §13 approval rule and the §14.1 one-writing-agent rule).
+   The maintainer then pushed them: `origin/main` and tag `v0.5.1` both point at `d0d0501`.
+   Pushing remains the maintainer's step, not an agent's (§13).
 
 ## 5. Handover protocol for Phase 2
 
@@ -580,8 +593,8 @@ Not blocking, but each must be handled rather than discovered mid-implementation
 
 ## 8. Decisions requiring maintainer approval
 
-One change to the rules themselves, plus one approval that an existing rule already
-requires. Neither may be treated as incidental.
+One change to the rules themselves, one approval that an existing rule already requires, and
+one re-classification resolved by ruling. None may be treated as incidental.
 
 1. **`AGENT.md` §2 scope change.** *"No performance or capacity work … no benchmarking
    claims"* must be relaxed to permit a capacity harness while **continuing to forbid
@@ -590,3 +603,10 @@ requires. Neither may be treated as incidental.
    P10 is a structural refactor, and that rule already requires an explicit, approved plan
    **before any code moves**. It is listed here so the plan is put to the maintainer
    deliberately rather than assumed.
+3. **P6 → P8a promotion — never separately approved; resolved by ruling (2026-09-18).**
+   P8a began as roadmap item P6, parked as *Optional/Pending*; no approved decision ever
+   recorded its promotion to the Phase 2 work sequence or its framing here as a Phase 2
+   "(blocker)". On 2026-09-18 the maintainer ruled that **P8a is a Phase 1 defect fix that
+   closes P6**, not Phase 2 work. It was fixed on `fix/sippy-retransmission-timer`, merged
+   into `main` (`d0d0501`) and released as **`v0.5.1`**. Recorded here so a future audit sees
+   the re-classification was resolved by ruling, not left by omission.

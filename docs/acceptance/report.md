@@ -1729,8 +1729,9 @@ it was not downloaded from this environment.
 ## Phase 2 — P8a sippy retransmission-timer shutdown fix (2026-09-18)
 
 Branch `fix/sippy-retransmission-timer` (branched from `main` at `7c4a417`). Item P8a in
-`docs/phase2-plan.md` §3; **not merged into `main` and not tagged** — both are the
-maintainer's steps. Acceptance item: **ACC-P8A-001** in `docs/acceptance/criteria.md`.
+`docs/phase2-plan.md` §3; **merged into `main` as `d0d0501` and released by the maintainer as
+tag `v0.5.1`** (both are the maintainer's steps, `AGENT.md` §13). Acceptance item:
+**ACC-P8A-001** in `docs/acceptance/criteria.md`.
 
 What was verified: stopping the AS signalling stack leaves **no** per-transaction timer
 armed, so a retransmission that was pending can never outlive the transaction manager it
@@ -1896,22 +1897,31 @@ not.
 
 ### 3. CI
 
-**CI has not run on this branch.** Nothing was pushed: `git push` — including pushing this
-branch — requires maintainer approval in this conversation and was not requested
-(`AGENT.md` §13). The committed workflow `.github/workflows/ci.yml` would run the five
-layers on push, but no run exists for `fix/sippy-retransmission-timer`, and the `README.md`
-badge reflects the latest run of `main`, not of this branch. Everything in this section was
-executed locally with real commands and real output; nothing here is a CI conclusion.
+**CI is green on the pushed `main` (`d0d0501`), which contains this fix — the maintainer's
+statement.** The item was merged into `main` (`d0d0501`), the maintainer pushed it and
+reported CI green, and then released it as tag `v0.5.1`. Following the P3 precedent above,
+this is recorded as the **maintainer's report, not an independently observed run**: there is
+no `gh` in this environment and GitHub is not reachable from it, so the job list and the
+per-job conclusions were not read here. The `README.md` badge reflects the latest run of
+`main`. Everything in sections 1, 2 and 4 was executed locally with real commands and real
+output.
+
+This is the `AGENT.md` §4.8 evidence kind 3 (CI result). The other kinds: kind 1
+(verification command with expected output) is section 1, kind 2 (a real log excerpt keyed
+by Call-ID) is section 2, and kind 4 (packet capture) is section 4 — recorded there as
+**not applicable**, deliberately, because a timer/shutdown fix changes no wire behaviour and
+no pcap was invented to fill the slot.
 
 ### 4. Capture
 
-`n/a` — deliberately, and not an omission. This fix changes no wire behaviour: no SIP
-message, header or body is added, removed or altered, and while the stack is running no
-retransmission is suppressed earlier or later than RFC 3261 allows. A capture of the
-failover flow would be byte-identical before and after, which is why no pcap is cited and
-none was fabricated. The wire-level evidence for the surrounding call is reproduced with
-`make capture` (`docs/specs/message-samples/`, generated and gitignored — `AGENT.md` §13
-forbids committing captures); `make demo` above is the same flow with narration.
+`n/a` — deliberately, and not an omission (the `AGENT.md` §4.8 evidence kind 4, packet
+capture). This fix changes no wire behaviour: no SIP message, header or body is added,
+removed or altered, and while the stack is running no retransmission is suppressed earlier
+or later than RFC 3261 allows. A capture of the failover flow would be byte-identical before
+and after, which is why no pcap is cited and none was fabricated. The wire-level evidence
+for the surrounding call is reproduced with `make capture` (`docs/specs/message-samples/`,
+generated and gitignored — `AGENT.md` §13 forbids committing captures); `make demo` above is
+the same flow with narration.
 
 ### Item results
 
@@ -1944,15 +1954,18 @@ forbids committing captures); `make demo` above is the same flow with narration.
   in any of them, so this run can confirm the cause is gone but cannot reproduce the original
   failure rate — which is exactly why the deterministic regression test, not the loop, is the
   guard.
-- **Version and release node — maintainer decision (2026-09-18), no `0.5.1` exists.**
-  `VERSION`, `pyproject.toml` and `uv.lock` stay at **`0.5.0`** (`uv lock --check` passes and
-  the lock is byte-identical to `main`'s, still on public PyPI), and every P8a entry stays
-  under the existing **`[Unreleased]`** heading with no dated node opened — even though
-  `docs/phase2-plan.md` §5 asks a Phase 2 conversation to update `VERSION`. The reason is
-  recorded in the P8a entry of that document so a fresh conversation does not re-derive it:
-  no Phase 2 item is merged into `main` yet (D7), and `CHANGELOG.md` line 7 says "one version
-  node per milestone" — P8a is not a milestone. Nothing in this branch was pushed, tagged or
-  merged.
+- **Version and release node — maintainer decision (2026-09-18), later superseded by the
+  release.** While P8a was unmerged the decision was to leave `VERSION`, `pyproject.toml` and
+  `uv.lock` at **`0.5.0`** (`uv lock --check` passed and the lock was byte-identical to
+  `main`'s, still on public PyPI) and to keep every P8a entry under the **`[Unreleased]`**
+  heading with no dated node opened — even though `docs/phase2-plan.md` §5 asks a Phase 2
+  conversation to update `VERSION`. The reason, recorded so a fresh conversation did not
+  re-derive it: nothing had been merged into `main` yet (D7), and `CHANGELOG.md` line 7 says
+  "one version node per milestone" — P8a is not a milestone. **Resolved 2026-09-18:** the item
+  landed on `main` (`d0d0501`) and the maintainer released **`v0.5.1`**; the version trio now
+  reads `0.5.1` and the entries that were under `[Unreleased]` became the
+  `[0.5.1] - 2026-09-18` release notes. Nothing was pushed or tagged by an agent: the merge
+  and the tag are the maintainer's.
 - **Test-harness port allocation — registered, not fixed.** The internal API's **TCP** port is
   allocated by `_free_udp_port()`, which probes **UDP** and therefore guarantees nothing about
   TCP; observed as 1 failure in 42 integration runs with

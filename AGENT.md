@@ -386,6 +386,17 @@ Additional expectations:
   part of "finishing" a task, and must not treat an approval given for earlier work as
   covering later work. Changes to the git configuration (for example `git remote set-url`)
   need the same explicit approval. Related: agents do not create tags — see §15.
+- **Nothing enters `main` without the maintainer's explicit approval given in that
+  conversation.** `main` is the maintainer's, not the agents': not a commit, not a merge,
+  not a cherry-pick, not a history rewrite, not a file — however small and however obviously
+  correct it looks. All agent work happens on branches. The approval is **per change and
+  non-transferable**: an approval given for earlier work does not authorise later work, and
+  "finishing a task" is not an implicit approval. Anything found to have entered `main`
+  without that approval is to be found and taken back — report it to the maintainer and
+  revert it on their instruction; it must not be left in place because reverting looks
+  disruptive. Verifying what is on `main` (`git log --oneline main` against
+  `git rev-parse main origin/main`) belongs in the closing handover (§15), so an
+  unauthorised entry is detected rather than discovered later.
 - **Conventional Commits**, English, one logical change per commit:
   `feat` · `fix` · `docs` · `refactor` · `test` · `chore` · `build`
 - **Pre-commit gate (all green)**: `ruff format --check`, `ruff check`, `mypy`,
@@ -458,6 +469,16 @@ To spawn a writing member:
 Rule of thumb: **read-only work -> synchronous subagent; any file change -> team mode with
 `mode = "acceptEdits"`.** If a subagent reports it "cannot edit" or "is read-only", you
 spawned it in the wrong mode — respawn it in team mode.
+
+**One writing member per working tree.** Every team-mode member shares **one** repository
+working tree — git's state is per working tree, not per member. Therefore **only one writing
+member may be active in this repository at a time**: spawn the next writer only after the
+previous one has reported and been shut down. A second writer's `git commit` lands on
+whatever branch the first one has checked out, not on `main`, and the failure is silent.
+On 2026-09-18 two documentation commits intended for `main` landed on
+`fix/sippy-retransmission-timer` instead, because a second member committed while that
+branch was checked out; they were harmless only because they were ultimately retained, and
+the cost was a branch that carries unrelated history.
 
 **Message timing and irreversibility (learned in M3).** A team-mode message is delivered to
 the member's inbox and read only at its next turn boundary, so it **cannot interrupt a turn

@@ -179,7 +179,9 @@ it, the abstraction is driven by reading code instead of by real collisions.
 ### D7 — Public throughout, one branch per work item
 
 **Decision.** The repository stays public. Each Phase 2 item is developed on its own branch
-and merged into `main` only when the item's own definition of done is met.
+and merged into `main` only when the item's own definition of done is met. Meeting that
+definition of done is **necessary but not sufficient**: the merge additionally requires the
+maintainer's explicit approval in that conversation (`AGENT.md` §13).
 
 **Rationale.** Under D1 visibility is the point; going private for months would produce
 nothing. But `main` must always be demonstrable: `AGENT.md` §4.7 requires a green CI badge,

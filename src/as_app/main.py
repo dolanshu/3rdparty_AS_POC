@@ -59,6 +59,7 @@ from as_app.observability.logging import LogDirection, configure_logging, get_lo
 from as_app.observability.metrics import MetricsRegistry, get_metrics_registry
 from as_app.observability.tracing import TraceRecorder, get_trace_recorder
 from as_app.routing.rules import RuleSetStore
+from as_app.sip_adapter import cancel_transaction_timers
 
 __all__ = ["AsStack", "main"]
 
@@ -251,14 +252,25 @@ class AsStack:
         ED2.loop()
 
     def stop(self) -> None:
-        """Release the trunk socket, the loop timers and the internal API port."""
+        """Release the trunk socket, the loop timers and the internal API port.
+
+        Everything the stack armed has to be cancelled before sippy's own
+        :meth:`SipTransactionManager.shutdown` runs: that call only cancels its own
+        cache-purge timer and releases the sockets, so the loop-owned timers of calls
+        that are still in flight would survive it and fire into a torn-down stack. See
+        :func:`as_app.sip_adapter.cancel_transaction_timers` and the gap row "Closing a
+        transaction manager mid-retransmission" in ``docs/production-gaps.md``.
+        """
         if self._shutdown_timer is not None:
             self._shutdown_timer.cancel()
             self._shutdown_timer = None
         if self._reload_timer is not None:
             self._reload_timer.cancel()
             self._reload_timer = None
+        if self.call_map is not None:
+            self.call_map.dispose()
         if self.transaction_manager is not None:
+            cancel_transaction_timers(self.transaction_manager)
             self.transaction_manager.shutdown()
             self.transaction_manager = None
         if self.internal_api is not None:

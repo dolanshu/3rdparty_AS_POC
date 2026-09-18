@@ -531,6 +531,17 @@ class CallController:
             self._no_answer_timer.cancel()
             self._no_answer_timer = None
 
+    def dispose(self) -> None:
+        """Drop the controller-owned timers so they cannot outlive the stack.
+
+        The no-answer timer watches a next hop for
+        :data:`_DEFAULT_NEXT_HOP_EXPIRE` seconds. A call that is still waiting when the
+        process stops would otherwise have its timer fire into a transaction manager that
+        has already been shut down, whose ``global_config['_sip_tm']`` is ``None``.
+        Called from :meth:`TrunkCallMap.dispose` when the stack stops (P8a).
+        """
+        self._cancel_no_answer_timer()
+
     def _reject_on_trunk(self, error: AsError) -> None:
         """Answer the trunk leg with the SIP status the error carries.
 
@@ -901,6 +912,17 @@ class TrunkCallMap:
         )
         self.controllers.append(controller)
         return controller
+
+    def dispose(self) -> None:
+        """Cancel the timers of every call this map still knows about.
+
+        Called when the signalling stack stops: the controllers of calls that are still
+        waiting for a next hop own loop timers that would otherwise fire into a
+        transaction manager which has already been shut down. See
+        :meth:`CallController.dispose` and ``AsStack.stop`` (P8a).
+        """
+        for controller in self.controllers:
+            controller.dispose()
 
     def _reject_peer(self, request: Any, source: str, peer: str) -> Any:
         """Answer a request from an address that is not an allowed trunk peer.

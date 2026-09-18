@@ -602,6 +602,12 @@ statement, not two contradictory ones.
 - `phase2` is **long-lived**: created once, from `main`, while `main` still held the full
   plan, and merged into `main` **once**, when Phase 2 is stable, with the maintainer's
   approval per `AGENT.md` §13.
+- **`main` is brought into `phase2` by merging, never by rebasing.** When `main` is merged
+  into `phase2`, the conflict on `docs/phase2-plan.md` is always resolved by keeping
+  `phase2`'s version: `main` holds a stub pointer, `phase2` holds the canonical plan. This
+  recurs on every change to `main` during Phase 2. Merge with `--no-ff` and never rebase:
+  `phase2` is published, so rewriting its history would need `--force`, which `AGENT.md` §13
+  forbids without the maintainer's explicit approval.
 - Item branches are cut from **`phase2`**, not from `main`, and merge into **`phase2`** when
   that item's own definition of done is met. Those merges are internal to Phase 2; they are
   **not** merges into `main`. They are **on demand, not the default**: the default is to work

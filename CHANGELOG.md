@@ -93,14 +93,19 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ### Verified
 
-- **P8a repeat-run evidence (2026-09-18, real commands).** Before the fix, every
-  `pytest tests/integration -q -s` run printed at least one `TypeError` traceback from
-  `SipTransactionManager.transmitData` (5/5 sampled runs carried 1–2), while 64 consecutive
-  integration-layer runs produced no red test at all — the defect is deterministic, the 1-in-6
-  *failure* is its timing-dependent consequence. After the fix: **32 consecutive integration
-  runs, 0 failures and 0 `TypeError` tracebacks**, `pytest tests -q` → 128 passed, and all
-  four gates green. The new regression test deterministically fails when the cancellation is
-  removed: `AssertionError: 2 timer(s) still armed on a stopped transaction manager`.
+- **P8a evidence (2026-09-18, real commands; two separate measurements, not merged).**
+  *The defect* is deterministic: 5/5 `pytest tests/integration -q -s` runs before the fix
+  printed at least one `TypeError` traceback from `SipTransactionManager.transmitData` (four
+  runs 1, one run 2). *The flake* is not: 64 consecutive `pytest tests/integration -q` runs
+  before the fix were **64 green, 0 failures**, so the 1-in-6 failure did not recur and was
+  never reproduced — only its cause was. After the fix, with the same commands: **0 `TypeError`
+  tracebacks in 42 `-q -s` runs** (41 green; the one failure is a different, unrelated test —
+  see `docs/acceptance/report.md`), **30/30 `-q` runs green** with the command identical to
+  the 64 pre-fix runs, and **30/30** runs of
+  `test_next_hop_failover_uses_the_second_hop` green. `pytest tests -q` → 128 passed and all
+  four gates are green. **The primary guard is the deterministic regression test, not the
+  repeat loop**: it fails on every run when the cancellation is removed
+  (`AssertionError: 2 timer(s) still armed on a stopped transaction manager`).
 - Compose demo run (2026-09-16, real output): `docker compose -f deploy/docker-compose.yml
   up -d` brought all three services `Up`; the mock's default call completed with Call-ID
   `e48cb46795675ab0f76f5578cf5b4449`, the AS log showing `invite received on the trunk` →

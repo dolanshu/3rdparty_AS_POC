@@ -1807,21 +1807,35 @@ TypeError: 'NoneType' object is not subscriptable
 ----------------------------------------------------------------------
 ```
 
-Reproduced with `.venv/bin/python -m pytest tests/integration -q -s` — equivalent to
-`uv run pytest tests/integration -q -s`, since the project is installed editable; the bare
-interpreter was used only to keep the repeat loop free of per-run `uv sync` overhead. In its
-purest form it reproduced 1/1 in a throwaway probe that stops a stack whose outbound INVITE
-is still unanswered and then drives the shared loop. Across **64 consecutive integration runs
-before the fix the suite stayed green 64/64** — so this collection did not observe the 1-in-6
-*failure*, only the defect behind it.
+The defect and the flake are **two different measurements**, and this report keeps them
+apart. `.venv/bin/python -m pytest` is equivalent to `uv run pytest` — the project is installed
+editable; the bare interpreter was used only to keep the repeat loop free of per-run `uv sync`
+overhead. In its purest form the defect reproduced 1/1 in a throwaway probe that stops a stack
+whose outbound INVITE is still unanswered and then drives the shared loop.
+
+**Before the fix:**
+
+| Measurement | Command | Result |
+| --- | --- | --- |
+| The defect | 5 × `.venv/bin/python -m pytest tests/integration -q -s` | **5/5 runs printed ≥1 `TypeError` traceback** (four runs 1, one run 2) — the defect is deterministic |
+| The flaky test | 64 × `.venv/bin/python -m pytest tests/integration -q` | **64 green, 0 failures** — the 1-in-6 *failure* did **not** recur; this collection observed the cause, not the failure |
 
 **After the fix:**
 
-| Evidence | Command | Result |
+| Measurement | Command | Result |
 | --- | --- | --- |
-| Integration layer, repeat | 42 × `.venv/bin/python -m pytest tests/integration -q -s` | 41 green, **1 failure** — see *Open items*; `TypeError` tracebacks: **0 in all 42 runs** |
-| The previously flaky test, repeat | 30 × `pytest tests/integration/test_translation.py::test_next_hop_failover_uses_the_second_hop -q -s` | **30 green**, 0 `TypeError` tracebacks |
+| The defect | 42 × `.venv/bin/python -m pytest tests/integration -q -s` | **`TypeError` tracebacks: 0 in all 42 runs**; 41 green, 1 failure — see *Open items* |
+| The flaky test | 30 × `.venv/bin/python -m pytest tests/integration -q` — identical command to the 64 pre-fix runs | **30 green, 0 failures** |
+| The test itself | 30 × `pytest tests/integration/test_translation.py::test_next_hop_failover_uses_the_second_hop -q -s` | **30 green**, 0 `TypeError` tracebacks |
 | Full three-layer suite | `uv run pytest tests -q` | 128 passed |
+
+**What actually guards the fix.** The primary guard is the **deterministic regression test**,
+not the repeat loop: `test_stopping_the_stack_leaves_no_transaction_timer_armed` fails on every
+run the moment the cancellation is removed, and it asserts the property itself rather than
+waiting for a symptom. The repeat runs are supporting evidence, and they show only what they
+measured — that the traceback is gone and that the previously flaky test passed 30/30 in this
+collection. They cannot prove the absence of a 1-in-6 failure, and this report does not claim
+they do.
 
 The equivalent loop a reviewer can run (it yields ≥1 traceback per run if the cancellation
 is removed from `AsStack.stop()`):
@@ -1903,7 +1917,7 @@ forbids committing captures); `make demo` above is the same flow with narration.
 
 | ID | Result |
 | --- | --- |
-| ACC-P8A-001 | **accepted** — 14 passed; the guard fails without the fix; 30/30 repeat runs of the previously flaky test green with no `TypeError` traceback |
+| ACC-P8A-001 | **accepted** — 14 passed. Primary guard: the deterministic regression test fails on every run without the fix (`AssertionError: 2 timer(s) still armed on a stopped transaction manager`). Supporting evidence: 0 `TypeError` tracebacks in 42 integration runs, 30/30 of the same command green (identical to the 64 pre-fix runs), 30/30 of the previously flaky test green |
 
 ### Open items raised by this run
 
@@ -1924,10 +1938,12 @@ forbids committing captures); `make demo` above is the same flow with narration.
   load probe) would meet exactly what P8a fixed on the AS side. Recorded in
   `docs/phase2-plan.md` §3 (P8a, point 5) instead of being assumed away.
 - **The 1-in-6 failure was never observed.** Datasets: 64 pre-fix and 42 post-fix
-  integration runs, plus 30 post-fix runs of the failover test alone. The *defect* reproduced
-  in every pre-fix run (≥1 `TypeError` each); the red-test outcome did not recur in any of
-  them, so this run can confirm the cause is gone but cannot reproduce the original failure
-  rate.
+  integration runs with `-s`, a further 30 post-fix runs with the `-q` command identical to
+  the 64 pre-fix runs, and 30 post-fix runs of the failover test alone. The *defect*
+  reproduced in every pre-fix run (≥1 `TypeError` each); the red-test outcome did not recur
+  in any of them, so this run can confirm the cause is gone but cannot reproduce the original
+  failure rate — which is exactly why the deterministic regression test, not the loop, is the
+  guard.
 - **Version and release node.** `VERSION`, `pyproject.toml` and `uv.lock` were bumped to
   `0.5.1` (`uv lock --check` passes; the lock diff is the single project-version line, still
   on public PyPI). The P8a entries were added to the existing `[Unreleased]` node rather than

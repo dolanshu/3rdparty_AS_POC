@@ -22,7 +22,7 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-F-008 | SIP headers and the SDP body are passed through unmodified; only the Request-URI and the number format are rewritten. | done | M1 | ACC-M1-002 |
 | REQ-F-009 | A complete call is driven: `INVITE → 100 → 180 → 200 OK → ACK → BYE`. | done | M1 | ACC-M1-001 |
 | REQ-F-010 | Every log line carries timestamp, level, module, `call_id`, `direction`, `peer` and an event message. | done | M0 | ACC-M0-007 |
-| REQ-F-011 | Counters for calls, dispositions, error codes, rule hits and peer status; health endpoint; graceful shutdown on `SIGTERM`/`SIGINT`. | done | M1→M3 | ACC-M1-004, ACC-M3-002 |
+| REQ-F-011 | Counters for calls, dispositions, error codes, rule hits and peer status; health endpoint; graceful shutdown on `SIGTERM`/`SIGINT`. | done | M1→M3 | ACC-M1-004, ACC-M3-002, ACC-P8A-001 |
 | REQ-F-012 | Console shows the live message flow, the rule that matched, the configuration, statistics and an SVG topology; rules are read-only. | done | M3 | ACC-M3-001 |
 | REQ-F-013 | All configuration comes from the environment; switching from the mock to a real S-SBC is a configuration change only. | done | M0 | ACC-M0-005 |
 | REQ-F-014 | Startup self-check (configuration schema, rules parse and validation, port availability, peer sanity) and fail-fast on invalid configuration. | done | M0 | ACC-M0-005 |
@@ -49,6 +49,18 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
   `src/as_app/routing/engine.py`; the sippy glue that applies them to a Request-URI is
   `CallController.apply_call_policy` in `src/as_app/call_controller.py` (M2).
 - `REQ-NF-009` is a deliberate non-goal, registered in `docs/production-gaps.md`.
+- **Graceful shutdown (P8a, 2026-09-18).** `REQ-F-011` covers "graceful shutdown on
+  `SIGTERM`/`SIGINT`"; that requirement text is **unchanged** — the capability it asks for
+  was already delivered in M1, and this item only removes a defect from the path that
+  implements it. Before the fix, stopping the stack left the per-transaction retransmission
+  timers armed in sippy's process-wide `ED2` loop, so an INVITE still awaiting an answer
+  kept retransmitting into a torn-down manager and raised
+  `TypeError: 'NoneType' object is not subscriptable`. `AsStack.stop()` now cancels them —
+  and the per-call no-answer timers — before sippy's own
+  `SipTransactionManager.shutdown()` (see `docs/architecture/lld.md` §3.2 and §5). Traced
+  by **ACC-P8A-001**, which asserts the property directly; the previously flaky failover
+  test is the symptom, not the guard. No wire behaviour changed, so no entry in
+  `docs/specs/` and no message sample is affected.
 - Milestones M0–M3 are delivered, so no requirement above is left `planned` or `partial`
   for want of a milestone. The three-service `docker compose` stack is validated with
   `docker compose config`; its SIP path still carries the `ALLOWED_PEERS` issue tracked in

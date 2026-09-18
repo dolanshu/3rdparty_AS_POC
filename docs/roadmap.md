@@ -762,14 +762,17 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   still waiting for a next hop. sippy itself is untouched — it is an installed dependency.
 
   **Evidence (real commands, real output; details in the P8a section of
-  `docs/acceptance/report.md`).** Before the fix every `pytest tests/integration -q -s`
-  run printed at least one
-  `TypeError: 'NoneType' object is not subscriptable` from `SipTransactionManager.transmitData`
-  (5/5 sampled runs had 1–2 occurrences) — the defect was deterministic; the *test failure*
-  was the rare outcome (0 failures in 64 consecutive integration-layer runs, so the flake
-  itself did not recur during this collection). After the fix: **32 consecutive integration
-  runs green, 0 failures, 0 `TypeError` tracebacks**, plus 128 passed for the whole three-layer
-  suite and all four gates green. The gap row "Closing a transaction manager
+  `docs/acceptance/report.md`).** Two measurements, kept apart because they say different
+  things. *The defect was deterministic*: every `pytest tests/integration -q -s` run printed
+  at least one `TypeError: 'NoneType' object is not subscriptable` from
+  `SipTransactionManager.transmitData` (5/5 sampled runs, 1–2 occurrences each). *The flake
+  did not recur*: 64 consecutive `pytest tests/integration -q` runs were 64 green, 0 failures,
+  so this collection never saw the 1-in-6 failure, only its cause. After the fix, same
+  commands: **0 `TypeError` tracebacks in 42 `-q -s` runs** (41 green — the single failure is
+  an unrelated health-endpoint test, see the report), **30/30 `-q` runs green**, **30/30**
+  runs of the failover test green, `pytest tests -q` → 128 passed, all four gates green. The
+  primary guard is the **deterministic** regression test (it fails on every run when the
+  cancellation is removed), not the repeat loop. The gap row "Closing a transaction manager
   mid-retransmission" in `docs/production-gaps.md` is resolved, with one caveat recorded
   (in-flight transactions are cancelled, not drained: no final response reaches the peer).
 - **P7 — Capture clears stale samples before writing.** `tools/capture_call.py` deleted only

@@ -212,7 +212,13 @@ one place in the signalling path that can change what is dialled.
   would put the wrong `Via` on the wire.
 - A side that needs its own local UDP port needs its own `SipTransactionManager`; each
   manager must have `global_config['_sip_tm']` set right after construction, and
-  `shutdown()` releases the socket again.
+  `shutdown()` releases the socket again. **`shutdown()` is not a complete teardown on its
+  own**: it cancels only the manager's own cache-purge timer, never the timers the
+  transactions carry (`teA`…`teG`), and it drops the tables those timers hang from. Because
+  `ED2` is the process-wide singleton above, a timer that survives it keeps firing — into a
+  manager whose `global_config` is already `None`. Whoever stops a manager has to cancel the
+  transaction timers first, which is what `as_app.sip_adapter.cancel_transaction_timers()`
+  does for the AS (P8a).
 
 ## 6. Configuration reference
 

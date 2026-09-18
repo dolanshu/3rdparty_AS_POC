@@ -540,6 +540,10 @@ plans, tracks status in `docs/roadmap.md` and reviews; it does not implement.
 handover notes and open items for each milestone. This section states the fixed scope
 only; never edit milestone status here (and never duplicate milestone status here).
 
+**Phase 2 (P8a–P11) has its own long-lived branch, `phase2`:** the canonical plan and status
+are `docs/phase2-plan.md` on that branch, the copy of that file on `main` is a stub, and a
+Phase 2 conversation reads and edits the plan on `phase2`.
+
 - **M0 — Foundation.** Telecom-grade skeleton: `config/ deploy/ src/ tests/ tools/`,
   `pyproject.toml` + `uv.lock`, ruff/mypy/pytest config, CI workflow, meta files
   (VERSION, CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, NOTICE), `docs/`

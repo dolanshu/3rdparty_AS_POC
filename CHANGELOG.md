@@ -59,16 +59,19 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   a new capture. It previously removed only `NN-*.txt`, so a capture that produced fewer
   messages than the previous run could leave orphaned sample files behind. The directory now
   always holds exactly the messages of the most recent capture (P7, `docs/roadmap.md`).
-- Three documents cited `AGENT.md` §14.3, a section that does not exist. They now cite the
-  sections that actually carry the rules they meant: `docs/roadmap.md` (the M1 open item on
-  scope conflict) cites the `AGENT.md` §15 handover protocol, which is where *"a milestone
-  conversation may not change scope that belongs to another milestone"* lives; and
+- Four documents cited an `AGENT.md` section that does not exist. They now cite the places
+  that actually carry the rules they meant: `docs/roadmap.md` (the M1 open item on scope
+  conflict) cites the `AGENT.md` §15 handover protocol, which is where *"a milestone
+  conversation may not change scope that belongs to another milestone"* lives;
   `docs/phase2-plan.md` (the `Related:` header, the P10 constraints, and §8 item 2, whose
   heading is now *"`AGENT.md` §14 rule 3 approval (no unconfirmed refactors)"*) cites
   `AGENT.md` §14 rule 3, which already forbids deleting code, rewriting large files or
-  restructuring directories without an explicit, approved plan. The §8 lead-in was corrected
-  to match: only item 1 changes a rule, item 2 is an approval an existing rule requires.
-  Documentation only; `AGENT.md` itself is unchanged.
+  restructuring directories without an explicit, approved plan, with the §8 lead-in
+  corrected to match — only item 1 changes a rule, item 2 is an approval an existing rule
+  requires; and `tools/README.md` ("Rules for new tools", §14.6) cites `AGENT.md` §14 rule 6
+  (report honestly), which is the rule *"Do not claim passed tests, verified behaviour or
+  working calls that were not executed"*. Documentation only; `AGENT.md` itself is
+  unchanged.
 
 ### Verified
 

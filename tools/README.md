@@ -24,6 +24,6 @@ uv run python tools/capture_call.py
 ## Rules for new tools
 
 - A tool that claims something about sippy must print the real output; a claim without an
-  executed run is not evidence (`AGENT.md` section 14.6).
+  executed run is not evidence (`AGENT.md` §14 rule 6, report honestly).
 - Tools may import from `src/`, never the other way round.
 - No tool may commit captures, payloads with real numbers or environment files.

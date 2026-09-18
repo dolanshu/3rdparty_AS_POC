@@ -179,9 +179,14 @@ it, the abstraction is driven by reading code instead of by real collisions.
 ### D7 — Public throughout, one branch per work item
 
 **Decision.** The repository stays public. Each Phase 2 item is developed on its own branch
-and merged into `main` only when the item's own definition of done is met. Meeting that
+and merged into **`phase2`** only when the item's own definition of done is met. Meeting that
 definition of done is **necessary but not sufficient**: the merge additionally requires the
 maintainer's explicit approval in that conversation (`AGENT.md` §13).
+
+*(Refined by the maintainer's ruling of 2026-09-19: the target of an item merge is `phase2`,
+not `main` — see §4, *Branch model and documentation location*. `main` receives exactly one
+Phase 2 merge, the final one, and that merge carries the approval above. Nothing else in
+this decision changes: `main` is still never where unfinished work lands.)*
 
 **Rationale.** Under D1 visibility is the point; going private for months would produce
 nothing. But `main` must always be demonstrable: `AGENT.md` §4.7 requires a green CI badge,
@@ -404,7 +409,12 @@ stills ship the defect, and the repository cancels what it armed itself, from it
 - **Goal.** A second, independently runnable AS process implementing D4, D5 and D9.
 - **First steps.** *(Renamed from "Prerequisites": these are P8's own first tasks, not a
   separate preliminary phase — the old wording invited exactly that misreading.)*
-  **1. Bring the branch up to `main`'s tip before anything else.** Done on 2026-09-18:
+  **1. Bring the branch up to `main`'s tip before anything else — superseded 2026-09-19.**
+  Under the branch model adopted that day, item branches are cut from `phase2` and do **not**
+  chase `main` (§4, *Branch model and documentation location*); `feat/anti-fraud-as` was
+  therefore fast-forwarded to **`phase2`'s tip** instead. The rest of this paragraph is the
+  2026-09-18 record of why the branch's position mattered, kept as history. Done on
+  2026-09-18:
   `feat/anti-fraud-as` was fast-forwarded from `d0d0501` to `ebe5a17`, the release that
   reconciles `VERSION` and `CHANGELOG` (`0.5.1`). A branch left at `d0d0501` still carries
   `VERSION` = `0.5.0` and no `[0.5.1]` CHANGELOG node, so the first commit made on it would
@@ -491,10 +501,11 @@ stills ship the defect, and the repository cancels what it armed itself, from it
 | Item | Branch | Repository |
 | --- | --- | --- |
 | P8a timer fix | `fix/sippy-retransmission-timer` | this one |
-| P8 anti-fraud AS | `feat/anti-fraud-as` (already created, empty) | this one |
-| P9 chained demo | `feat/chained-as-demo` | this one |
-| P9.5 capacity probe | `feat/capacity-probe` | this one |
-| P10 platform extraction | new branch here, output is a new repository | new repository |
+| **Phase 2 integration (P8–P11)** | **`phase2`** — long-lived, created once from `main` | this one |
+| P8 anti-fraud AS | `feat/anti-fraud-as` (already created, empty) — **off `phase2`**, merges into `phase2` | this one |
+| P9 chained demo | `feat/chained-as-demo` — off `phase2`, merges into `phase2` | this one |
+| P9.5 capacity probe | `feat/capacity-probe` — off `phase2`, merges into `phase2` | this one |
+| P10 platform extraction | new branch off `phase2`, output is a new repository | new repository |
 | P11 TLS + harness | branches in the new repository | new repository |
 
 `main` always stays demonstrable: `make demo` passes, CI is green, and no document describes
@@ -557,29 +568,92 @@ the release reconciliation; item 5 below is where `v0.5.1` ends up.)*
    do not create tags). **It is not a precedent.** The full record lives in the tag object
    itself (`git tag -n99 v0.5.1`); it is cross-referenced here, not repeated.
 
-### Documentation location and branch base — maintainer ruling of 2026-09-18
+### Branch model and documentation location — maintainer ruling of 2026-09-19
 
-Phase 2 documentation — **this plan and `docs/roadmap.md`** — stays on `main`. Each Phase 2
-item's branch **fast-forwards to `main`'s tip when the item starts** (see P8's *First steps*
-in §3) and carries its own documentation updates with it when it lands. The maintainer
+**This section supersedes the ruling of 2026-09-18 that used to stand here.** That ruling
+said: *"Phase 2 documentation — this plan and `docs/roadmap.md` — stays on `main`. Each
+Phase 2 item's branch fast-forwards to `main`'s tip when the item starts … The maintainer
 considered keeping the plan on a long-lived `phase2` branch and **rejected** it, because
 `main` would then be stale for the whole of Phase 2 — exactly what D1 and D7 exist to
-prevent. Recorded so that the question is not re-litigated.
+prevent."* The maintainer changed that decision on **2026-09-19**. The old text is quoted
+here as history and replaced below as the operative rule, so that this document carries one
+statement, not two contradictory ones.
+
+**The model has three levels.**
+
+| Level | Branch | Holds |
+| --- | --- | --- |
+| Global | `main` | `AGENT.md`, `docs/README.md`, `CHANGELOG.md` / `VERSION`, the M0–M4 and P1–P7 history, releases and tags |
+| Phase | `phase2` | the canonical Phase 2 plan (`docs/phase2-plan.md`) and Phase 2 status |
+| Item | `feat/anti-fraud-as`, then `feat/chained-as-demo`, `feat/capacity-probe` | one item's implementation, tests and documentation |
+
+- `phase2` is **long-lived**: created once, from `main`, while `main` still held the full
+  plan, and merged into `main` **once**, when Phase 2 is stable, with the maintainer's
+  approval per `AGENT.md` §13.
+- Item branches are cut from **`phase2`**, not from `main`, and merge into **`phase2`** when
+  that item's own definition of done is met. Those merges are internal to Phase 2; they are
+  **not** merges into `main`.
+- **Item branches do not chase `main`.** Nothing is synced merely because `main` moved. An
+  item branch moves for a reason belonging to that item, never as a reflex to upstream
+  movement.
+- **The plan is read *and* edited where you are.** `docs/phase2-plan.md` is in the working
+  tree of `phase2` and of every item branch cut from it, so a Phase 2 conversation reads it
+  and updates it without switching branches. That is the entire point of the model.
+- **`main` keeps a pointer, not a copy.** On `main`, `docs/phase2-plan.md` is a short stub
+  naming the `phase2` branch as the home of the plan and stating that the plan is edited
+  there, not here; `docs/roadmap.md`, `docs/README.md` and `AGENT.md` name `phase2` the same
+  way. There is exactly one full text of this plan in the repository at any time — the
+  reason is the *Single source of truth* paragraph in §1.
+
+**What changed since 2026-09-18.** The old objection — that a plan on a side branch leaves
+`main` stale for the whole of Phase 2 — is answered, not waved away. `main` is not silent:
+it carries the stub and the pointers above, so a reviewer who arrives on `main` is told where
+Phase 2 lives. What would actually violate D1 and D7 is unfinished *implementation* on
+`main`, and this model keeps that off `main` exactly as the old one did; a plan on a branch
+never violated either (D7's last paragraph).
+
+**Why the alternatives were rejected** — recorded so the question is not re-litigated:
+
+1. **"Always sync item branches with `main`."** Rejected: the rule is *event-triggered*, so
+   whether an item branch is up to date depends on someone noticing that `main` moved, and it
+   is *drift-prone*, because every sync is a merge with its own conflicts. P8's *First steps*
+   in §3 already records one drift caused by exactly this: a branch left at `d0d0501`
+   carried `VERSION` = `0.5.0` and no `[0.5.1]` CHANGELOG node, so its first commit fought
+   the release reconciliation instead of building on it.
+2. **"Keep the plan on `main` and read it from wherever you are with
+   `git show main:docs/phase2-plan.md`."** Rejected: it solves reading and not writing —
+   updating the plan still requires switching back to `main`, and the plan is edited at every
+   Phase 2 handover, so this puts the dangerous operation on the most frequent path. Branch
+   switching caused **two working-tree incidents in this repository on 2026-09-18** (agents
+   sharing one working tree committed onto the branch that happened to be checked out; see
+   accepted delta 1 under *Main audit ruling* above).
+3. **"A separate long-lived branch per phase."** **This is the option adopted**, not one that
+   was set aside — `phase2` is its first instance. It is listed here only so that a reader
+   does not mistake it for a rejected alternative.
 
 ## 5. Handover protocol for Phase 2
 
-Each item runs in **its own conversation**, following `AGENT.md` §15:
+Each item runs in **its own conversation, on its own branch cut from `phase2`**, following
+`AGENT.md` §15:
 
 1. Read `AGENT.md`.
 2. Read `docs/README.md`.
-3. Read **the section of this document for that item** (§3), plus the decisions it cites.
+3. Read **the section of this document for that item** (§3), plus the decisions it cites —
+   **on the `phase2` branch**, where this document is in the working tree (see below).
 4. Read `docs/acceptance/criteria.md` for the acceptance items the conversation owns.
+
+**A Phase 2 conversation reads this plan on the `phase2` branch.** Step 3 above — and step 2
+of the closing list, which updates this document — read and edit `docs/phase2-plan.md` in the
+working tree of `phase2`, or of an item branch cut from it. No branch switch is involved; that
+is the point of the model (§4, *Branch model and documentation location*). P8's branch is
+`feat/anti-fraud-as`, **branched from `phase2` and merged into `phase2`**, not into `main`.
 
 Before the conversation ends:
 
 1. Run the definition of done (`AGENT.md` §16) and record evidence per §4.8.
-2. Update **this document** — item status, what was learned, and the entry state for the
-   next item. Update the `docs/roadmap.md` status line as well; it is a pointer only.
+2. Update **this document** (on the branch you are on — that is the canonical copy) — item
+   status, what was learned, and the entry state for the next item. Update the
+   `docs/roadmap.md` status line as well; it is a pointer only.
 3. Update `CHANGELOG.md` and `VERSION`; commit; **do not tag** — tagging is the
    maintainer's step.
 4. Write down anything a fresh conversation would otherwise re-derive.

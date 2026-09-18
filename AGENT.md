@@ -379,6 +379,13 @@ Additional expectations:
 
 ## 13. Git & Commit Rules
 
+- **Never push without explicit maintainer approval.** A commit is local and still
+  reversible; a push publishes to a public repository and is not. `git push` — including
+  force-push, pushing a tag and any other operation that changes the remote — may only run
+  when the maintainer has asked for it **in that conversation**. An agent does not push as
+  part of "finishing" a task, and must not treat an approval given for earlier work as
+  covering later work. Changes to the git configuration (for example `git remote set-url`)
+  need the same explicit approval. Related: agents do not create tags — see §15.
 - **Conventional Commits**, English, one logical change per commit:
   `feat` · `fix` · `docs` · `refactor` · `test` · `chore` · `build`
 - **Pre-commit gate (all green)**: `ruff format --check`, `ruff check`, `mypy`,

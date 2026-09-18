@@ -504,7 +504,9 @@ whatever branch the first one has checked out, not on `main`, and the failure is
 On 2026-09-18 two documentation commits intended for `main` landed on
 `fix/sippy-retransmission-timer` instead, because a second member committed while that
 branch was checked out; they were harmless only because they were ultimately retained, and
-the cost was a branch that carries unrelated history.
+the cost was a branch that carries unrelated history. That branch is the same story as the
+rule in §13: it had been created by an agent on its own initiative, which an agent may no
+longer do without the maintainer's approval given in that conversation.
 
 **Message timing and irreversibility (learned in M3).** A team-mode message is delivered to
 the member's inbox and read only at its next turn boundary, so it **cannot interrupt a turn
@@ -591,6 +593,8 @@ and requires reading, in this order:
 3. `docs/roadmap.md` — the section for the current milestone: status, exit criteria,
    handover notes, open items
 4. `docs/acceptance/criteria.md` — the acceptance items owned by that milestone
+5. Before the first commit, **confirm which branch the conversation is on** — it must be the
+   branch the maintainer named or approved (§13)
 
 A milestone conversation may not change scope that belongs to another milestone. A scope
 change is a maintainer decision, not a local edit.

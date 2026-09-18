@@ -794,14 +794,11 @@ handover protocol.
 drift exactly the way `config/routing_rules.yaml` and `config/routing_rules.compose.yaml`
 do, and that drift is already a registered production gap.
 
-| Item | Status | Branch / repository |
-| --- | --- | --- |
-| P8a — sippy retransmission-timer shutdown fix (Phase 1 defect fix, closes P6) | done, released as `v0.5.1` (2026-09-18) | `fix/sippy-retransmission-timer` |
-| P8 — anti-fraud AS (second use case) | not started (branch created, empty) | `feat/anti-fraud-as` |
-| P9 — chained demo (SBC → AS-1 → AS-2 → core) | not started | `feat/chained-as-demo` |
-| P9.5 — read-only capacity probe | not started | `feat/capacity-probe` |
-| P10 — platform extraction | not started | new repository |
-| P11 — platform verification (TLS + capacity harness) | not started | new repository |
+Phase 2 item status, entry states and handover notes live in `docs/phase2-plan.md` §3. This
+board deliberately does not duplicate them — the reason is the paragraph above, and the table
+that used to sit here had already drifted twice (it showed P8a as "not started" after the
+plan recorded it done, and its P8a row named `fix/sippy-retransmission-timer`, a branch
+deleted on 2026-09-18).
 
 Per-item status and handover notes are kept in `docs/phase2-plan.md`, which every Phase 2
 conversation reads on entry and updates on exit (`AGENT.md` §15).

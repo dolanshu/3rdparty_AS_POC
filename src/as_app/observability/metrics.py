@@ -64,6 +64,7 @@ class MetricsSnapshot:
     errors_by_code: dict[str, int]
     rule_hits: dict[str, int]
     peer_status: dict[str, str]
+    counters: dict[str, int]
 
 
 @dataclass
@@ -76,6 +77,8 @@ class MetricsRegistry:
         errors_by_code: Count per internal ``AS-*`` error code.
         rule_hits: Count per routing rule identifier.
         peer_status: Last observed status per peer name.
+        counters: Named, application-specific counters — the bucket a use case adds to
+            without the registry having to know what it counts.
     """
 
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -84,6 +87,7 @@ class MetricsRegistry:
     errors_by_code: Counter[str] = field(default_factory=Counter)
     rule_hits: Counter[str] = field(default_factory=Counter)
     peer_status: dict[str, PeerStatus] = field(default_factory=dict)
+    counters: Counter[str] = field(default_factory=Counter)
 
     def record_call_started(self) -> None:
         """Count one new call attempt arriving on the trunk."""
@@ -117,6 +121,22 @@ class MetricsRegistry:
         with self._lock:
             self.rule_hits[rule_id] += 1
 
+    def record_counter(self, name: str, *, amount: int = 1) -> None:
+        """Record one occurrence of a named, application-specific counter.
+
+        This is the one generic bucket in the registry. A second AS use case needs to count
+        things the first one has no concept of (for example screening verdicts), and the
+        alternative — an interface, a registry of registries or a per-use-case counter type
+        — is exactly the premature abstraction P8 must not build (ADR-0007 decision 9). The
+        name is a plain convention: ``verdict.reject``, ``screen.block_list``.
+
+        Args:
+            name: Counter name, dot-separated lower case by convention.
+            amount: Amount to add; ``1`` for a single occurrence.
+        """
+        with self._lock:
+            self.counters[name] += amount
+
     def set_peer_status(self, peer_name: str, status: PeerStatus) -> None:
         """Set the observed status of a peer or next hop.
 
@@ -140,6 +160,7 @@ class MetricsRegistry:
                 errors_by_code=dict(self.errors_by_code),
                 rule_hits=dict(self.rule_hits),
                 peer_status={name: status.value for name, status in self.peer_status.items()},
+                counters=dict(self.counters),
             )
 
 

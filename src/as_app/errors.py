@@ -55,6 +55,18 @@ class AsErrorCode(Enum):
     PEER_UNREACHABLE = ("AS-PEER-002", 503, "next hop peer did not answer")
     PEER_MALFORMED_REQUEST = ("AS-PEER-003", 400, "request from the trunk could not be parsed")
 
+    # --- anti-fraud screening (P8) -----------------------------------------
+    # The anti-fraud AS is a second process, but a second process must not grow a second
+    # error vocabulary: its codes live in this one authoritative model (REQ-F-023). The
+    # three rejection codes map to 608 Rejected (RFC 8688, ADR-0007); a rejection is
+    # distinguished by code, not by status, because they share one status.
+    FRAUD_CALLER_BLOCKED = ("AS-FRAUD-001", 608, "calling party is on the block list")
+    FRAUD_RATE_EXCEEDED = ("AS-FRAUD-002", 608, "calling party exceeded the call-rate window")
+    FRAUD_REPUTATION_LOW = ("AS-FRAUD-003", 608, "calling party reputation is below the threshold")
+    FRAUD_DATA_UNREADABLE = ("AS-FRAUD-004", 500, "screening data file cannot be read")
+    FRAUD_DATA_SCHEMA_ERROR = ("AS-FRAUD-005", 500, "screening data file violates the schema")
+    FRAUD_NO_VERDICT = ("AS-FRAUD-006", 500, "screening produced no verdict")
+
     # --- internal ----------------------------------------------------------
     INTERNAL_ERROR = ("AS-INT-001", 500, "unexpected internal failure")
 
@@ -71,7 +83,10 @@ class AsErrorCode(Enum):
         self.message: Final[str] = message
 
 
-#: Reason phrases for the status codes this application can emit (RFC 3261 section 21).
+#: Reason phrases for the status codes this application can emit (RFC 3261 section 21,
+#: RFC 8688 section 3 for 608). sippy puts the phrase it is given on the wire verbatim, so
+#: this map is the only thing that makes a rejected call read as ``608 Rejected`` instead of
+#: falling back to ``Server Internal Error`` (ADR-0007, LLD section 9.5).
 SIP_PHRASES: Final[dict[int, str]] = {
     400: "Bad Request",
     403: "Forbidden",
@@ -80,6 +95,7 @@ SIP_PHRASES: Final[dict[int, str]] = {
     500: "Server Internal Error",
     503: "Service Unavailable",
     603: "Decline",
+    608: "Rejected",
 }
 
 

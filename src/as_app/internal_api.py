@@ -114,6 +114,9 @@ def metrics_payload(registry: MetricsRegistry) -> dict[str, Any]:
         "errors_by_code": snapshot.errors_by_code,
         "rule_hits": snapshot.rule_hits,
         "peer_status": snapshot.peer_status,
+        # Application-specific counters (for example the anti-fraud screening verdicts).
+        # Empty for the number-translation AS; additive, so the console contract holds.
+        "counters": snapshot.counters,
     }
 
 

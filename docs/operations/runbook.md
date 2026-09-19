@@ -74,8 +74,11 @@ kept across the reload — the data describes the thresholds, the callers keep t
 | One screened call | `GET /api/v1/traces/{call-id}` on 8082 — the `verdict` event carries the signal, the score, the calls in window, the matched list entry and whether the INVITE declared `sip.608` |
 
 To watch the screening flow in the console, point it at the second instance:
-`AS_INTERNAL_API_URL=http://127.0.0.1:8082 make console`. The page renders either instance:
-the Screening view shows the lists and parameters, the trace shows the verdict, and the
+`AS_INTERNAL_API_URL=http://127.0.0.1:8082 make console`. The page renders either instance,
+and says which one it is displaying: the **instance** chip in the status bar, the browser
+title and the label of the AS node in the topology view all come from the `instance` field
+the AS reports on `/healthz` (`number-translation` or `anti-fraud`), never from the port. The
+Screening view shows the lists and parameters, the trace shows the verdict, and the
 statistics view shows the verdict counters.
 
 ## 4. Logs

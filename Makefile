@@ -1,7 +1,7 @@
 # Makefile — day-to-day commands for the 3rd-party AS POC.
 #
-# Everything runs through uv so that the locked environment is used. The three packages
-# under src/ are put on the import path with PYTHONPATH; no wheel is built.
+# Everything runs through uv so that the locked environment is used. The packages under
+# src/ are put on the import path with PYTHONPATH; no wheel is built.
 
 SHELL := /bin/bash
 UV ?= uv
@@ -76,7 +76,7 @@ probe: sync ## Probe the sippy stack and print what it really does
 probe-608: sync ## Probe the sippy 608 Rejected path over real UDP (ADR-0007 design evidence)
 	$(RUN) python tools/anti_fraud_probe.py
 
-docker-up: ## Start the three services with docker compose
+docker-up: ## Start the local demo stack (both AS instances, two mocks, console)
 	docker compose -f deploy/docker-compose.yml up --build
 
 docker-down: ## Stop the compose stack

@@ -158,6 +158,12 @@ The rejected call is answered by the AS itself and never reaches the core networ
 reject path is UAS behaviour and originates no second leg. Nothing is written to the
 repository; the standalone process is `make fraud`.
 
+The console renders **either** AS instance. Each process reports a stable instance identity
+on `/healthz` (`number-translation`, `anti-fraud`), which the page shows in its title, in the
+status bar and as the label of the AS node in the topology view — so it is never ambiguous
+which instance is on screen. Point it at the second one with
+`AS_INTERNAL_API_URL=http://127.0.0.1:8082 make console`.
+
 To verify that the SIP stack really runs:
 
 ```bash

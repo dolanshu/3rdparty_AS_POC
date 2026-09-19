@@ -168,10 +168,12 @@ before the platform work precisely to expose the friction between the two instan
 
 ### 8.2 Deployment view
 
-Four processes now. The anti-fraud AS is a separate process for the same reason as the
-number-translation AS (ADR-0002): sippy's `ED2.loop()` blocks, so its internal API runs in
-its own process and on its own port, and the two AS instances must not share a listen port
-(D6, and the port-collision trap in `docs/phase2-plan.md` section 6).
+**Five processes now**: the two AS instances, the two mocks and the console. The anti-fraud
+AS is a separate process for the same reason as the number-translation AS (ADR-0002):
+sippy's `ED2.loop()` blocks, so its internal API runs in its own process and on its own port,
+and the two AS instances must not share a listen port (D6, and the port-collision trap in
+`docs/phase2-plan.md` section 6). Each AS has its **own mock** so either instance can be
+demonstrated on its own; P8 does not chain them (that is P9).
 
 ```mermaid
 graph TB
@@ -179,12 +181,13 @@ graph TB
         AS["as<br/>UDP 5060 (trunk)<br/>TCP 8080 (internal API)"]
         FRAUD["anti-fraud-as<br/>UDP 5062 (trunk)<br/>TCP 8082 (internal API)"]
         MOCK["s-sbc-mock<br/>UDP 15060 (UAC)<br/>UDP 15061 (UAS)"]
+        MOCKF["s-sbc-mock-fraud<br/>UDP 15063 (UAC)<br/>UDP 15062 (UAS)"]
         CONSOLE["console<br/>TCP 8081"]
     end
     MOCK == "INVITE" ==> AS
-    MOCK == "INVITE" ==> FRAUD
+    MOCKF == "INVITE" ==> FRAUD
     AS == "translated INVITE" ==> MOCK
-    FRAUD == "relayed INVITE (allow)" ==> MOCK
+    FRAUD == "relayed INVITE (allow)" ==> MOCKF
     CONSOLE -- "HTTP / WS" --> AS
     CONSOLE -- "HTTP / WS" --> FRAUD
 ```
@@ -193,23 +196,23 @@ graph TB
 | --- | --- | --- | --- |
 | `as` | `python -m as_app.main` | `5060/udp` trunk, `8080/tcp` internal API | Number translation and routing (Phase 1) |
 | `anti-fraud-as` | `python -m anti_fraud_as.main` | `5062/udp` trunk, `8082/tcp` internal API | Caller screening: allow or `608 Rejected` (P8) |
-| `s-sbc-mock` | `python -m s_sbc_mock.main` | `15060/udp` UAC side, `15061/udp` UAS side | Emulates the S-CSCF trigger and the core network |
-| `console` | `python -m console.main` | `8081/tcp` | Operations UI, reaches each AS over its internal API |
+| `s-sbc-mock` | `python -m s_sbc_mock.main` | `15060/udp` UAC side, `15061/udp` UAS side | Emulates the S-CSCF trigger and the core network for `as` |
+| `s-sbc-mock-fraud` | `python -m s_sbc_mock.main` | `15063/udp` UAC side, `15062/udp` UAS side | Same mock, dedicated to `anti-fraud-as` |
+| `console` | `python -m console.main` | `8081/tcp` | Operations UI, reaches **either** AS over its internal API and reports which instance it is displaying |
 
-Every port is configuration and **no default silently points at a real network**; the port
-matrix in `docs/operations/deployment.md` is extended with the second AS in the
-implementation commit. The distinct listen port (`5062`) is a deliberate default: without
-it, running both instances locally collides on `5060`, which is the trap recorded in
-`docs/phase2-plan.md` section 6.
+Every port is configuration and **no default silently points at a real network**. The
+distinct listen port (`5062`) is a deliberate default: without it, running both instances
+locally collides on `5060`, which is the trap recorded in `docs/phase2-plan.md` section 6.
+The full port matrix is in `docs/operations/deployment.md` section 2.
 
 ### 8.3 Interface view
 
 | Interface | Direction | Protocol | Notes |
 | --- | --- | --- | --- |
 | SIP trunk (reject) | S-SBC → anti-fraud AS → S-SBC | SIP over UDP | The AS terminates the INVITE and answers it **from the UAS side only**: `608 Rejected`, no second leg, no `Call-Info` (ADR-0007). The answer is **unconditional** — it does not depend on the UAC's `Feature-Caps` declaration, which only bears on RFC 8688 section 3.4's announcement obligation and is recorded as `sip_608_declared` |
-| SIP trunk (allow) | S-SBC → anti-fraud AS → S-SBC | SIP over UDP | The AS relays the INVITE **unchanged** as a B2BUA (Request-URI and headers untouched, **no added header**) and relays the response back |
+| SIP trunk (allow) | S-SBC → anti-fraud AS → S-SBC | SIP over UDP | The AS relays the INVITE as a B2BUA: the Request-URI and the SDP body are kept and the **pass-through header set** is copied, **no header is added**, and the response is relayed back. `Feature-Caps` is **not** in that set, so the `sip.608` declaration does not cross the AS (ADR-0007 decision 6) |
 | Calling identity | inside the INVITE | `P-Asserted-Identity` | The screening input: the AS inspects the *calling* party, not the called number (D4) |
-| Internal API | console → anti-fraud AS | HTTP (REST) + WebSocket | `GET /healthz`, `/api/v1/metrics`, `/api/v1/screening`, `/api/v1/traces`, `WS /ws/events` |
+| Internal API | console → anti-fraud AS | HTTP (REST) + WebSocket | `GET /healthz` (answers the stable **instance identity** the console renders), `/api/v1/metrics`, `/api/v1/screening`, `/api/v1/traces`, `WS /ws/events` |
 | Screening data file | operator → anti-fraud AS | YAML file | `config/caller_screening.yaml`: block/allow lists, reputation seed, window parameters. Read-only; validated on load and hot reloaded like the routing rules (ADR-0004 pattern) |
 
 The `608` reject path and the allow path are the two external outcomes, and both are

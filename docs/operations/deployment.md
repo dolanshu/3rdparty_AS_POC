@@ -120,7 +120,7 @@ docker compose -f deploy/docker-compose.yml logs -f as
 docker compose -f deploy/docker-compose.yml down
 ```
 
-All three services come up on their own; the mock places its default `office-to-mobile` call
+All five services come up on their own; the mock places its default `office-to-mobile` call
 (`+86216180001` → `+8613800138000`) about half a second after it starts, so the AS log shows a
 complete call without any further command. `docker compose down` removes the containers and
 the `as-poc-trunk` network; the stack defines no volumes.
@@ -158,13 +158,13 @@ referencing public PyPI, so CI, `uv lock --check` and other machines are unaffec
 | --- | --- | --- |
 | AS self-check | `uv run python -m as_app.main --self-check-only` | exit code `0`, log event `startup self-check passed` |
 | Anti-fraud self-check | `uv run python -m anti_fraud_as.main --self-check-only` | exit code `0`, log event `startup self-check passed` |
-| Anti-fraud Internal API | `curl -s http://127.0.0.1:8082/healthz` | `{"status":"ok","screening_data_loaded":true,...}` |
+| Anti-fraud Internal API | `curl -s http://127.0.0.1:8082/healthz` | `{"status":"ok","instance":"anti-fraud","screening_data_loaded":true,...}` |
 | Anti-fraud screening data | `curl -s http://127.0.0.1:8082/api/v1/screening` | the block/allow lists and the window/reputation parameters |
 | Anti-fraud screening flow | `make demo-fraud` | one call allowed and relayed, one answered `608 Rejected` |
-| Internal API | `curl -s http://127.0.0.1:8080/healthz` | `{"status":"ok",...}` |
+| Internal API | `curl -s http://127.0.0.1:8080/healthz` | `{"status":"ok","instance":"number-translation",...}` |
 | Console | `curl -s http://127.0.0.1:8081/healthz` | `{"status":"ok","component":"console"}` |
 | Trunk reachable | `uv run python tools/sippy_probe.py` | `minimal SipTransactionManager + ED2.loop() stack: OK` |
-| Compose stack | `docker compose -f deploy/docker-compose.yml ps` | `as`, `s-sbc-mock` and `console` all `Up` |
+| Compose stack | `docker compose -f deploy/docker-compose.yml ps` | `as`, `anti-fraud-as`, `s-sbc-mock`, `s-sbc-mock-fraud` and `console` all `Up` |
 | Call completed | `curl -s http://127.0.0.1:8080/api/v1/metrics` | `calls_total` ≥ 1, `calls_by_disposition` has `completed`, `rule_hits` has the matched rule |
 
 ## 6. Configuration in deployment

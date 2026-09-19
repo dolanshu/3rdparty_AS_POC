@@ -46,9 +46,11 @@ dev = [
   "types-pyyaml>=6.0",
 ]
 
-# The three packages under src/ (as_app, console, s_sbc_mock) are separate runtime
-# targets of one application. They are installed editable, so `uv sync` alone is enough
-# to run `python -m as_app.main` from anywhere: no PYTHONPATH juggling for the reviewer.
+# The four packages under src/ (anti_fraud_as, as_app, console, s_sbc_mock) are separate
+# runtime targets of one repository: two AS applications that never import each other, the
+# console, and the mock. They are installed editable, so `uv sync` alone is enough to run
+# `python -m as_app.main` or `python -m anti_fraud_as.main` from anywhere: no PYTHONPATH
+# juggling for the reviewer.
 [build-system]
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"

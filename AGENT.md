@@ -270,7 +270,7 @@ Pinned; do not upgrade without asking.
   step, no third-party front-end libraries**
 - `uv` for environment and dependency management (`pyproject.toml` + `uv.lock`)
 - pytest · `ruff` (format + lint) · `mypy`
-- `docker compose` for the three-service demo
+- `docker compose` for the local demo stack (both AS instances, two mocks and the console)
 
 Constraints that shape the design:
 
@@ -344,9 +344,11 @@ describe the process, not the instance:
 
 ```bash
 uv sync                  # install / sync the locked environment
-make dev                 # run AS + mock locally
-docker compose up        # as + s-sbc-mock + console
-make demo                # one command: place a call, show the translated INVITE
+make dev                 # run the number-translation AS locally (+ make mock, make console)
+make fraud               # run the anti-fraud AS locally, on its own ports (P8)
+docker compose up        # as + anti-fraud-as + both mocks + console
+make demo                # one call through the number-translation AS, narrated
+make demo-fraud          # two calls through the anti-fraud AS: one allowed, one 608
 make lint                # ruff format --check + ruff check + mypy
 make test                # unit + integration + e2e
 ```

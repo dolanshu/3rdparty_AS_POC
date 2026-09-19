@@ -36,6 +36,10 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-F-022 | Cross-call anti-fraud state (the call-rate window and reputation) lives in a **process-level module** and never in the per-call `CallController` (D9). | done | P8 | ACC-P8-004 |
 | REQ-F-023 | New `AS-FRAUD-*` error codes are added to the authoritative model in `src/as_app/errors.py` and mapped to SIP status codes and log messages (AGENT.md section 4.3). | done | P8 | ACC-P8-005 |
 | REQ-F-024 | The verdict, its signals/score and the matched list entry are observable through counters, the Call-ID keyed trace and the console. | done | P8 | ACC-P8-005 |
+| REQ-F-025 | The chained topology `SBC → AS-1 (anti-fraud) → AS-2 (number translation) → core` runs end to end: an INVITE AS-1 **allows** is relayed to AS-2, translated there and routed to the core, driving a complete call (`INVITE → 100 → 180 → 200 OK → ACK → BYE`) through both AS instances (D6). | planned | P9 | ACC-P9-001 |
+| REQ-F-026 | The two AS instances are chained by **configuration only**: AS-1's next hop is set to AS-2's SIP listen address and AS-2's routing catalogue selects the core. No iFC emulation is added to the mock, and neither AS imports the other — they stay independent processes (D6, `AGENT.md` section 5). | planned | P9 | ACC-P9-001 |
+| REQ-F-027 | A **reject** at AS-1 (`608`, REQ-F-019) short-circuits the chain: AS-2 and the core never receive the call, because the reject path originates no second leg (REQ-F-021). | planned | P9 | ACC-P9-002 |
+| REQ-F-028 | The chained call is observable per instance: each AS writes its own Call-ID keyed trace and console feed, and the demo makes the two Call-IDs the two B2BUAs in series produce visible rather than hiding them. | planned | P9 | ACC-P9-003 |
 
 ## 2. Non-functional requirements
 
@@ -56,6 +60,9 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-NF-013 | No media is played. A real UAC that does not declare `sip.608` would require a media announcement; this is a registered POC gap, not a hidden defect (D5, ADR-0006). | done | P8 | ACC-P8-003 |
 | REQ-NF-014 | Configuration is through environment variables only, declared in `.env.example`; **no new third-party dependency** is added (AGENT.md section 8). | done | P8 | ACC-P8-001 |
 | REQ-NF-015 | The `608` reject path is verified **by running sippy**, not assumed (AGENT.md section 6). | done | P8 | ACC-P8-006 |
+| REQ-NF-016 | Cross-AS Call-ID correlation is **not solved**: two B2BUAs in series produce two different Call-IDs, because a B2BUA regenerates the dialog `Call-ID` for its second leg (`Call-ID` is not in the pass-through set), so a chained call appears as two independent per-instance traces. This is a registered POC gap, made visible rather than hidden (D6, plan section 3 P9 known issue). | planned | P9 | ACC-P9-003 |
+| REQ-NF-017 | The chained topology is demonstrated by a **first-class, documented run command** runnable from a clean checkout, mirroring `make demo` / `make demo-fraud`. Chaining reuses the existing peer/listen knobs, so it adds **no new environment variable and no new port** (D6, `AGENT.md` section 8). | planned | P9 | ACC-P9-004 |
+| REQ-NF-018 | The friction the chained demo surfaces — what in the shared skeleton turned out to be number-translation specific — is **recorded**, as the primary input to P10 (plan section 3 P9 deliberate output). | planned | P9 | ACC-P9-005 |
 
 ## 3. Traceability notes
 
@@ -98,6 +105,27 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
   relay/allow path. This requirements-stage review gate raised these three points —
   reputation decay, the second process's stop path and this reject-path reconciliation —
   and they were folded into `REQ-F-016`, `REQ-F-018` and this note here.
+- **P9 chained demo — requirements stage (2026-09-19).** `REQ-F-025 … REQ-F-028` and
+  `REQ-NF-016 … REQ-NF-018` are P9's own rows; no Phase 1 or P8 requirement is changed.
+  **Chaining is configuration, not code (D6, `REQ-F-026`).** The plan's implementation note
+  records that no iFC emulation is needed in the mock — pointing AS-1's next hop at AS-2's
+  listen address is a peer/catalogue setting — and the anti-fraud AS relays an allowed call
+  to its single configured next hop (`FRAUD_SBC_PEER_*`), so the chain is wired from the
+  existing knobs and the routing catalogue. **Structural change (`REQ-NF-017`).** P9
+  introduces a **new run command** — a chained-demo entry point mirroring `make demo` /
+  `make demo-fraud`. Under `AGENT.md` section 13 a changed run command is a structural
+  change, so the implementation commit must update `AGENT.md` section 10, `README.md` and
+  `docs/README.md` in the same commit. The chained topology needs **no new environment
+  variable and no new port**: the two AS listen ports (`5060` / `5062`) already differ
+  precisely so both instances can run on one host (plan section 6). **Known issue
+  (`REQ-NF-016`, `REQ-F-028`).** Two B2BUAs in series mean two Call-IDs: each AS terminates
+  the incoming INVITE and originates its own second leg, and `Call-ID` is regenerated rather
+  than passed through (`src/as_app/sip_adapter.py`, `PASSTHROUGH_HEADERS`), so cross-AS
+  correlation is unsolved and is registered as a POC gap rather than assumed away.
+  **Deliberate output (`REQ-NF-018`).** The friction the chain exposes is P10's primary
+  input and is recorded at the item's close (plan section 5.4). The HLD/LLD deltas and any
+  probe are the next pipeline stage (plan section 5.1) and are not written here; the
+  `ACC-P9-*` items are created in the acceptance stage, as `ACC-P8-*` were.
 - Milestones M0–M3 are delivered, so no requirement above is left `planned` or `partial`
   for want of a milestone. The `docker compose` stack (both AS instances, two mocks and the
   console) is validated with `docker compose config`; its SIP path still carries the

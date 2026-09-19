@@ -296,11 +296,11 @@ data file and the second process.
 `src/anti_fraud_as/` is a new package next to `src/as_app/`, `src/console/` and
 `src/s_sbc_mock/`. Adding it is a structural change (`AGENT.md` section 5); the
 implementation commit mirrors it into `AGENT.md`, `README.md` and `docs/README.md`
-(section 9.8).
+(section 9.10).
 
 | Module | Responsibility |
 | --- | --- |
-| `main.py` | Process entry point and `FraudAsStack`: the second process's own `SipConf` identity pinning, own `SipTransactionManager`, own `ED2.loop()`, loop-owned shutdown and reload timers, and its own stop path (section 9.6) |
+| `main.py` | Process entry point and `FraudAsStack`: the second process's own `SipConf` identity pinning, own `SipTransactionManager`, own `ED2.loop()`, loop-owned shutdown and reload timers, and its own stop path (section 9.7) |
 | `bootstrap.py` | `FraudAsSettings` (pydantic-settings) and `run_startup_self_check` — the same fail-fast contract as the first AS (`AGENT.md` section 4.3) |
 | `call_controller.py` | `FraudCallController` (per call) and `FraudCallMap` (process entry point, peer allowlist): the verdict seam, the allow-path relay and the UAS-only reject |
 | `screening.py` | The **pure** verdict: `screen()` over plain-data inputs and outputs. No sockets, no global state, no clock (REQ-NF-011) |
@@ -622,7 +622,35 @@ routing-named `TraceEvent.rule_id`; overloading a field named after routing woul
 console read differently for the two instances. The field-name mismatch is noted as friction
 for P10, not fixed here.
 
-### 9.9 Structural changes for the implementation commit
+### 9.9 Observability of the verdict (REQ-F-024)
+
+The verdict, the deciding signal, the score and the matched list entry must be observable
+without reading the code. Three surfaces carry them, and none of them is on the wire.
+
+- **Counters.** `MetricsRegistry` is reused with one **minimal, generic** addition: a
+  `record_counter(name)` method over a `counters: Counter[str]` field, surfaced in
+  `MetricsSnapshot` and in the `/api/v1/metrics` payload as a new key. The anti-fraud AS
+  records `verdict.allow` / `verdict.reject` and one counter per deciding signal
+  (`screen.block_list`, `screen.rate_window`, `screen.reputation`); the number-translation
+  AS never writes the bucket, so its payload only gains an empty key. This is a small
+  additive change to an existing class — no interface, no registration, no base class, so it
+  does not create the framework P8 must not build. Rejections are counted a second time,
+  **by reason**, through the existing `record_error(AS-FRAUD-001…003)`, and a call's final
+  outcome still goes through `record_call_disposition`, which records
+  `CallDisposition.REJECTED` for a rejected call.
+- **Trace.** The Call-ID keyed trace carries `verdict`, `screen_source`, `screen_reason`,
+  `reputation`, `calls_in_window` and `list_entry` as event attributes (section 9.8), so a
+  rejected call explains itself in the console exactly as a routed call names its rule.
+- **Console.** `GET /api/v1/screening` exposes the block/allow lists and the window and
+  reputation parameters, read-only; the console renders the verdict on the trace. The
+  coverage delta is in section 9.10.
+
+`rule_hits` is deliberately **not** reused for list-entry matches: the field is named after
+routing rules, and overloading it would make the same field read differently for the two
+instances. That the counter surface needs a generic bucket at all is friction P10 inherits,
+and it is recorded as such rather than fixed here.
+
+### 9.10 Structural changes for the implementation commit
 
 The implementation commit mirrors these into `AGENT.md`, `README.md` and `docs/README.md`
 in the same commit (`AGENT.md` sections 12 and 13), and covers the console delta of

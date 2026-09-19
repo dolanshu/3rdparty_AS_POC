@@ -9,6 +9,20 @@
   separation) · ADR-0007 (anti-fraud AS) · `docs/architecture/hld.md` section 9 ·
   `docs/architecture/lld.md` section 2.3 and section 10 · `tools/chained_as_probe.py`
 
+> **Pending rework — this ADR was written against a defective behaviour (maintainer ruling,
+> 2026-09-19).** Decisions **2**, **3** and **4** below describe the **current** behaviour of
+> the code as the probe measured it: the AS **reuses the inbound `Call-ID` on its outbound
+> leg**, so one `Call-ID` spans the whole chain. The maintainer has ruled that a **Phase 1
+> defect** — the code contradicts the design intent stated in
+> `docs/architecture/lld.md` section 2.3 (`Call-ID` belongs to the dialog and the second leg
+> has its own) — not accepted behaviour. **Decision 3 does not stand:** the premise it retires
+> is the *intended* behaviour, so `REQ-NF-016` / `REQ-F-028` and the plan's section 6 and
+> section 3 P9 keep their wording, and the rewording this ADR assigned to the implementation
+> commit is **withdrawn**. The fix lands on **`main`** and is merged back into `phase2`;
+> **P9 is paused** until then, and this ADR is to be **reworked when P9's design stage is
+> redone** (`docs/phase2-plan.md` section 3, P9). The probe's measurements are true
+> observations of the code as it stands and are kept.
+
 ## Context
 
 P9 puts the two AS instances that already exist — the anti-fraud AS of P8 and the

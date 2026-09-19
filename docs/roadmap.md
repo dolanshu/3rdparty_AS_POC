@@ -809,6 +809,11 @@ every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
   status, review-gate findings and the P9 entry state live in `docs/phase2-plan.md` §3 on
   `phase2`; the acceptance evidence is in `docs/acceptance/report.md`.
 
+- **P9 — chained demo. [Status: Paused]** (2026-09-19, on `phase2`). A pointer only: the plan,
+  the pause, the Phase 1 `Call-ID` defect that blocks it and the entry state for resuming live
+  in `docs/phase2-plan.md` §3 on `phase2`. The defect is fixed as a separate item on `main` and
+  merged back into `phase2`; it is **not** recorded here.
+
 ## Conventions
 
 - **Single source of truth:** rules live in `AGENT.md`; live status lives here; evidence

@@ -284,6 +284,16 @@ distinction has to be visible, every screened INVITE carries the declaration sta
 
 ## 9. The chained topology (P9)
 
+> **Pending rework — the `Call-ID` statements below describe the current, defective behaviour
+> (maintainer ruling, 2026-09-19).** The chain is wired by configuration only, which stands;
+> but the claim in section 9.3 that one `Call-ID` is preserved across the whole chain is an
+> observation of the code as it stands, and the maintainer has ruled that behaviour a
+> **Phase 1 defect** — the AS reuses the inbound `Call-ID` on its outbound leg, against the
+> design intent of `docs/architecture/lld.md` section 2.3. The fix lands on **`main`** and is
+> merged back into `phase2`; **P9 is paused** until then, and this section is to be
+> **reworked when P9's design stage is redone** (`docs/phase2-plan.md` section 3, P9). The
+> measurements are kept — they are true observations of the code as it stands.
+
 `docs/phase2-plan.md` D6 puts the two AS instances **in series** before the platform work:
 `SBC → AS-1 (anti-fraud) → AS-2 (number translation) → core`. This section adds the chained
 deployment view, the interface view and the key flows. It extends the views above rather

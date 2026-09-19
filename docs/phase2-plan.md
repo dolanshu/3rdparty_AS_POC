@@ -562,7 +562,64 @@ retransmission population, so P9.5 inherits the P8a timer population unchanged.
 - **Deliberate output.** The friction this surfaces — what in the skeleton turned out to be
   number-translation specific — is the primary input to P10 and must be written down here.
 - **Known issue.** Two B2BUAs in series produce **two different Call-IDs**; cross-AS
-  correlation is a real problem, not a cosmetic one.
+  correlation is a real problem, not a cosmetic one. *(That is the intended behaviour, not
+  what the code does today — the AS reuses the inbound `Call-ID` on its outbound leg, which
+  the maintainer has ruled a Phase 1 defect. The statement becomes true when that defect is
+  fixed; see the pause below.)*
+
+**P9 is paused — a Phase 1 `Call-ID` defect in the second leg must be fixed first
+(maintainer ruling, 2026-09-19).**
+
+**Classification.** This is a **Phase 1 defect** — the code contradicts its own design
+document — **not** a P9 design fact and **not** an accepted deviation. It is recorded in
+P9's entry only because P9's probe is what measured it, in the same way P8a sits in this
+sequence as a Phase 1 defect fix that later items refer to.
+
+**The defect.** The Phase 1 AS is a B2BUA with two legs (`uaA` trunk, `uaO` next hop) and it
+**reuses the inbound `Call-ID` on its outbound leg**, so both legs carry one `Call-ID`.
+`docs/architecture/lld.md` §2.3 states the design intent — *"`To`, `Call-ID` and `CSeq`
+belong to the dialog and the second leg has its own"* — and `From` / `To` / `CSeq` really are
+rebuilt (new tag, fresh `CSeq`); `Call-ID` is not. `src/as_app/call_controller.py` rebuilds
+the outbound `CCEventTry` with `original[0]` — the inbound `Call-ID`, unchanged — and
+`src/anti_fraud_as/call_controller.py` has the same problem at
+`CCEventTry(event.getData())`. sippy only generates a `Call-ID` when none is supplied
+(`sippy/UacStateIdle.py:57-60`), and sippy's own B2BUA always changes it for the second leg
+(`sippy/b2bua.py:346-349`, the `-b2b_N` suffix by default).
+
+**Measurement and evidence — the finding is measured, not argued.**
+
+- `docs/acceptance/report.md` already records the property: the captured INVITE pair is
+  described as *"same Call-ID, same pass-through headers"* in the M1 and M2 capture sections
+  that `ACC-M1-002` and `ACC-M2-005` cite, and `ACC-M1-005`'s evidence reads *"same Call-ID
+  on both legs of the capture"*.
+- `docs/roadmap.md:641` records it in the M4 acceptance narrative — *"…exchange on both legs
+  with the same Call-ID"*.
+- P9's own probe (`tools/chained_as_probe.py`, committed as `d6b4ece`) measured
+  **`distinct Call-IDs: 1`** across a two-B2BUA chain.
+
+**Decisions taken (maintainer, 2026-09-19).**
+
+1. The fix is a **separate item in a separate conversation**, landed on **`main`** and then
+   **merged back into `phase2`**. It is not P9's work and not Phase 2 work.
+2. **P9 pauses** until that fix has landed and been merged back. No P9 implementation work
+   starts before then.
+3. P9's **design stage (stage 2, §5.1) must be redone** after the fix, because its artefacts
+   — ADR-0008, `docs/architecture/hld.md` §9 and `docs/architecture/lld.md` §10 — were
+   written against the defective behaviour. The **stage-2 review gate (§5.2) is therefore
+   deferred, not skipped**: it runs against the redone design.
+4. P9's **stage-1 requirements (`REQ-F-025 … REQ-F-028`, `REQ-NF-016 … REQ-NF-018`) are
+   correct as written** once the fix lands: they describe the intended behaviour. **They are
+   not changed**, and the plan's §6 bullet and the P9 *Known issue* above become true again.
+   ADR-0008 decision 3 and the "Corrected `Call-ID` premise" rows of `lld.md` §10.5, which
+   assign a rewording of `REQ-NF-016` / `REQ-F-028` and of this plan to the implementation
+   commit, are **withdrawn** by this ruling.
+
+**Entry state for resuming P9.** `main` carries the `Call-ID` fix and `phase2` carries it by
+merge; the requirements of decision 4 are unchanged; stage 2 is redone from scratch on the
+fixed behaviour (the probe re-run, ADR-0008 reworked, HLD §9 and LLD §10 reworked and the
+LLD §2.3 statement restored to the pre-stage-2 design intent), its read-only review gate runs
+then, and stages 3–5 follow. The stored measurements are kept, because they are true
+observations of the code as it stood.
 
 ### P9.5 — Read-only capacity probe
 
@@ -894,7 +951,10 @@ item inherits. All were established by running the stack, not by assumption.
   copies into four. Prefer expanding the address from the environment at load time rather
   than maintaining another copy.
 - **Chained Call-IDs.** Two B2BUAs in series mean two Call-IDs; correlation across AS
-  instances has to be solved, not assumed away (P9).
+  instances has to be solved, not assumed away (P9). *(Not true of the code today: the AS
+  reuses the inbound `Call-ID` on its outbound leg, so a chained call carries **one**
+  `Call-ID` — a Phase 1 defect, not an accepted deviation. The bullet becomes true when that
+  defect is fixed on `main` and merged back into `phase2`; see §3 P9.)*
 
 ## 7. Open items and registered gaps
 
@@ -923,6 +983,13 @@ Not blocking, but each must be handled rather than discovered mid-implementation
    let the server bind port `0` and report the port it received. Whoever picks it up should
    also make the health poll distinguish "not up yet" from "something else is listening" —
    P9.5 will run far more processes in one host and will meet this much more often.
+8. **Phase 1 `Call-ID` defect — blocks P9; registered 2026-09-19, not fixed here.** The AS
+   reuses the inbound `Call-ID` on its outbound leg, contradicting the design intent of
+   `docs/architecture/lld.md` §2.3; the maintainer has ruled it a **Phase 1 defect**, not an
+   accepted deviation. It is fixed as a **separate item in a separate conversation**, on
+   **`main`**, then merged back into `phase2`; **P9 is paused** until that has landed, and
+   P9's stage 2 is redone afterwards (§3 P9). Nothing about the fix is registered **here** —
+   its own conversation owns its `CHANGELOG` / `VERSION` and any `ACC-*` row.
 
 ## 8. Decisions requiring maintainer approval
 

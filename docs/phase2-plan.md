@@ -640,8 +640,9 @@ consequence of the fix that only the chain makes observable.
   fix could not touch it, and it is not a P8 regression: it has been there since P8 landed.
   It is **in P9's scope**, for two reasons: the chain is where a preserved `Call-ID` becomes
   observable (`REQ-NF-016`), and the requirement is written as satisfied only when both
-  instances regenerate. **It is recorded here as a P9 stage-2 finding and fixed in P9's
+  instance regenerate. **It is recorded here as a P9 stage-2 finding and fixed in P9's
   stage 3** (the implementation stage), following §5.1 rather than being patched in passing.
+  **It was fixed there** — commit `8d04326`; see the stage-3 record below.
 - **(B) The phase2-only adaptation `d26d5c4` is kept.** It changes two calls in
   `tests/integration/test_fraud_screening_path.py` from `messages_for(call_id)` to
   `messages_for_any((call_id, outbound_call_id(call_id)))`. That looks premature today —
@@ -677,6 +678,39 @@ on the wire and preserved, but it is a **per-scenario literal** that **no observ
 surface is keyed on**, so the *traces* still do not correlate. Per §5.2 the stage is **not
 re-reviewed**; the remaining findings were non-blocking and are folded in above.
 
+**Stage-3 review gate — run, clean, three non-blocking findings fixed inside the stage
+(§5.2).** The read-only review of the implementation ran against the commit set
+`8d04326`…`753a528`. **No blocking finding.** It confirmed the fix is correct and
+isomorphic to `src/as_app/call_controller.py`'s derivation (all five other elements of
+`event.getData()` preserved, the called number included; `self.call_id` still the trunk
+value; the inbound object unmutated), that the two adapted call sites are correct under the
+new design, that every `lld.md` §10.4 bullet is met by `tools/demo_chained_call.py`, that
+every §10.5 row is satisfied, and that nothing outside the authorised scope was touched
+(`git diff --name-only` over the range, plus an empty `git status` after a demo run). It
+reproduced the acceptance signal itself: the probe's `distinct Call-IDs: 3` / `Call-ID per
+leg: True` / `ICID preserved: True` at exit 0, the demo at exit 0, and all four gates green.
+
+Three non-blocking findings were **fixed inside the stage** (commit `7b0874a`, so the stage
+is **not** re-reviewed):
+
+- **A tautological assertion.** One added assertion compared `outbound_call_id(x) != x`,
+  which is true by construction because the helper always appends a non-empty `-b2b_1`, so
+  it guarded nothing. It now compares the **observed** far-side `Call-ID`
+  (`received_call_ids[0]`) against the trunk value, which is what §10.2 actually requires.
+- **A second tautology claim was checked and rejected.** The reviewer read the *other* `!=`
+  assertion the same way; the value there is already read off
+  `mock.uas.received_invites[0].call_id`, so it observes the far side and was left as it is.
+  Recorded because a review finding is verified before it is applied, not applied because it
+  was reported.
+- **The "unit/integration assertion" of §10.5 had only integration and e2e coverage.** The
+  unit layer pinned no contract for `outbound_call_id` at all, so a controller reusing the
+  trunk value was caught only by a socket test. `tests/unit/test_sip_adapter.py` gained one
+  pure contract test (the derived value follows the documented `-b2b_1` form and differs
+  from its input); `make unit` went from 199 to 200 and nothing else changed. The module
+  docstring of `src/anti_fraud_as/call_controller.py`, which still read "relays the INVITE
+  unchanged" and had the same looseness the method docstring was already corrected for, was
+  tightened in the same commit.
+
 **Entry state for resuming P9.** `main` carries the `Call-ID` fix and `phase2` carries it by
 merge; the requirements of decision 4 are unchanged, so `REQ-NF-016` / `REQ-F-028` and this
 plan's §6 and §3 wording are **not touched**; stage 2 is redone on the fixed behaviour — the
@@ -686,6 +720,21 @@ merge left self-contradictory (LLD §2.3, and the "pending rework" banners in AD
 than left pending. Its read-only review gate (§5.2) runs then, and stages 3–5 follow. The
 stored measurements are kept, because they are true observations of the code as it stood;
 stage 2 re-run records the new ones beside them.
+
+**State after stage 3.** Stages 1–3 are complete and their review gates have run: stage 1
+(`REQ-F-025…028`, `REQ-NF-016…018`, written in P8's conversation and unchanged by this
+ruling), stage 2 as reworked above, and stage 3 as recorded above. The implementation landed
+as `8d04326` (the anti-fraud outbound `Call-ID`, the defect fix of finding (A)), `54a7582`
+(the `tools/demo_chained_call.py` demo, the `make demo-chained` target and the §10.5
+structural updates) and `753a528` (the README transcript brought in line with an executed
+run), with the stage-3 review findings fixed in `7b0874a`. **The acceptance signal for the
+fix is real and reproduced by two independent agents**: `tools/chained_as_probe.py` reports
+`distinct Call-IDs: 3`, `Call-ID per leg: True`, `ICID preserved: True` and exits 0, where it
+reported `distinct Call-IDs: 2` / `Call-ID per leg: False` before the fix. Finding (B) is
+confirmed necessary: the two-element lookup `d26d5c4` introduced is what lets the integration
+suite follow both legs now that they really do differ. Finding (C), the timing flake, is
+still registered and not fixed. **Stage 4 (the three test layers) is next**; the acceptance
+items `ACC-P9-001…005` and their §4.8 evidence are stage 5 and do not exist yet.
 
 ### P9.5 — Read-only capacity probe
 

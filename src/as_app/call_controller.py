@@ -57,7 +57,7 @@ from sippy.SipHeader import SipHeader
 from sippy.SipURL import SipURL
 from sippy.UA import UA
 
-from as_app.errors import AsError, AsErrorCode
+from as_app.errors import AsError, AsErrorCode, SkeletonErrorCode
 from as_app.observability.logging import LogDirection, get_logger, log_event
 from as_app.observability.metrics import (
     CallDisposition,
@@ -425,7 +425,7 @@ class CallController:
             direction=LogDirection.INTERNAL,
             failed_hop=failed.name if failed else "",
             failover_hop=next_hop.name,
-            error_code=AsErrorCode.PEER_UNREACHABLE.code,
+            error_code=SkeletonErrorCode.PEER_UNREACHABLE.code,
         )
         self._originate_towards(next_hop)
         return True
@@ -534,7 +534,7 @@ class CallController:
             call_id=self.call_id,
             direction=LogDirection.INTERNAL,
             next_hop=self._serving_hop.name if self._serving_hop else "",
-            error_code=AsErrorCode.PEER_UNREACHABLE.code,
+            error_code=SkeletonErrorCode.PEER_UNREACHABLE.code,
         )
         # ``disconnect()`` enqueues a ``CCEventDisconnect`` and drives the state
         # transition so sippy emits the event to the event callback, which the failover
@@ -993,12 +993,12 @@ class TrunkCallMap:
             The sippy callback triple carrying the ``403`` response.
         """
         error = AsError(
-            AsErrorCode.PEER_NOT_ALLOWED,
+            SkeletonErrorCode.PEER_NOT_ALLOWED,
             f"source address {source} is not an allowed trunk peer",
             context={"source": source, "sip_method": str(request.getMethod())},
         )
         call_id = str(request.getHFBody("call-id"))
-        self.metrics.record_error(AsErrorCode.PEER_NOT_ALLOWED.code)
+        self.metrics.record_error(SkeletonErrorCode.PEER_NOT_ALLOWED.code)
         self.tracer.record(
             call_id,
             LogDirection.INBOUND,

@@ -15,10 +15,11 @@
 """Unit tests for the ``AS-FRAUD-*`` error family and how the verdict is observed.
 
 Two things are pinned here. First, the second AS is a second *process*, not a second error
-vocabulary: its codes live in the one authoritative model of ``src/as_app/errors.py``, and
-the three rejection codes carry ``608`` with the phrase ``Rejected`` — sippy puts the phrase
-it is handed on the wire verbatim, so a missing ``SIP_PHRASES[608]`` would answer
-``608 Server Internal Error`` (ADR-0007, LLD section 9.5).
+mechanism: its ``AS-FRAUD-*`` codes are the ``FraudErrorCode`` family over the shared,
+memberless ``ErrorCode`` base the platform library owns, and the three rejection codes carry
+``608`` with the phrase ``Rejected`` — sippy puts the phrase it is handed on the wire
+verbatim, so a missing ``SIP_PHRASES[608]`` would answer ``608 Server Internal Error``
+(ADR-0007, LLD section 9.5).
 
 Second, the verdict has to be observable off the wire (REQ-F-024): the generic counter
 bucket, the health document and the screening payload are the three surfaces the console
@@ -35,13 +36,14 @@ from pathlib import Path
 
 import pytest
 
+from anti_fraud_as.errors import FraudErrorCode
 from anti_fraud_as.internal_api import (
     health_payload,
     metrics_payload,
     screening_payload,
 )
 from anti_fraud_as.screening_data import ScreeningDataStore
-from as_app.errors import SIP_PHRASES, AsError, AsErrorCode
+from as_app.errors import SIP_PHRASES, AsError, ErrorCode
 from as_app.observability.metrics import MetricsRegistry
 
 pytestmark = pytest.mark.unit
@@ -64,7 +66,7 @@ def test_every_error_code_has_a_reason_phrase() -> None:
     know is answered with the wrong phrase silently. This is the guard that the new ``608``
     family was added to the table as well as to the code list.
     """
-    missing = sorted({code.sip_status for code in AsErrorCode} - set(SIP_PHRASES))
+    missing = sorted({code.sip_status for code in FraudErrorCode} - set(SIP_PHRASES))
 
     assert not missing, f"error statuses without a reason phrase: {missing}"
 
@@ -72,12 +74,12 @@ def test_every_error_code_has_a_reason_phrase() -> None:
 @pytest.mark.parametrize(
     "code",
     [
-        AsErrorCode.FRAUD_CALLER_BLOCKED,
-        AsErrorCode.FRAUD_RATE_EXCEEDED,
-        AsErrorCode.FRAUD_REPUTATION_LOW,
+        FraudErrorCode.FRAUD_CALLER_BLOCKED,
+        FraudErrorCode.FRAUD_RATE_EXCEEDED,
+        FraudErrorCode.FRAUD_REPUTATION_LOW,
     ],
 )
-def test_the_screening_rejections_are_answered_with_608(code: AsErrorCode) -> None:
+def test_the_screening_rejections_are_answered_with_608(code: FraudErrorCode) -> None:
     """A screening rejection is a 608, whichever signal fired.
 
     The status is shared, so the *code* is what distinguishes block list from rate window
@@ -94,12 +96,12 @@ def test_the_screening_rejections_are_answered_with_608(code: AsErrorCode) -> No
 @pytest.mark.parametrize(
     "code",
     [
-        AsErrorCode.FRAUD_DATA_UNREADABLE,
-        AsErrorCode.FRAUD_DATA_SCHEMA_ERROR,
-        AsErrorCode.FRAUD_NO_VERDICT,
+        FraudErrorCode.FRAUD_DATA_UNREADABLE,
+        FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR,
+        FraudErrorCode.FRAUD_NO_VERDICT,
     ],
 )
-def test_the_configuration_failures_are_answered_with_500(code: AsErrorCode) -> None:
+def test_the_configuration_failures_are_answered_with_500(code: FraudErrorCode) -> None:
     """A broken data file is an AS failure, not a verdict about the caller."""
     error = AsError(code, code.message)
 
@@ -109,7 +111,7 @@ def test_the_configuration_failures_are_answered_with_500(code: AsErrorCode) -> 
 
 def test_the_fraud_codes_are_unique_and_prefixed() -> None:
     """Codes are stable identifiers: no duplicates, and the family is recognisable."""
-    fraud = [code for code in AsErrorCode if code.code.startswith("AS-FRAUD-")]
+    fraud = [code for code in FraudErrorCode if code.code.startswith("AS-FRAUD-")]
     codes = [code.code for code in fraud]
 
     assert codes == [
@@ -124,15 +126,17 @@ def test_the_fraud_codes_are_unique_and_prefixed() -> None:
 
 
 def test_fraud_codes_live_in_the_shared_error_model() -> None:
-    """One authoritative model for both processes (REQ-F-023).
+    """One shared mechanism, one family per vocabulary (REQ-F-023).
 
-    The anti-fraud AS must not grow its own error vocabulary: a reviewer reads one table,
-    and the console renders one ``errors_by_code`` map.
+    The anti-fraud AS must not grow its own error *mechanism*: its ``AS-FRAUD-*`` codes are
+    a family of the library's shared, memberless :class:`ErrorCode` base, and both of its
+    modules use that one family rather than a private per-process vocabulary.
     """
     from anti_fraud_as import call_controller, screening_data
 
-    assert call_controller.AsErrorCode is AsErrorCode
-    assert screening_data.AsErrorCode is AsErrorCode
+    assert call_controller.FraudErrorCode is FraudErrorCode
+    assert screening_data.FraudErrorCode is FraudErrorCode
+    assert issubclass(FraudErrorCode, ErrorCode)
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +169,7 @@ def test_metrics_payload_exposes_the_counters_next_to_the_errors() -> None:
     registry = MetricsRegistry()
     registry.record_call_started()
     registry.record_counter("verdict.reject")
-    registry.record_error(AsErrorCode.FRAUD_CALLER_BLOCKED.code)
+    registry.record_error(FraudErrorCode.FRAUD_CALLER_BLOCKED.code)
 
     payload = metrics_payload(registry)
 

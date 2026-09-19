@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from as_app.errors import AsErrorCode
+from anti_fraud_as.errors import FraudErrorCode
 
 __all__ = [
     "ScreeningDecision",
@@ -154,7 +154,7 @@ def screen(signals: ScreeningSignals, policy: ScreeningPolicy) -> ScreeningDecis
             source=ScreeningSource.BLOCK_LIST,
             score=signals.effective_reputation,
             list_entry=signals.blocklisted_by,
-            error_code=AsErrorCode.FRAUD_CALLER_BLOCKED.code,
+            error_code=FraudErrorCode.FRAUD_CALLER_BLOCKED.code,
         )
     if signals.calls_in_window > policy.reject_above_calls:
         return ScreeningDecision(
@@ -162,7 +162,7 @@ def screen(signals: ScreeningSignals, policy: ScreeningPolicy) -> ScreeningDecis
             reason="calling party exceeded the call-rate window",
             source=ScreeningSource.RATE_WINDOW,
             score=signals.effective_reputation,
-            error_code=AsErrorCode.FRAUD_RATE_EXCEEDED.code,
+            error_code=FraudErrorCode.FRAUD_RATE_EXCEEDED.code,
         )
     if signals.effective_reputation < policy.reject_below_reputation:
         return ScreeningDecision(
@@ -170,7 +170,7 @@ def screen(signals: ScreeningSignals, policy: ScreeningPolicy) -> ScreeningDecis
             reason="calling party reputation is below the threshold",
             source=ScreeningSource.REPUTATION,
             score=signals.effective_reputation,
-            error_code=AsErrorCode.FRAUD_REPUTATION_LOW.code,
+            error_code=FraudErrorCode.FRAUD_REPUTATION_LOW.code,
         )
     return ScreeningDecision(
         verdict=ScreeningVerdict.ALLOW,

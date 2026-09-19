@@ -39,11 +39,22 @@ name = "as-platform"
 version = "0.1.0"
 source = { editable = "../as_platform" }
 dependencies = [
+    { name = "pydantic" },
     { name = "sippy" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sippy", specifier = "==2.4.2" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "sippy", specifier = "==2.4.2" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.9" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "ruff", specifier = ">=0.5" },
+]
 
 [[package]]
 name = "ast-serialize"

@@ -60,6 +60,7 @@ from sippy.SipURL import SipURL
 from sippy.UA import UA
 
 from anti_fraud_as.caller_state import CallerStateStore
+from anti_fraud_as.errors import AsError, FraudErrorCode, SkeletonErrorCode
 from anti_fraud_as.screening import (
     ScreeningDecision,
     ScreeningPolicy,
@@ -69,7 +70,6 @@ from anti_fraud_as.screening import (
     screen,
 )
 from anti_fraud_as.screening_data import ListMatchResult, ScreeningDataStore
-from as_app.errors import AsError, AsErrorCode
 from as_app.observability.logging import LogDirection, get_logger, log_event
 from as_app.observability.metrics import (
     CallDisposition,
@@ -252,19 +252,19 @@ def declares_sip_608(request: Any) -> bool:
     return False
 
 
-def _error_code_for(code: str | None) -> AsErrorCode:
+def _error_code_for(code: str | None) -> FraudErrorCode:
     """Resolve an internal error code string to its enum member.
 
     Args:
         code: A code such as ``AS-FRAUD-002``, or ``None``.
 
     Returns:
-        The matching :class:`AsErrorCode`, or ``FRAUD_NO_VERDICT`` when nothing matches.
+        The matching :class:`FraudErrorCode`, or ``FRAUD_NO_VERDICT`` when nothing matches.
     """
-    for candidate in AsErrorCode:
+    for candidate in FraudErrorCode:
         if candidate.code == code:
             return candidate
-    return AsErrorCode.FRAUD_NO_VERDICT
+    return FraudErrorCode.FRAUD_NO_VERDICT
 
 
 class FraudCallController:
@@ -641,7 +641,7 @@ class FraudCallController:
 
         if self.next_hop is None:
             error = AsError(
-                AsErrorCode.CFG_MISSING,
+                SkeletonErrorCode.CFG_MISSING,
                 "FRAUD_SBC_PEER_ADDRESS is required: the AS must know its next hop",
                 call_id=self.call_id,
             )
@@ -741,7 +741,7 @@ class FraudCallController:
             call_id=self.call_id,
             direction=LogDirection.INTERNAL,
             next_hop=self._next_hop_peer(),
-            error_code=AsErrorCode.PEER_UNREACHABLE.code,
+            error_code=SkeletonErrorCode.PEER_UNREACHABLE.code,
         )
         self.uaO.disconnect()
 
@@ -937,12 +937,12 @@ class FraudCallMap:
             The sippy callback triple carrying the ``403`` response.
         """
         error = AsError(
-            AsErrorCode.PEER_NOT_ALLOWED,
+            SkeletonErrorCode.PEER_NOT_ALLOWED,
             f"source address {source} is not an allowed trunk peer",
             context={"source": source, "sip_method": str(request.getMethod())},
         )
         call_id = str(request.getHFBody("call-id"))
-        self.metrics.record_error(AsErrorCode.PEER_NOT_ALLOWED.code)
+        self.metrics.record_error(SkeletonErrorCode.PEER_NOT_ALLOWED.code)
         self.tracer.record(
             call_id,
             LogDirection.INBOUND,

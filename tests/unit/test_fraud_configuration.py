@@ -34,7 +34,7 @@ import pytest
 from pydantic import ValidationError
 
 from anti_fraud_as.bootstrap import FraudAsSettings, run_startup_self_check
-from as_app.errors import AsError, AsErrorCode
+from anti_fraud_as.errors import AsError, FraudErrorCode, SkeletonErrorCode
 
 pytestmark = pytest.mark.unit
 
@@ -213,7 +213,7 @@ def test_the_self_check_rejects_a_missing_screening_file(
     with pytest.raises(AsError) as raised:
         run_startup_self_check(settings)
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_UNREADABLE
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_UNREADABLE
 
 
 def test_the_self_check_rejects_an_invalid_screening_file(
@@ -226,7 +226,7 @@ def test_the_self_check_rejects_an_invalid_screening_file(
     with pytest.raises(AsError) as raised:
         run_startup_self_check(settings_for(free_udp_port, broken))
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
 
 
 def test_the_self_check_requires_a_next_hop(free_udp_port: int, screening_file: Path) -> None:
@@ -236,7 +236,7 @@ def test_the_self_check_requires_a_next_hop(free_udp_port: int, screening_file: 
     with pytest.raises(AsError) as raised:
         run_startup_self_check(settings)
 
-    assert raised.value.code is AsErrorCode.CFG_MISSING
+    assert raised.value.code is SkeletonErrorCode.CFG_MISSING
 
 
 def test_the_self_check_requires_at_least_one_allowed_peer(
@@ -248,7 +248,7 @@ def test_the_self_check_requires_at_least_one_allowed_peer(
     with pytest.raises(AsError) as raised:
         run_startup_self_check(settings)
 
-    assert raised.value.code is AsErrorCode.CFG_PEER_INVALID
+    assert raised.value.code is SkeletonErrorCode.CFG_PEER_INVALID
 
 
 def test_the_self_check_fails_fast_when_the_port_is_taken(screening_file: Path) -> None:
@@ -260,7 +260,7 @@ def test_the_self_check_fails_fast_when_the_port_is_taken(screening_file: Path) 
         with pytest.raises(AsError) as raised:
             run_startup_self_check(settings_for(taken_port, screening_file))
 
-    assert raised.value.code is AsErrorCode.CFG_PORT_UNAVAILABLE
+    assert raised.value.code is SkeletonErrorCode.CFG_PORT_UNAVAILABLE
 
 
 # ---------------------------------------------------------------------------

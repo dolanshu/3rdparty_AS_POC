@@ -39,7 +39,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from anti_fraud_as.caller_state import WindowPolicy
-from as_app.errors import AsError, AsErrorCode
+from anti_fraud_as.errors import AsError, FraudErrorCode
 
 __all__ = [
     "CallRateWindowConfig",
@@ -334,7 +334,7 @@ def load_screening_data(path: str | Path) -> ScreeningData:
         raw = source.read_text(encoding="utf-8")
     except OSError as exc:
         raise AsError(
-            AsErrorCode.FRAUD_DATA_UNREADABLE,
+            FraudErrorCode.FRAUD_DATA_UNREADABLE,
             f"cannot read screening data: {exc}",
             context={"screening_file": str(source)},
         ) from exc
@@ -342,7 +342,7 @@ def load_screening_data(path: str | Path) -> ScreeningData:
         parsed = yaml.safe_load(raw)
     except yaml.YAMLError as exc:
         raise AsError(
-            AsErrorCode.FRAUD_DATA_SCHEMA_ERROR,
+            FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR,
             f"screening data is not valid YAML: {exc}",
             context={"screening_file": str(source)},
         ) from exc
@@ -350,7 +350,7 @@ def load_screening_data(path: str | Path) -> ScreeningData:
         document = ScreeningDocument.model_validate(parsed)
     except Exception as exc:  # pydantic raises ValidationError with a long message
         raise AsError(
-            AsErrorCode.FRAUD_DATA_SCHEMA_ERROR,
+            FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR,
             f"screening data violates the schema: {exc}",
             context={"screening_file": str(source)},
         ) from exc

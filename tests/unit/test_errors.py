@@ -18,22 +18,29 @@ from __future__ import annotations
 
 import pytest
 
-from as_app.errors import SIP_PHRASES, AsError, AsErrorCode
+from anti_fraud_as.errors import FraudErrorCode
+from as_app.errors import SIP_PHRASES, AsError, AsErrorCode, SkeletonErrorCode
 
 pytestmark = pytest.mark.unit
 
+#: Every code family the mechanism carries, one subclass per vocabulary (ADR-0009
+#: decision 3). The uniqueness and status-coverage checks below span all three, so a code
+#: added to any family cannot collide with another or miss its reason phrase.
+ALL_FAMILIES = (AsErrorCode, SkeletonErrorCode, FraudErrorCode)
+
 
 def test_every_code_has_a_unique_identifier_and_status() -> None:
-    """Error codes are unique and every status has a reason phrase."""
-    codes = [code.code for code in AsErrorCode]
+    """Error codes are unique across every family and every status has a reason phrase."""
+    codes = [code.code for family in ALL_FAMILIES for code in family]
     assert len(codes) == len(set(codes))
-    for code in AsErrorCode:
-        assert code.sip_status in SIP_PHRASES
+    for family in ALL_FAMILIES:
+        for code in family:
+            assert code.sip_status in SIP_PHRASES
 
 
 def test_relevant_sip_statuses_are_present() -> None:
     """The statuses the POC needs are mapped (AGENT.md section 1, failure branches)."""
-    statuses = {code.sip_status for code in AsErrorCode}
+    statuses = {code.sip_status for family in ALL_FAMILIES for code in family}
     assert {404, 603, 403, 500}.issubset(statuses)
 
 
@@ -56,6 +63,6 @@ def test_error_exposes_status_phrase_and_log_fields() -> None:
 def test_error_falls_back_to_the_code_message() -> None:
     """Without a detail the message of the code is used."""
     assert (
-        AsError(AsErrorCode.PEER_NOT_ALLOWED).detail
+        AsError(SkeletonErrorCode.PEER_NOT_ALLOWED).detail
         == "source address is not an allowed trunk peer"
     )

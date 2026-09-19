@@ -34,7 +34,7 @@ from typing import Annotated, Any
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from as_app.errors import AsError, AsErrorCode
+from as_app.errors import AsError, AsErrorCode, SkeletonErrorCode
 from as_app.routing.rules import load_rule_set
 
 __all__ = ["AsSettings", "ShutdownController", "install_signal_handlers", "run_startup_self_check"]
@@ -140,7 +140,7 @@ def check_port_available(address: str, port: int, *, family: int = socket.AF_INE
         probe.bind((address, port))
     except OSError as exc:
         raise AsError(
-            AsErrorCode.CFG_PORT_UNAVAILABLE,
+            SkeletonErrorCode.CFG_PORT_UNAVAILABLE,
             f"cannot bind UDP {address}:{port}: {exc}",
             context={"address": address, "port": str(port)},
         ) from exc
@@ -160,12 +160,12 @@ def run_startup_self_check(settings: AsSettings) -> None:
     """
     if not settings.sbc_peer_address.strip():
         raise AsError(
-            AsErrorCode.CFG_MISSING,
+            SkeletonErrorCode.CFG_MISSING,
             "SBC_PEER_ADDRESS is required: the AS must know its next hop",
         )
     if not settings.allowed_peers:
         raise AsError(
-            AsErrorCode.CFG_PEER_INVALID,
+            SkeletonErrorCode.CFG_PEER_INVALID,
             "ALLOWED_PEERS must list at least one trunk peer address",
         )
     rules_path = Path(settings.rules_file)

@@ -212,6 +212,7 @@ def fraud_pair_factory(screening_file: Path):
         screening_path: Path | None = None,
         caller_state: Any = None,
         allowed_peers: list[str] | None = None,
+        peer_port: int | None = None,
     ) -> TrunkPair:
         """Bind one anti-fraud AS and one mock on ephemeral ports.
 
@@ -220,6 +221,8 @@ def fraud_pair_factory(screening_file: Path):
             caller_state: Process-level state store to inject; the stack builds its own
                 from the screening data when omitted.
             allowed_peers: Trunk peers accepted; defaults to loopback.
+            peer_port: Next hop the AS relays an allowed INVITE to. Defaults to the mock's
+                core port; pass an unbound port to exercise a peer that never answers.
 
         Returns:
             A bound :class:`TrunkPair`.
@@ -235,7 +238,7 @@ def fraud_pair_factory(screening_file: Path):
             fraud_sip_listen_address=TRUNK_ADDRESS,
             fraud_sip_listen_port=as_port,
             fraud_sbc_peer_address=TRUNK_ADDRESS,
-            fraud_sbc_peer_port=core_port,
+            fraud_sbc_peer_port=peer_port or core_port,
             fraud_allowed_peers=list(allowed_peers or [TRUNK_ADDRESS]),
             fraud_screening_file=screening_path or screening_file,
             fraud_internal_api_address=TRUNK_ADDRESS,

@@ -35,6 +35,17 @@ wheels = [
 ]
 
 [[package]]
+name = "as-platform"
+version = "0.1.0"
+source = { editable = "../as_platform" }
+dependencies = [
+    { name = "sippy" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sippy", specifier = "==2.4.2" }]
+
+[[package]]
 name = "ast-serialize"
 version = "0.11.2"
 source = { registry = "https://pypi.org/simple" }
@@ -603,6 +614,7 @@ name = "third-party-as-poc"
 version = "0.7.0"
 source = { editable = "." }
 dependencies = [
+    { name = "as-platform" },
     { name = "sippy" },
 ]
 
@@ -635,6 +647,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "as-platform", editable = "../as_platform" },
     { name = "fastapi", marker = "extra == 'as'", specifier = ">=0.110" },
     { name = "fastapi", marker = "extra == 'console'", specifier = ">=0.110" },
     { name = "pydantic", marker = "extra == 'as'", specifier = ">=2.0" },

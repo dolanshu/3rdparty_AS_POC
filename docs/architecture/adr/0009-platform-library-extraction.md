@@ -216,6 +216,19 @@ them all — and reports the complete list in the acceptance evidence:
 | `tests/unit/test_fraud_error_model.py::test_fraud_codes_live_in_the_shared_error_model` | `:133-134` | asserts `call_controller.AsErrorCode is AsErrorCode` and `screening_data.AsErrorCode is AsErrorCode`; becomes `FraudErrorCode`. The assertion's **intent** — one authoritative model, no private per-process vocabulary (REQ-F-023) — is preserved and still asserted |
 | `tests/unit/test_fraud_error_model.py::test_the_configuration_failures_are_answered_with_500` | `:101` | parametrised over `AsErrorCode` with FRAUD codes; the annotation repoints |
 
+**Implementation-stage finding (2026-09-19, step 1): a sixth site, in a second bounded class.**
+Step 1's mandatory `as-platform` entry in `[project].dependencies` (decision 6) collides with
+`tests/unit/test_fraud_configuration.py::test_the_runtime_dependency_pin_is_unchanged`, which
+asserted the literal substring `dependencies = ["sippy==2.4.2"]` and so could not survive that
+entry — `[project].dependencies` is one TOML array, and the enumeration above missed this site.
+**The second permitted class is narrower than the first and can only strengthen it:** a
+structural assertion that pins the **literal text of a file the extraction is required to
+change** is repointed at the **same fact expressed structurally**, and may only be
+**strengthened**, never weakened. The sippy pin is still asserted unchanged — `sippy==2.4.2`
+remains an entry, per `AGENT.md` section 6 — and the exact set of `[project].dependencies`
+entries is now pinned rather than left open. The assertion's expected *fact* is unchanged; no
+test is added, deleted or weakened.
+
 This is the one place where the literal sentence *"If that suite has to change to accommodate
 the extraction, the extraction is wrong, not the tests"* (requirements traceability note) meets
 the split; the note is **qualified in place** so it keeps its force — the extraction may not

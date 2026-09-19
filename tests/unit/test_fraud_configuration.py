@@ -303,10 +303,22 @@ def test_the_fraud_package_adds_no_third_party_dependency(repo_root: Path) -> No
 
 
 def test_the_runtime_dependency_pin_is_unchanged(repo_root: Path) -> None:
-    """The SIP stack stays the only mandatory runtime dependency (``AGENT.md`` section 6)."""
+    """The sippy pin is unchanged; ``as-platform`` is the only other runtime dependency.
+
+    The SIP stack stays pinned at exactly ``sippy==2.4.2`` (``AGENT.md`` section 6), and it
+    is the only pinned third-party runtime dependency. The sole other mandatory runtime
+    dependency is this project's own platform library ``as-platform``, consumed from the
+    sibling checkout ``../as_platform`` (ADR-0009 decision 6) — not a third-party package
+    and not a version pin.
+    """
     text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert 'dependencies = ["sippy==2.4.2"]' in text
+    runtime = re.search(r"^dependencies = \[(.*?)^\]", text, re.DOTALL | re.MULTILINE)
+    assert runtime is not None, "the runtime dependencies are missing from pyproject.toml"
+    runtime_dependencies = re.findall(r'"([^"]+)"', runtime.group(1))
+    assert "sippy==2.4.2" in runtime_dependencies
+    assert set(runtime_dependencies) - {"sippy==2.4.2"} == {"as-platform"}
+
     # The block ends at a line that is only ``]``: an item like ``uvicorn[standard]``
     # contains a ``]`` of its own, so the delimiter cannot be the first one seen.
     block = re.search(r"^as = \[(.*?)^\]", text, re.DOTALL | re.MULTILINE)

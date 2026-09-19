@@ -219,8 +219,8 @@ def test_console_page_contains_operations_ui_elements() -> None:
     # Status bar: peer state, version, uptime, call counters.
     for label in ("uptime", "calls", "peers", "ver"):
         assert label in page, f"status-bar item '{label}' not found"
-    # Left navigation with five views.
-    for nav in ("Call Trace", "Rules", "Configuration", "Statistics", "About"):
+    # Left navigation with the M3 views plus the P8 Screening view.
+    for nav in ("Call Trace", "Rules", "Screening", "Configuration", "Statistics", "About"):
         assert nav in page, f"navigation item '{nav}' not found"
     # Live message flow: direction colour coding (inbound/outbound/internal).
     for var in ("--in", "--out", "--int"):
@@ -243,6 +243,29 @@ def test_console_page_injects_as_api_url() -> None:
     rendered = CONSOLE_PAGE.replace("__AS_API_URL__", "http://10.0.0.1:9999")
     assert "http://10.0.0.1:9999" in rendered
     assert "__AS_API_URL__" not in rendered
+
+
+def test_console_page_carries_the_screening_and_instance_surfaces() -> None:
+    """P8: the second AS surface is on the one shared page (LLD section 9.10).
+
+    The console is one page for both instances, so it needs the Screening view (the block and
+    allow lists plus the screening parameters), the verdict chart in Statistics, and the
+    instance identity in the status bar and the document title — the page must say which AS
+    it is displaying, and read that identity from ``/healthz`` rather than infer it from a
+    port.
+    """
+    page = CONSOLE_PAGE
+    # The navigation entry and the Screening view it selects.
+    assert 'data-v="screening"' in page, "Screening navigation entry not found"
+    for element in ("vw-screening", "scrC", "blT", "alT"):
+        assert element in page, f"screening view element '{element}' not found"
+    # Verdict chart in the statistics view.
+    assert "vcC" in page, "verdict chart container not found"
+    assert "Verdicts" in page, "verdict chart label not found"
+    # Instance identity: a status-bar chip and the document title both read /healthz.
+    assert 'id="aInst"' in page, "instance status-bar chip not found"
+    assert "hd.instance" in page, "the instance identity is not read from /healthz"
+    assert "document.title" in page, "the page title is not set from the instance identity"
 
 
 # ---------------------------------------------------------------------------

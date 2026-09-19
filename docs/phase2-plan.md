@@ -895,9 +895,10 @@ value it prints is a boundary statement.
    interpreter; in production each instance owns its own process and loop, so the number of
    instances is not what this measures.
 2. **The 3-second no-answer timeout is a wall-clock boundary, not a resource limit**, and it
-   is what turns a slow call into a failed one under load. The chain accepts the whole burst
-   and degrades **per call**: it never refuses load and never answers `503`/overload, because
-   there is no admission control.
+   is what turns a slow call into a failed one under load. Inside the configured range the
+   chain neither refused nor degraded: every call up to 64 completed and no `503` was ever
+   observed. What is absent is any admission control or back-pressure, so the fixed 3-second
+   wall-clock timeout is the only thing that can turn a slow call into a failed one.
 3. **The failover hop's no-answer timer does not fire, so `timerB` — not the application —
    ends the call.** This is the sharpest finding, and it is stronger than the P8a lesson.
    Towards an unreachable hop the controller logs `next hop did not answer in time` **once
@@ -916,6 +917,11 @@ value it prints is a boundary statement.
    application decided. Once `timerB` has fired the transactions are still present in
    `SipTransactionManager.tclient` (measured `8` entries, `0` with `timerB` armed), so the
    reap does not clean the table.
+
+Running the probe with a non-default window above `timerB` (40s) triggers sippy
+`AttributeError: 'NoneType' object has no attribute 'pop'` tracebacks on teardown — the same
+defect class as the registered P8a gap (`docs/production-gaps.md`), on a different code path,
+and not hit by the default run.
 
 - **Status: done (2026-09-19), worked on `phase2`; not merged into `main`, not tagged.**
   The probe is `tools/capacity_probe.py`, run explicitly and **not** in the gate (no Makefile

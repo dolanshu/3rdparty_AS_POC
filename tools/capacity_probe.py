@@ -130,8 +130,9 @@ DEFAULT_LEVEL_TIMEOUT_SECONDS = 12.0
 #: How long the unreachable-hop chain is driven. It observes the application's 3-second
 #: no-answer timeout, not the 32-second ``timerB``, but a call is only released after the
 #: rule set's primary **and** failover hop have each timed out, so the window has to cover
-#: two of them plus the relay. It must stay **below** ``timerB``: once ``timerB`` fires the
-#: client transactions are reaped and the population this probe measures is gone.
+#: two of them plus the relay. It must stay **below** ``timerB``: this probe measures the
+#: **armed** population, and once ``timerB`` fires the arm is gone — the entries themselves
+#: linger in ``tclient`` (the table is not reaped).
 DEFAULT_UNREACHABLE_WINDOW_SECONDS = 9.0
 
 #: How many calls the unreachable-hop observation places in one burst.
@@ -827,7 +828,9 @@ def main(argv: list[str] | None = None) -> int:
                 "    constraint: the armed population scales with the burst — each call leaves "
                 "one armed transaction per hop the rule set tries, so a burst of N calls "
                 "against H hops leaves up to N*H transactions and their timers in the process "
-                f"for timerB = {unreachable.timerb_seconds}s, whatever the application decided"
+                "for timerB = "
+                f"{unreachable.timerb_seconds if unreachable.timerb_seconds is not None else '-'}"
+                "s, whatever the application decided"
             )
             print(
                 "    constraint: retransmission continues towards a silent hop — timerA "

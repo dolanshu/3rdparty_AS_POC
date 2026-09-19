@@ -929,6 +929,65 @@ and not hit by the default run.
   `docs/production-gaps.md`. No calls-per-second and no latency figure is published (D10),
   and no file under `src/` was changed — P9.5 is read-only by definition.
 
+**P9.5 review gate — run, clean, three non-blocking findings fixed inside the stage (§5.2).**
+The read-only review of the probe ran against commit `9713c5f`, asked the §5.2
+*Implementation* question ("matches the design, stays in scope, no shortcuts taken
+silently") and the design question's probe clause ("the probe result actually supports the
+design"). **No blocking finding.** Read-only-ness was verified independently:
+`git diff --name-only 9713c5f^ 9713c5f` is exactly the four paths
+(`tools/capacity_probe.py`, `tools/README.md`, `docs/production-gaps.md`,
+`docs/phase2-plan.md`) with nothing under `src/`. The probe was confirmed to only generate
+load and observe — it imports `AsStack` / `FraudAsStack` / `SMockApplication` and reads
+public surfaces (`place_call`, `outcome_for`, `start`/`stop`, `recorder.messages`, plus
+`getattr` reads of `transaction_manager.tclient` and `teB`) with no monkeypatch or mutation
+of the production paths, and its only write is a rewritten rule copy into a
+`tempfile.mkdtemp` directory. The deliverable was confirmed to be constraints only: the
+output carries offered levels, completion counts, the loop gap (loop responsiveness, not
+call latency), the `timerB` constant, the INVITE count and the `tclient` entries — **no**
+calls-per-second and **no** latency figure (D10, §8 item 1). The reviewer reproduced the
+probe (`uv run python tools/capacity_probe.py`, exit 0) and checked every recorded value:
+the positive control `1 of 1` completed, all levels up to 64 completed (`64 of 64`), the
+loop gap `0.03s` → `0.17s`, and towards the unreachable hop `0 of 4` released, `8 of 8`
+armed for `timerB = 32.0s`, `36` transmissions. It then escalated the window past the
+recorded 9s: at 15s `0 of 4` released / `40` transmits, at 25s `0 of 4` / `48` transmits
+(confirming the "`0 of 4` after 25s" claim), and at 40s `4 of 4` released with `8` entries
+still in `tclient` and `0` armed — confirming both the sharpest finding (the application
+never gives up; `timerB` ends the call) and that the table is not reaped. It confirmed the
+probe is **not** in the gate: no Makefile target, `pytest --collect-only` matches nothing
+(`pyproject.toml` `testpaths = ["tests"]`), and it is absent from `.github/workflows/ci.yml`.
+Gates: `make lint` clean (ruff format 92 files, ruff check passed, mypy 28 source files),
+unit **203**, integration **34**, e2e **9**; the known flake of §7 item 9 fired once on the
+first integration run and passed on re-run.
+
+Five non-blocking points were raised. **Three were fixed inside the stage** (commit
+`3c38e9e`, so the stage is **not** re-reviewed):
+
+- **The `DEFAULT_UNREACHABLE_WINDOW_SECONDS` comment was wrong about the reap.** It said
+  `timerB` reaps the client transactions; the review measured the opposite — after `timerB`
+  fires the arm is gone and the entries **linger** in `tclient`, the table is not reaped.
+  Fixed: the comment now says the probe measures the **armed** population.
+- **A cosmetic `Nones`.** The burst-constraint line printed `timerB = Nones` on the
+  no-armed-transaction path. Fixed with the same `None` → `-` fallback the interval line
+  above it already uses.
+- **"degrades per call" was an overstatement, and it was corrected in both places.** The gap
+  row and "What was learned" point 2 both claimed the chain degrades per call, but inside the
+  configured range nothing degraded: all 64 concurrent calls completed and no `503` was ever
+  observed. Restated as: no completion ceiling and no refusal inside the configured range,
+  and no admission control or back-pressure — the fixed 3-second wall-clock timeout is the
+  only limit that can turn a slow call into a failed one. Recorded because the original claim
+  was **stronger** than what was observed.
+
+Two points were **recorded rather than fixed**:
+
+- **A non-default window above `timerB` (40s) triggers sippy
+  `AttributeError: 'NoneType' object has no attribute 'pop'` tracebacks on teardown** — the
+  same defect class as the registered P8a gap (`docs/production-gaps.md`), on a different
+  code path, and not hit by the default run. Recorded in the P9.5 section above.
+- **A reproducibility note, left as correct behaviour.** One of six unreachable-hop runs
+  spuriously reported `4 of 4` released / `0` INVITEs; the probe's own guard flagged that run
+  `FAILED` (exit 1) rather than printing a false pass, so the harness discriminates honestly.
+  No fix — the guard doing its job is the correct outcome.
+
 ### P10 — Platform extraction (new repository)
 
 - **Goal.** Extract the skeleton shared by both AS instances into a library; both become its

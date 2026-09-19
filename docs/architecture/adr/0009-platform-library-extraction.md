@@ -521,7 +521,10 @@ this scope and no more.
 
 - **Two repositories to clone.** The clean-checkout guarantee of `AGENT.md` section 10 is
   restated as "clone both side by side" (decision 8, REQ-F-032). A checkout with only this
-  repository does not resolve `as-platform` at all (*Verified facts*, (a)).
+  repository already carries `[tool.uv.sources]`, so it takes the `path` branch and fails with
+  `Failed to generate package metadata for as-platform==0.1.0 @ editable+../as_platform`
+  (*cause: Distribution not found at: file:///…*) — the failure *Verified facts* (f) describes,
+  not the missing-source error of (a) (decision 6).
 - **The library version is not a compatibility guard, and the lock does not supply one.** A
   `path` source ignores the version constraint in `dependencies` (*Verified facts*, (c)) and
   `--frozen` accepts a version skew (*Verified facts*, (d)), so neither the pin nor the lock

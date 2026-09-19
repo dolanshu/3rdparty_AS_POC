@@ -267,8 +267,16 @@ def test_a_caller_that_never_declared_sip_608_is_still_answered_608(fraud_trunk_
 
     finals = [data for data in responses if _status_of_response(data) >= 200]
     assert finals, f"the AS sent no final response, only {len(responses)} provisional datagram(s)"
-    status_line = finals[0].decode(errors="replace").split("\r\n", 1)[0]
+    response_text = finals[0].decode(errors="replace")
+    status_line = response_text.split("\r\n", 1)[0]
     assert status_line.startswith("SIP/2.0 608"), status_line
+
+    # RFC 8688 sections 3.1 and 6: the rejection carries no Call-Info, and with no body it
+    # carries no Content-Type either - the AS is signalling-only and plays no announcement
+    # (REQ-F-019, ADR-0006).
+    reply_headers = headers_of(response_text)
+    assert "call-info" not in reply_headers, "the 608 must not carry a Call-Info header"
+    assert "content-type" not in reply_headers, "the 608 must not carry a body"
 
     attributes = verdict_attributes(fraud_trunk_pair.as_stack, call_id)
     assert attributes["verdict"] == "reject"

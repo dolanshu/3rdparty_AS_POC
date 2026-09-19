@@ -2453,3 +2453,358 @@ Call-ID) and `03-out-invite-core.txt` (same Call-ID plus `-b2b_1`).
 | ACC-M1-002 | **accepted (re-tested)** — `pytest tests/integration -q -k pass_through`: 1 passed. |
 | ACC-M1-005 | **accepted (re-tested)** — `tools/capture_call.py` wrote 14 files; the outbound Call-ID is the trunk one plus `-b2b_1`. |
 | ACC-M2-005 | **accepted (re-tested)** — as above; the translated call's samples show `<trunk>-b2b_1` on the core leg. |
+
+## Phase 2 — P9 chained topology (2026-09-19)
+
+Branch `phase2` (item **P9** in `docs/phase2-plan.md` §3; under the branch model of §4 P9 is
+worked directly on `phase2`). Acceptance items **ACC-P9-001 … ACC-P9-005** in
+`docs/acceptance/criteria.md`; their requirements are `REQ-F-025 … REQ-F-028` and
+`REQ-NF-016 … REQ-NF-018`. Design rationale is **ADR-0008** (with HLD §9 and LLD §10).
+
+What was verified: the chained topology `SBC → AS-1 (anti-fraud) → AS-2 (number translation) →
+core` runs — two B2BUAs in series — wired **by configuration only** (no iFC emulation, no shared
+import in the forbidden direction); an INVITE AS-1 allows is relayed into AS-2, translated there
+and answered by the core; a `608` reject at AS-1 short-circuits before AS-2 and the core. A
+chained call carries **three distinct** `Call-ID`s, one per leg, so each instance writes its own
+Call-ID keyed trace and cross-AS correlation is **not** solved (`REQ-NF-016`); the standard
+end-to-end key (the `P-Charging-Vector` ICID) **is** preserved across the chain but no
+observability surface is keyed on it. The only code change P9's implementation stage made is the
+anti-fraud controller's outbound `Call-ID` (the defect fix of finding (A)); the rest is a demo,
+its documentation and the recorded friction.
+
+Result: **accepted**, with the limitations recorded under *Accepted limitations and open items*.
+
+Environment of this run: Linux x86-64, loopback only; Python 3.10.12; sippy 2.4.2; `uv`
+0.12.15; repository `VERSION` = 0.5.1 at the time of the run.
+
+### 1. Command and output
+
+Every command below was run from the repository root on `phase2`; the outputs are pasted
+verbatim (ports and Call-IDs are ephemeral and vary per run).
+
+**The gate (`AGENT.md` §13: local, before the commit — not a CI result, see §3).**
+
+```text
+$ make lint
+uv sync
+Resolved 50 packages in 2ms
+Checked 49 packages in 0.80ms
+uv run ruff format --check .
+91 files already formatted
+uv run ruff check .
+All checks passed!
+uv run mypy
+Success: no issues found in 28 source files
+(exit 0)
+```
+
+```text
+$ make unit
+203 passed in 1.17s
+$ make integration
+34 passed in 32.15s
+$ make e2e
+9 passed in 5.33s
+```
+
+**ACC-P9-001** — the chain end to end (REQ-F-025) and configuration-only chaining (REQ-F-026):
+
+```text
+$ uv run pytest tests/integration/test_chained_topology.py -q
+3 passed in 2.23s
+
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k import_the_anti_fraud
+1 passed, 52 deselected in 0.03s
+```
+
+The integration tests are `test_an_allowed_call_traverses_both_b2bus_and_is_translated`,
+`test_every_leg_regenerates_its_call_id_and_each_instance_keys_its_trace` and
+`test_a_reject_at_as1_short_circuits_before_as2_and_the_core`. The unit test is
+`test_as_app_does_not_import_the_anti_fraud_as`.
+
+**ACC-P9-002** — the `608` reject short-circuits before AS-2 and the core (REQ-F-027):
+
+```text
+$ uv run pytest tests/integration/test_chained_topology.py tests/e2e/test_chained_call_flows.py -q -k reject
+2 passed, 3 deselected in 0.65s
+```
+
+Both assertions are on a **delta of zero**: `tracer.known_call_ids()` at AS-2 and
+`mock.uas.received_invites` at the core, with the wire assertion `"SIP/2.0 608 Rejected" in
+response_lines` in the recorded bytes.
+
+**ACC-P9-003** — per-instance observability and the three per-leg `Call-ID`s (REQ-F-028,
+REQ-NF-016):
+
+```text
+$ uv run pytest tests/integration/test_chained_topology.py tests/e2e/test_chained_call_flows.py -q
+5 passed in 3.35s
+
+$ uv run python tools/chained_as_probe.py ; echo $?
+chained AS POC - two B2BUAs in series, wired by configuration only
+topology   : emulated S-CSCF --UDP--> AS-1 anti-fraud --UDP--> AS-2 number translation --UDP--> emulated core
+ports      : AS-1 127.0.0.1:47482, AS-2 127.0.0.1:46310, trunk 47247, core 46154
+wiring     : AS-1 next hop = AS-2 listen address; AS-2 next hop = the rule set
+
+[1/2] allowed call relayed through both AS instances
+caller        : +86216180001
+called        : +8613800138000
+AS-1 verdict  : allow
+AS-1 signal   : none
+S-CSCF Call-ID: 8030a24ea391ace86f9ee9fa78aada2b
+AS-2 trunk Call-ID: 8030a24ea391ace86f9ee9fa78aada2b-b2b_1
+AS-2 rule     : R-MOB-CM-40
+core Call-ID  : 8030a24ea391ace86f9ee9fa78aada2b-b2b_1-b2b_1
+core called number: 013800138000
+final status  : 200
+released      : True
+distinct Call-IDs: 3
+Call-ID per leg: True
+S-CSCF ICID   : poc-chained-allow
+AS-2 ICID     : poc-chained-allow
+core ICID     : poc-chained-allow
+ICID preserved: True
+
+[2/2] rejected call short-circuits at AS-1
+caller        : +8613400000001
+AS-1 verdict  : reject
+final status  : 608
+AS-2 calls seen: 0
+core INVITEs seen: 0
+
+--- verdict --------------------------------------------------------
+allowed call completed through two B2BUAs : OK
+608 reject short-circuited before AS-2     : OK
+Call-ID regenerated on every leg           : OK
+ICID preserved across every leg            : OK
+0
+```
+
+**ACC-P9-004** — the first-class documented run command (REQ-NF-017):
+
+```text
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k "demo_chained or chaining"
+2 passed, 51 deselected in 0.02s
+
+$ uv run python tools/demo_chained_call.py --rules-file config/routing_rules.yaml --screening-file config/caller_screening.yaml ; echo $?
+chained AS POC - two B2BUAs in series, wired by configuration only
+topology   : emulated S-CSCF --UDP--> AS-1 anti-fraud --UDP--> AS-2 number translation --UDP--> emulated core
+ports      : AS-1 127.0.0.1:47780, AS-2 127.0.0.1:47201, trunk 46982, core 45266
+wiring     : AS-1 next hop = AS-2 listen address; AS-2 next hop = the rule set
+
+[1/2] allowed call relayed through both AS instances
+caller            : +86216180001
+called            : +8613800138000
+AS-1 verdict      : allow
+AS-1 signal       : none
+AS-2 rule         : R-MOB-CM-40
+core called number: 013800138000
+final status      : 200
+released          : True
+
+  the dialog Call-ID is regenerated on every leg (three distinct values):
+S-CSCF Call-ID    : 51486e71823cb9f07a360e90cf25393c
+AS-2 trunk Call-ID: 51486e71823cb9f07a360e90cf25393c-b2b_1
+core Call-ID      : 51486e71823cb9f07a360e90cf25393c-b2b_1-b2b_1
+distinct Call-IDs : 3
+Call-ID per leg   : True (each transition is outbound_call_id of the previous one)
+
+  the end-to-end ICID survives the whole chain (one value at every hop):
+S-CSCF ICID       : poc-chained-allow
+AS-2 ICID         : poc-chained-allow
+core ICID         : poc-chained-allow
+ICID preserved    : True
+
+[2/2] rejected call short-circuits at AS-1
+caller            : +8613400000001
+AS-1 verdict      : reject
+final status      : 608 (608 Rejected, no second leg)
+AS-2 calls seen   : 0 (the absence is the assertion)
+core INVITEs seen : 0 (the absence is the assertion)
+
+--- verdict --------------------------------------------------------
+allowed call completed through two B2BUAs : OK
+608 reject short-circuited before AS-2     : OK
+Call-ID regenerated on every leg           : OK
+three distinct Call-IDs across the chain   : OK
+ICID preserved across every leg            : OK
+0
+```
+
+The unit tests behind the `-k` selection are
+`test_make_demo_chained_is_a_documented_first_class_entry_point` (the `Makefile` target plus
+the command named in `AGENT.md` §10, `README.md` and `docs/README.md`) and
+`test_chaining_added_no_new_configuration_knob` (no declared `.env.example` key contains
+`chain`). The demo is the same tool the `make demo-chained` target runs
+(`tools/demo_chained_call.py`).
+
+**ACC-P9-005** — the friction is recorded (REQ-NF-018):
+
+```text
+$ grep -nE '^\| (iFC / ISC emulation|Cross-AS trace correlation|Shared state between the two instances|Routing catalogue coupling|Chain failure, ordering and capacity semantics) ' docs/production-gaps.md
+96:| iFC / ISC emulation | ...
+97:| Cross-AS trace correlation | ...
+98:| Shared state between the two instances | ...
+99:| Routing catalogue coupling | ...
+100:| Chain failure, ordering and capacity semantics | ...
+(exit 0)
+```
+
+All five rows sit under `## Additional gaps registered while building P9 (chained AS topology,
+2026-09-19)`. There is **no test** for REQ-NF-018: it is a record, verified by reading the
+register.
+
+### 2. Log excerpt
+
+The chain's observability is per instance, so the excerpt is **two Call-ID keyed traces of one
+call** — printed by `tests/e2e/test_chained_call_flows.py -q -s`, a real run. The S-CSCF leg's
+value is `23cdbf10ffd1406c4e8c0561cbbe647c`; AS-2's trunk leg is that value with AS-1's
+`-b2b_1` suffix, `23cdbf10ffd1406c4e8c0561cbbe647c-b2b_1` (the core leg is that value with the
+suffix again, `…-b2b_1-b2b_1`, asserted off the wire by the same test). The two traces carry
+**different keys** and hold events only for their own key:
+
+```text
+AS-1 (anti-fraud), keyed on the S-CSCF Call-ID
+call-id 23cdbf10ffd1406c4e8c0561cbbe647c
+  2026-09-19T15:30:49.740+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-19T15:30:49.741+00:00  internal trunk    verdict allow: no screening signal rejected the call
+  2026-09-19T15:30:49.741+00:00  out      next_hop INVITE  invite relayed towards the next hop
+  2026-09-19T15:30:49.745+00:00  in       next_hop 100     100 Trying on the next-hop leg
+  2026-09-19T15:30:49.745+00:00  out      trunk    100     100 Trying relayed to the trunk leg
+  2026-09-19T15:30:49.983+00:00  in       next_hop 180     180 Ringing on the next-hop leg
+  2026-09-19T15:30:49.983+00:00  out      trunk    180     180 Ringing relayed to the trunk leg
+  2026-09-19T15:30:50.208+00:00  in       next_hop 200     200 OK on the next-hop leg
+  2026-09-19T15:30:50.208+00:00  out      trunk    200     200 OK relayed to the trunk leg
+  2026-09-19T15:30:50.428+00:00  in       next_hop BYE     call released on the next-hop leg
+AS-2 (number translation), keyed on the Call-ID AS-1 sent
+call-id 23cdbf10ffd1406c4e8c0561cbbe647c-b2b_1
+  2026-09-19T15:30:49.742+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-19T15:30:49.743+00:00  internal -        decision route: China Mobile subscribers, E.164 in and national format out
+  2026-09-19T15:30:49.743+00:00  out      next_hop INVITE  invite originated towards the next hop
+  2026-09-19T15:30:49.756+00:00  in       next_hop 100     100 Trying on the next-hop leg
+  2026-09-19T15:30:49.756+00:00  out      trunk    100     100 Trying relayed to the trunk leg
+  2026-09-19T15:30:49.982+00:00  in       next_hop 180     180 Ringing on the next-hop leg
+  2026-09-19T15:30:49.982+00:00  out      trunk    180     180 Ringing relayed to the trunk leg
+  2026-09-19T15:30:50.206+00:00  in       next_hop 200     200 OK on the next-hop leg
+  2026-09-19T15:30:50.207+00:00  out      trunk    200     200 OK relayed to the trunk leg
+  2026-09-19T15:30:50.426+00:00  in       next_hop BYE     call released on the next-hop leg
+```
+
+The **rejected** call of the same run, keyed on `9a4a1cff59f5496c458a273ade843ca2` — one trace,
+no `BYE`, no second leg:
+
+```text
+AS-1 (anti-fraud), the whole call
+call-id 9a4a1cff59f5496c458a273ade843ca2
+  2026-09-19T15:30:50.623+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-19T15:30:50.624+00:00  internal trunk    verdict reject: calling party is on the block list
+  2026-09-19T15:30:50.624+00:00  out      trunk    608     608 Rejected answered on the trunk leg
+```
+
+The three per-leg values are shown explicitly by the design probe, in a **separate** run
+(ports and values are ephemeral per run) — the trunk value `8030a24ea391ace86f9ee9fa78aada2b`,
+then `…-b2b_1`, then `…-b2b_1-b2b_1`, with the ICID `poc-chained-allow` equal at every hop
+(quoted in §1). The two runs are independent; the values differ because the mock generates the
+trunk `Call-ID` fresh each time, and neither is normalised.
+
+### 3. CI
+
+**No CI run can exist for `phase2`, and none exists.** `.github/workflows/ci.yml` triggers on
+`push` / `pull_request` **targeting `main` only**; the only other trigger is `workflow_dispatch`,
+which a maintainer would have to start by hand and which no agent may start. So there is no run
+to link, no badge for this branch and no per-job conclusion to report. `AGENT.md` §13 is
+explicit that the local pre-commit gate is **not** CI and must never be presented as a CI
+result, so the gate in §1 above (ruff format / ruff check / mypy clean; `203` / `34` / `9` in
+the three layers) is recorded as a **local** run, not as kind-3 evidence. This is the one
+`AGENT.md` §4.8 evidence kind P9 cannot supply from this environment; it follows the P8 section
+above and the P3 precedent, and nothing here claims a CI result.
+
+### 4. Capture
+
+**There is no capture path for the chain, and this section records that plainly rather than
+manufacturing a reference.** `docs/specs/message-samples/` is generated and **gitignored**
+(only its `README.md` is tracked), so no new sample can be committed (`AGENT.md` §13 forbids
+committing captures), and `tools/capture_call.py` — the generator behind `make capture` — drives
+the **number-translation** AS directly (`as_app.main.AsStack`), not the chain; it captures no
+second B2BUA. So there is no committed pcap or message-sample set of the chained flows.
+
+What **does** exist, and is reproducible from the committed tree:
+
+- The wire-level guard is the **integration and e2e tests' own recorded bytes**: the AS-side
+  `SipMessageRecorder` (`pair.as_messages`) is asserted for the full line `SIP/2.0 608 Rejected`
+  on the reject path, and the core's received INVITE (`pair.mock.uas.received_invites`) is
+  asserted for the translated number `013800138000`, the SDP body and the pass-through headers
+  across both hops. That is the wire reference for this item; it is reproduced by the ACC-P9-001
+  and ACC-P9-002 commands above, and it is not a file that can be committed.
+- `make capture` remains the reproduction command for the single-AS (number-translation) flow's
+  14 samples, but those samples show **one** B2BUA, not the chain, and they are gitignored.
+- The probe and the demo print the real per-hop `Call-ID`s and ICIDs from the wire (§1, §2), which
+  is why the correlation gap is observable without a capture file.
+
+### Item results
+
+| ID | Result |
+| --- | --- |
+| ACC-P9-001 | **accepted** — `3 passed` + `1 passed, 52 deselected`. An allowed call crosses both B2BUs (core INVITE carries `013800138000`, SDP and pass-through headers identical), chaining is configuration-only, and the one-way import independence holds |
+| ACC-P9-002 | **accepted** — `2 passed, 3 deselected`. `SIP/2.0 608 Rejected` on the trunk; zero call state at AS-2 and zero INVITEs at the core, as deltas |
+| ACC-P9-003 | **accepted** — `5 passed`; probe exit `0` with `distinct Call-IDs: 3`, `Call-ID per leg: True`, `ICID preserved: True`. Each trace is keyed on its own leg's value and not on the other's |
+| ACC-P9-004 | **accepted** — `2 passed, 51 deselected`; `tools/demo_chained_call.py` exit `0` with three `Call-ID`s and five `OK` verdict lines. The "no new port" half is not asserted (see below) |
+| ACC-P9-005 | **accepted** — the five P9 gap rows are present under the P9 heading in `docs/production-gaps.md` (grep exit `0`). Verified by the register, **not** by a test |
+
+### Evidence kinds per item
+
+| Item | Kind 1 (command + output) | Kind 2 (Call-ID log) | Kind 3 (CI) | Kind 4 (capture) |
+| --- | --- | --- | --- | --- |
+| ACC-P9-001 | yes — §1 (`3 passed`, `1 passed`) | yes — **§2**: the allow call's two keyed traces and the reject call's trace; the per-hop values are also in §1 (probe/demo) | **not producible** — §3 | **partial** — §4: the tests assert the recorded wire bytes (core INVITE, `608` line); no committed sample |
+| ACC-P9-002 | yes — §1 (`2 passed, 3 deselected`) | yes — **§2**: the reject trace keyed on `9a4a1cff…`, with no `BYE` and no second-leg event | **not producible** — §3 | **partial** — §4: the recorded bytes assert `SIP/2.0 608 Rejected`; no committed sample |
+| ACC-P9-003 | yes — §1 (`5 passed`; probe exit `0`) | yes — **§2**: the three per-leg values (`23cdbf10…`, `…-b2b_1`, `…-b2b_1-b2b_1` / probe `8030a24e…`), each trace keyed on its own value | **not producible** — §3 | **partial** — §4: per-hop `Call-ID`s and ICIDs are read off the recorded wire bytes; no committed sample |
+| ACC-P9-004 | yes — §1 (`2 passed, 51 deselected`; demo exit `0`) | yes — **§2** and §1: the demo transcript is itself Call-ID keyed (three values for the allowed call) | **not producible** — §3 | **n/a** — the demo prints the wire values; §4 records the missing capture |
+| ACC-P9-005 | yes — §1 (grep exit `0`) | **n/a** — a documentation record has no Call-ID keyed log | **not producible** — §3 | **n/a** — no wire artefact |
+
+**§2 holds the real-run Call-ID keyed traces** (the allow call's two per-instance traces and the
+reject trace), so every kind-2 reference above points at §2, with the probe/demo's explicit
+three-value output in §1. Kind 3 is the one kind P9 cannot supply (no CI can run for `phase2`);
+it is recorded honestly above, and the maintainer's post-merge `main` run replaces it then. Kind
+4 is **partial** for the chain: the tests' recorded wire bytes are the reference, and no capture
+file can be committed (`docs/specs/message-samples/` is generated and gitignored, and no capture
+tool drives the chain).
+
+### Accepted limitations and open items
+
+Consistent with the stage-4 position, and not hidden:
+
+- **`REQ-NF-018` is verified by the gap register, not by a test.** "The friction is recorded" is a
+  documentation property; the row is satisfied by the P9 section of `docs/production-gaps.md`
+  (and ADR-0008 decision 7), and no executed check asserts it. Recorded so it is not mistaken for
+  coverage.
+- **The ICID is preserved across the chain but is a per-scenario literal no surface is keyed on.**
+  The probe and the demo both measure `ICID preserved: True`, but the value is
+  `poc-{scenario.name}` (`poc-chained-allow`), the same for two calls of one scenario, and both
+  instances key their trace/log/metrics/console on the local `Call-ID`. So `REQ-NF-016`'s
+  "correlation is not solved" **stands**; the preserved ICID proves pass-through, not per-call
+  identity (ADR-0008 decision 4, gap row *Cross-AS trace correlation*).
+- **`REQ-NF-017`'s "no new port" is not asserted, and the no-new-knob check is a substring
+  heuristic.** `test_chaining_added_no_new_configuration_knob` only asserts that no declared
+  `.env.example` key contains `chain`; "no new port" is inferred from the documented port matrix
+  (`5060` / `5062` already differ), not asserted. Left as it is (the stage-4 finding: pinning the
+  whole key set would make every future knob edit this test).
+- **`REQ-F-026`'s literal "neither AS imports the other" is broader than what can be asserted.**
+  `src/anti_fraud_as/call_controller.py` imports `as_app.sip_adapter` **by design** (ADR-0007
+  decision 9); only the forbidden direction (`src/as_app` ↛ `anti_fraud_as`) is assertable and is
+  what `test_as_app_does_not_import_the_anti_fraud_as` asserts. ACC-P9-001 claims only that
+  one-way independence. The wording question is escalated as `docs/phase2-plan.md` §7 item 10,
+  not settled here (`AGENT.md` §14 rule 2).
+- **AS-2's wire recorder is built but discarded** (`tests/conftest.py`), so `REQ-F-027`'s absence
+  is proven through `tracer.known_call_ids()` rather than AS-2's received bytes. Adequate — AS-2
+  traces on INVITE — but it is a **proxy**, registered as such in the stage-4 record.
+- **The integration timing flake of `docs/phase2-plan.md` §7 item 9 is a known flake, not P9
+  friction, and it did not fire here.** It affects
+  `tests/integration/test_fraud_screening_path.py::test_a_broken_edit_keeps_the_previous_screening_data`
+  (a wall-clock race around the relayed leg's 3-second timeout). This run's `make integration`
+  was `34 passed`; the flake is registered in `docs/production-gaps.md` and left unfixed
+  (`AGENT.md` §14 rule 4).
+- **The probe and the demo run both instances in one interpreter.** The production shape is three
+  processes (LLD §10.3); the tools exercise the two instances' logic and wiring, not the process
+  boundary. `SipConf` and `ED2` are process-wide singletons, so each stack is given its own
+  `TraceRecorder` / `MetricsRegistry` (ADR-0008, *Verified facts*).
+- **No capture of the chained flows** — see §4; recorded as missing rather than manufactured.

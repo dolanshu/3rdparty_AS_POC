@@ -999,6 +999,49 @@ Two points were **recorded rather than fixed**:
   must not be done incidentally. The new repository follows a library standard, not this
   repository's application standard (D8).
 
+**P10 requirements-stage review gate — run, PASS-WITH-FINDINGS, all four findings fixed inside
+the stage (§5.2).**
+The read-only review of the requirements stage ran against commit `dab30f0`, asked the §5.2
+*Requirements* question ("completeness, testability, consistency with decisions D1–D10") and
+returned **PASS-WITH-FINDINGS — no blocker**: one major and three minor findings. The gate
+verified the diff independently — `1 file changed, 39 insertions(+)`, `0` deletions — so the
+note's claim that no Phase 1, P8 or P9 requirement is changed holds. It also confirmed:
+`REQ-F-029`'s citation of the §14 rule 3 waiver matches §8 item 2, which is "APPROVED
+2026-09-19" and does say the plan is written first and reviewed before code moves; `REQ-NF-020`
+is correctly scoped to *enable* rather than *build* P11's pluggable transport, pluggable state
+store and harness, so it does not contradict the still-`done` `REQ-NF-002` (UDP-only) — TLS
+supersession belongs to P11 (D10); the test named in `REQ-F-030`
+(`tests/unit/test_repository_baseline.py::test_as_app_does_not_import_the_anti_fraud_as`) exists
+with that exact name and asserts the stated direction; and all six new rows use the `planned`
+status vocabulary, with their `ACC-P10-001…006` references unique and correctly deferred to the
+acceptance stage.
+
+One major and three minor findings were raised. **All four were fixed inside the stage** (commit
+`91c737d`, so the stage is **not** re-reviewed — §5.2 "one review per stage, no loop"):
+
+- **(major) No requirement covered the new library's own test suite.** `REQ-F-031` only states
+  that this repository's three layers stay green; a brand-new repository has no stated testing
+  standard or gate. Fixed: `REQ-NF-021` added — the library carries its own suite and its own
+  gate (`ruff` format and lint, `mypy`, `pytest`), covering the pure helpers, the sippy adapter
+  boundary and the library-level independence assertion of `REQ-F-030`.
+- **(minor) The requirement set was silent on whether the move is staged.** Nothing said the
+  ~8000-line skeleton move is staged rather than all-or-nothing, nor what keeps the repository
+  demonstrable mid-move. Fixed: `REQ-F-033` added — the skeleton moves in steps that each leave
+  this repository building, linting and passing its three layers (D7, `AGENT.md` §10).
+- **(minor) The traceability note carried a test count that was not established verbatim
+  anywhere in the repository.** The note said "(246 tests at the time of writing)", a figure
+  only derivable by summing the `203` / `34` / `9` layer counts recorded in
+  `docs/acceptance/report.md`. Fixed: replaced with a pointer to where the counts are on record.
+- **(minor) `REQ-F-030`'s library-independence claim had no named verification.** The row asserts
+  the library imports neither `as_app` nor `anti_fraud_as`, but only the preserved one-way
+  invariant had a named test. Fixed: the row was amended to cite the library's own suite
+  (`REQ-NF-021`).
+
+`ACC-P10-007` and `ACC-P10-008` are the two new acceptance references (from `REQ-F-033` and
+`REQ-NF-021`), to be created in P10's acceptance stage like `ACC-P10-001…006`. No code has moved:
+P10's design stage has not started, and §8 item 2 requires the plan to be written and reviewed
+before any code moves.
+
 ### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 
 - **Goal.** Prove the abstraction was right by adding a **second implementation** of each

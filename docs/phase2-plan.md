@@ -1042,6 +1042,115 @@ One major and three minor findings were raised. **All four were fixed inside the
 P10's design stage has not started, and §8 item 2 requires the plan to be written and reviewed
 before any code moves.
 
+**P10 design stage (stage 2) — the ADR and the consumption probe (2026-09-19).** The stage
+produced **`docs/architecture/adr/0009-platform-library-extraction.md`** and a scratch probe of
+the `uv` consumption mechanism. **No code moved:** the commit is the new ADR plus this plan
+edit, with nothing under `src/` or `tests/`, so §8 item 2's "the plan is written and reviewed
+before any code moves" is still the operative gate and the implementation stage has not started.
+The ADR is the design answer to `REQ-F-029 … REQ-F-033` and `REQ-NF-019 … REQ-NF-021`; it does
+not restate them.
+
+The ADR settles eight decisions, in its own words:
+
+1. **The library's identity and standard.** Repository `as_platform` (sibling `../as_platform`),
+   distribution `as-platform`, import package `as_platform`; the **D8 library standard** — API
+   reference, integration guide, compatibility matrix (REQ-NF-019) — not this repository's
+   `AGENT.md` §4.1 application layout; `py.typed` and the pinned sippy travel with it.
+2. **The module split.** `observability/`, `sip_adapter`, the `errors` mechanism, the `bootstrap`
+   plumbing, the version chain, the `internal_api` shell, the controller shell (`Base*`) and the
+   stack shell move; `routing/`, `screening.py`, `caller_state.py`, `screening_data.py`, the
+   config and the entry points stay; `as_app.sip_adapter` and `as_app.observability.*` stay as
+   thin **re-export facades** so the by-path references in `tools/`, `tests/`, the ADRs and the
+   LLD keep resolving and the three layers remain the unchanged anti-regression guard.
+3. **The error model: one mechanism, per-family code sets, and the `REQ-F-023` delta.** Python
+   forbids extending an `Enum` that has members, so the library owns a **memberless `ErrorCode`
+   base** with `SIP_PHRASES`, `sip_status_for` and `AsError`; the skeleton codes
+   (`AS-CFG-*`, `AS-PEER-*`, `AS-INT-*`) become `SkeletonErrorCode`, the translation codes stay
+   in `src/as_app/errors.py`, and the anti-fraud gains `FraudErrorCode` in its own package.
+   Every code, status and message is byte-identical (REQ-F-031), but `REQ-F-023` and `AGENT.md`
+   §4.3 name a **location** (`src/as_app/errors.py`) that the split moves — a wording delta,
+   escalated the way §7 item 10 was rather than reworded by a stage (§5.2).
+4. **The controller seam and `PolicyDecision`.** `BaseCallController.apply_call_policy()` keeps
+   the LLD's "single seam" name and calls one application hook, `decide(event) ->
+   PolicyDecision`; `PolicyDecision` is plain data (`action`, `outbound_event`, `next_hops`,
+   `error`, `disposition`, `attributes`), so the base applies a decision without knowing either
+   use case's vocabulary. The base owns the failover form of `_relay_from_next_hop`; the
+   anti-fraud's one-element hop list reproduces its no-failover behaviour exactly. The one-leg
+   relaxation of LLD §9.6 becomes a stated base invariant, not an anti-fraud special case.
+5. **The two pluggable seams are interfaces only** (REQ-NF-020): `Transport` / `UdpTransport` and
+   `StateStore` / `InMemoryStateStore`, one implementation each. No second transport, no external
+   store, no load harness; the state-store seam sits **under** `CallerStateStore`, which stays
+   process-level and out of the per-call controller (D9, LLD §9.2). The capacity harness is a
+   P11 capability and is not a seam.
+6. **Consumption: `[project].dependencies` plus `[tool.uv.sources] as-platform = { path =
+   "../as_platform", editable = true }`.** `editable = true` is required by the staged extraction
+   (a step edits the library and runs this gate against it). Four measured properties shape it,
+   below.
+7. **The staged extraction: seven steps, each leaving `make lint` clean and all three layers
+   green** (REQ-F-033, D7, `AGENT.md` §10) — (1) create the library and add the path dependency,
+   no code moves; (2) move the leaf modules with the facades; (3) move the version chain and
+   bootstrap plumbing; (4) move the controller shell and rewire both controllers to `decide()`;
+   (5) move and generalise `internal_api`; (6) add the two seams; (7) give the library its own
+   suite, gate, independence assertion and documents. The order is by dependency; step 4 is the
+   only step that can change behaviour and is guarded by the three layers plus
+   `tools/chained_as_probe.py`.
+8. **`AGENT.md` §10 is restated, not weakened:** "clone **both** repositories side by side →
+   `uv sync` → `make demo`", recorded as an explicit exception (REQ-F-032); the library carries
+   its **own** gate (REQ-NF-021), which does not replace this repository's three layers.
+
+**The consumption probe (design instrument, run and recorded in this stage).** A scratch probe
+under `/tmp/p10probe` — a throwaway `as_platform` (`VERSION` 0.4.0) and seven consumer variants
+(six top-level, one nested), each varying one `pyproject.toml` key — settled the mechanism of
+ADR-0009 decision 6. **It is
+not committed**, unlike `tools/anti_fraud_probe.py` (ADR-0007) and `tools/chained_as_probe.py`
+(ADR-0008): the recorded output is the evidence. Tool versions `uv 0.12.15`, CPython `3.10.12`.
+Four facts are **not** what a reader would assume, and each is now a stated property of the
+decision rather than a surprise in the implementation stage:
+
+- **The source is mandatory.** A dependency key alone does not resolve — `uv sync` fails with
+  *"Because as-platform was not found in the package registry … your project's requirements are
+  unsatisfiable"*.
+- **The default is a copy, not a link.** A `path` source with no `editable` key installs a
+  non-editable copy (`direct_url.json` → `{"dir_info":{"editable":false}}`); `editable = false`
+  is the explicit spelling of the same thing; only `editable = true` produces the
+  `_editable_impl_as_platform.pth` link.
+- **The version pin is ignored.** `dependencies = ["as-platform>=99.0"]` with a `path` source
+  installed the checkout's `0.4.0` and exited `0`, so the pin is not a guard.
+- **The lock is the guard and `--frozen` is not.** With the library bumped `0.4.0` → `0.5.0`,
+  `uv sync --locked` refused (*"The lockfile at `uv.lock` needs to be updated, but `--locked`
+  was provided"*) while `uv sync --frozen` accepted the skew and installed `0.5.0` silently.
+  `py.typed` is a hard requirement for the same reason the lock is: without it `mypy` reports
+  `Skipping analyzing "as_platform": … missing library stubs or py.typed marker [import-untyped]`
+  and `make lint` fails. The `path` is resolved relative to the consuming `pyproject.toml`, so
+  `../as_platform` means a sibling of this repository's root and a deeper nesting does not find
+  it — which is what makes REQ-F-032's "side by side" exact.
+
+**Obligations this design places on the implementation commit** (all stated in ADR-0009, none
+performed here): `AGENT.md` §10 (the restated clean-checkout sentence) and §4.3 (the error model's
+location, only if the maintainer rules that way), `README.md` and `docs/README.md` (the second
+checkout and the **ADR index range**, which both read "ADR-0001 … ADR-0008" today), the
+`docs/production-gaps.md` rows the ADR's *Gaps accepted* lists (no versioned consumption; the
+interface induced from two instances; no second transport / store / harness; no mock or console
+in the library; the naming debt; the library gate not in this repository's CI; the `REQ-F-023`
+location delta; the scratch probe), and `ACC-P10-*` in the acceptance stage.
+
+**Unsettled, and recorded rather than hidden.**
+
+- **The HLD/LLD deltas that §5.1 also assigns to the design stage are not written.** The ADR
+  states what they must contain (a new LLD section naming the library boundary; the HLD deployment
+  view showing two repositories), but neither file is edited in this stage. They are the next
+  artefact before any code moves; the reason they are small is that the extraction changes no
+  observable behaviour (REQ-F-031) and LLD §9.1 already states the shared/use-case-specific
+  boundary.
+- **The error-model split forces one bounded test edit** (ADR-0009 decision 3): a unit test that
+  reads `AsErrorCode.CFG_*` / `PEER_*` / `FRAUD_*` must import the member from the family enum
+  that now owns it. The **assertions are unchanged**; only the module the member is read from
+  changes, because the member genuinely moved. This is the one place where the traceability
+  note's literal *"If that suite has to change to accommodate the extraction, the extraction is
+  wrong, not the tests"* meets the split, and it is reported plainly rather than smoothed over.
+- **`REQ-F-023` and `AGENT.md` §4.3 name a location the split moves**, and a stage may not reword
+  a frozen requirement (§5.2). Escalated to the maintainer, like §7 item 10.
+
 ### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 
 - **Goal.** Prove the abstraction was right by adding a **second implementation** of each

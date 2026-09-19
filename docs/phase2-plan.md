@@ -523,7 +523,7 @@ stills ship the defect, and the repository cancels what it armed itself, from it
 
 | Item | Branch | Repository |
 | --- | --- | --- |
-| P8a timer fix | `fix/sippy-retransmission-timer` | this one |
+| P8a timer fix | `fix/sippy-retransmission-timer` (deleted after the merge) | this one |
 | **Phase 2 integration (P8–P11)** | **`phase2`** — long-lived, created once from `main` | this one |
 | **P8 anti-fraud AS** | **`phase2`** — worked directly on the integration branch | this one |
 | P9 chained demo | `feat/chained-as-demo` — **on demand only**; otherwise worked on `phase2` | this one |

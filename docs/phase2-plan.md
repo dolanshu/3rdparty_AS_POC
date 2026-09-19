@@ -736,6 +736,56 @@ suite follow both legs now that they really do differ. Finding (C), the timing f
 still registered and not fixed. **Stage 4 (the three test layers) is next**; the acceptance
 items `ACC-P9-001…005` and their §4.8 evidence are stage 5 and do not exist yet.
 
+**Stage-4 review gate — run, clean, four non-blocking findings recorded (§5.2).** The
+read-only review of the tests ran against commit `a14acf4`, asked the §5.2 *Tests* question
+("the tests genuinely fail without the change, coverage matches the requirements"). **No
+blocking finding.** The reviewer reproduced the red signal in its own way rather than
+accepting the producer's word for it: a pytest plugin kept **outside** the repository
+replaced only the controller's module-level `outbound_call_id` reference with the identity
+— the pre-fix reuse, without touching the working tree — and the guards went red at exactly
+the two points the producer recorded (`tests/integration/test_chained_topology.py:189`,
+`tests/e2e/test_chained_call_flows.py:162`) **while the traversal test stayed green**, which
+is what shows the per-leg assertions guard the requirement rather than something incidental.
+Coverage was checked row by row: REQ-F-025 (integration and e2e, far-end evidence), REQ-F-026
+(structural unit test), REQ-F-027 (delta absences at AS-2 and the core plus the literal
+`SIP/2.0 608 Rejected` on the wire), REQ-F-028 / REQ-NF-016 (three wire `Call-ID`s, each
+tracer keyed on its own trunk value and asserted **not** to be keyed on the other's), and
+REQ-NF-017 (the target plus the four documents); REQ-NF-018 is correctly not a test target,
+being the recorded-friction row. The fixture was confirmed to wire the chain **by
+configuration only**, to give each stack its own registry and recorder, and to release AS-2
+in `stop()`; scope was confirmed to be exactly the four test files
+(`git diff --name-only a14acf4^ a14acf4`); the four gates were reproduced (lint clean, unit
+203, integration 34, e2e 9), the known flake of §7 item 9 did **not** fire, and
+`git status --short` was empty after the review.
+
+Four non-blocking findings, **recorded and none fixed inside the stage**:
+
+- **REQ-F-026's literal wording is broader than the invariant that can be asserted, and this
+  is escalated, not settled here.** The row reads "neither AS imports the other", but
+  `src/anti_fraud_as/call_controller.py` imports `as_app.sip_adapter` **by design**
+  (ADR-0007 decision 9), so only the forbidden direction (`src/as_app` ↛ `anti_fraud_as`) is
+  assertable and only it is asserted — the unit test says so in its docstring. Rewording a
+  frozen requirement is not a call a stage review may take (§5.2), so it becomes §7 item 10
+  for the maintainer. Recorded precisely because the assertion is **narrower** than the
+  requirement's text: the gap is in the wording, not in the test.
+- **REQ-NF-017's "no new port" is not asserted, and the no-new-knob check is a substring
+  heuristic** (`.env.example` keys containing `chain`). Left as it is: pinning the whole
+  declared key set would make every future knob edit this test, which is more machinery than
+  the finding warrants.
+- **AS-2's wire recorder is built but discarded** (`tests/conftest.py`), so REQ-F-027's
+  absence is proven through `tracer.known_call_ids()` rather than through AS-2's received
+  bytes. Adequate — AS-2 traces on INVITE — but it is a proxy, and it is registered as one.
+- **Two assertions are implied by the ones above them** (`test_chained_topology.py:191`,
+  `test_chained_call_flows.py:163`). Redundant, not vacuous: both compare observed wire values.
+
+**State after stage 4.** Stages 1–4 are complete and their review gates have run; the test
+layer landed as `a14acf4` (the `ChainedPair` fixture, the integration and e2e chained flows,
+and the two structural unit invariants), adding 3 unit, 3 integration and 2 e2e tests with no
+`src/`, `config/`, `docs/` or `Makefile` change riding along. The P9 requirement rows are
+still `planned` in the SRS, which is correct: they close with the acceptance items in stage 5.
+**Stage 5 (the acceptance items `ACC-P9-001…005` and their §4.8 evidence) is next**, followed
+by the item close of §5.4.
+
 ### P9.5 — Read-only capacity probe
 
 - **Goal.** Discover where the capacity boundary is. **Do not change the skeleton** — add a
@@ -1118,6 +1168,18 @@ Not blocking, but each must be handled rather than discovered mid-implementation
    setting, or wait on the trace event rather than on wall-clock — not to widen the timeout.
    The same precedent as item 7: register the harness defect rather than improvise a fix
    inside the item that happened to observe it.
+10. **`REQ-F-026`'s wording versus the invariant that can be asserted — escalated to the
+   maintainer 2026-09-19, by the stage-4 review gate of §3 P9.** The row says the two AS
+   instances stay independent processes and that "neither AS imports the other", but
+   `src/anti_fraud_as/call_controller.py` imports `as_app.sip_adapter` **by design** — the
+   reuse of the use-case-agnostic skeleton, ADR-0007 decision 9 — so only `src/as_app` ↛
+   `anti_fraud_as` is assertable, and only that direction is asserted
+   (`tests/unit/test_repository_baseline.py`). The behaviour is correct and the test is
+   honest; the **wording** is looser than the fact. A stage review may not reword a frozen
+   requirement (§5.2), so the maintainer's call is: leave the row as it is and read
+   "neither imports the other" as the one-way dependency it was meant to be, or tighten the
+   clause to name the direction (which would also touch ADR-0008 decision 1, which repeats
+   the phrase). **Registered, not fixed, and not blocking** — nothing in P9 depends on it.
 
 ## 8. Decisions requiring maintainer approval
 

@@ -31,6 +31,7 @@ from __future__ import annotations
 import pytest
 
 from as_app.observability.tracing import CallTrace
+from as_app.sip_adapter import outbound_call_id
 from s_sbc_mock.uac import CallScenario
 
 pytestmark = pytest.mark.e2e
@@ -90,12 +91,14 @@ def test_an_allowed_call_runs_invite_to_bye(
     assert outcome.status == 200, f"caller saw {outcome.status} instead of 200 OK"
     assert outcome.released is True
 
-    # The core side of the mock is the far end, and it saw the same call with the same
-    # called number: the anti-fraud AS relays, it does not translate.
+    # The core side of the mock is the far end, and it saw the relayed leg with its own
+    # derived Call-ID (not the trunk one) and the same called number: the anti-fraud AS
+    # relays, it does not translate (LLD section 2.3, REQ-NF-016).
     invites = list(fraud_trunk_pair.mock.uas.received_invites)
     assert invites, "no INVITE reached the core side of the mock"
     received = invites[0]
-    assert received.call_id == call_id
+    assert received.call_id == outbound_call_id(call_id)
+    assert received.call_id != call_id
     assert received.called_number == "+8613800138000"
     assert received.body == scenario.sdp_offer.strip()
 

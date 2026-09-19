@@ -20,6 +20,16 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   and every failover hop reuses the same value. `CallController.call_id` stays the trunk
   Call-ID for the log/trace correlation key. The message samples and the affected acceptance
   items (ACC-M1-002 / ACC-M1-005 / ACC-M2-005) were re-tested.
+- The **anti-fraud AS** had its **own copy of the same defect** on its outbound leg:
+  `FraudCallController._originate_allowed` built `CCEventTry(event.getData())`, keeping the
+  trunk Call-ID in element `[0]`, so the inter-AS leg reused the S-CSCF's identity. It now
+  derives a fresh `SipCallId` with the shared `as_app.sip_adapter.outbound_call_id()`, exactly
+  as the number-translation controller does, and rebuilds the event with every other element
+  (the called number included) unchanged. The file exists only on `phase2`, which is why the
+  Phase 1 fix could not reach it; the fix is what turns `tools/chained_as_probe.py` green
+  (`Call-ID per leg: True`, `distinct Call-IDs: 3`). `FraudCallController.call_id` stays the
+  trunk Call-ID. The integration and e2e assertions that encoded the old behaviour were
+  updated to assert the derived value and its difference from the trunk one.
 
 ## [0.6.0] - 2026-09-19 — P8 anti-fraud AS (Phase 2)
 

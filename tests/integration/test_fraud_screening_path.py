@@ -255,9 +255,13 @@ def test_a_block_listed_caller_is_answered_608_and_never_reaches_the_core(
         fraud_trunk_pair, "screening-reject-control", ALLOWED_CALLER
     )
     received_call_ids = [invite.call_id for invite in fraud_trunk_pair.mock.uas.received_invites]
-    assert received_call_ids == [allowed_call_id], (
+    assert received_call_ids == [outbound_call_id(allowed_call_id)], (
         f"the core-side recorder is not observing the relayed call: {received_call_ids}"
     )
+    # The regression made explicit: the relayed leg carries its own dialog identity, derived
+    # from the trunk Call-ID, so the core never sees the S-CSCF's value (REQ-NF-016, LLD
+    # section 10.2). A controller that forgot the derivation would reuse the trunk value.
+    assert outbound_call_id(allowed_call_id) != allowed_call_id
 
 
 def test_a_caller_that_never_declared_sip_608_is_still_answered_608(fraud_trunk_pair) -> None:
@@ -447,7 +451,11 @@ def test_an_invite_without_a_calling_identity_is_allowed(fraud_trunk_pair) -> No
 
     # The call was relayed: the fail-open path is an allow, not a silent drop.
     assert fraud_trunk_pair.mock.uas.received_invites, "the allowed call was not relayed"
-    assert fraud_trunk_pair.mock.uas.received_invites[0].call_id == call_id
+    # The relayed leg derives its own Call-ID from the trunk value; the core sees the
+    # ``-b2b_1`` form, never the trunk identity (REQ-NF-016, LLD section 10.2).
+    relayed_call_id = fraud_trunk_pair.mock.uas.received_invites[0].call_id
+    assert relayed_call_id == outbound_call_id(call_id)
+    assert relayed_call_id != call_id
 
 
 # ---------------------------------------------------------------------------

@@ -38,7 +38,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from typing import Any
+from typing import Any, Final
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,6 +49,7 @@ from as_app.observability.tracing import CallTrace, TraceEvent, TraceRecorder
 from as_app.routing.rules import RuleSet, RuleSetStore
 
 __all__ = [
+    "INSTANCE_NAME",
     "INTERNAL_API_ROUTES",
     "InternalApiServer",
     "create_internal_api_app",
@@ -58,6 +59,12 @@ __all__ = [
     "trace_payload",
     "traces_payload",
 ]
+
+#: Stable machine identity of this AS instance, reported on ``GET /healthz``. Both AS
+#: processes share one console page, so the page has to be able to say which of them it is
+#: displaying (P8, ADR-0007); the identity is what it renders — never the port, which is
+#: configuration.
+INSTANCE_NAME: Final[str] = "number-translation"
 
 #: Endpoints the console may use. Address and port come from ``INTERNAL_API_*``
 #: (``AGENT.md`` section 8).
@@ -79,19 +86,27 @@ _WS_POLL_SECONDS = 1.0
 _WS_MAX_TRACES = 50
 
 
-def health_payload(*, version: str, uptime_seconds: float, rule_set_loaded: bool) -> dict[str, Any]:
+def health_payload(
+    *,
+    version: str,
+    uptime_seconds: float,
+    rule_set_loaded: bool,
+    instance: str = INSTANCE_NAME,
+) -> dict[str, Any]:
     """Build the health endpoint payload.
 
     Args:
         version: Version of the AS.
         uptime_seconds: Seconds since process start.
         rule_set_loaded: Whether a rule set is active.
+        instance: Machine identity of the instance answering; defaults to this module's.
 
     Returns:
         The health document served on ``GET /healthz``.
     """
     return {
         "status": "ok" if rule_set_loaded else "degraded",
+        "instance": instance,
         "version": version,
         "uptime_seconds": round(uptime_seconds, 3),
         "rule_set_loaded": rule_set_loaded,

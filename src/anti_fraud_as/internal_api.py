@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from typing import Any
+from typing import Any, Final
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +41,7 @@ from as_app.observability.metrics import MetricsRegistry
 from as_app.observability.tracing import CallTrace, TraceEvent, TraceRecorder
 
 __all__ = [
+    "INSTANCE_NAME",
     "INTERNAL_API_ROUTES",
     "InternalApiServer",
     "create_internal_api_app",
@@ -50,6 +51,12 @@ __all__ = [
     "trace_payload",
     "traces_payload",
 ]
+
+#: Stable machine identity of this AS instance, reported on ``GET /healthz``. Both AS
+#: processes are rendered by one console page, so the page has to be able to say which of
+#: them it is displaying (ADR-0007); the identity is what it renders — never the port, which
+#: is configuration.
+INSTANCE_NAME: Final[str] = "anti-fraud"
 
 #: Endpoints the console may use. Address and port come from ``FRAUD_INTERNAL_API_*``.
 INTERNAL_API_ROUTES: dict[str, str] = {
@@ -71,24 +78,39 @@ _WS_MAX_TRACES = 50
 
 
 def health_payload(
-    *, version: str, uptime_seconds: float, screening_data_loaded: bool
+    *,
+    version: str,
+    uptime_seconds: float,
+    screening_data_loaded: bool,
+    instance: str = INSTANCE_NAME,
 ) -> dict[str, Any]:
     """Build the health endpoint payload.
+
+    Three readiness keys are reported, and the reasons differ:
+
+    * ``instance`` — the machine identity of this process, so the console can say
+      unambiguously which AS it is displaying.
+    * ``screening_data_loaded`` — the **honest** readiness key of this instance: the
+      anti-fraud AS is ready when its screening data is active.
+    * ``rule_set_loaded`` — a **compatibility key only**. The anti-fraud AS has no rule set;
+      it is reported with the screening-data state so the one shared console page renders
+      both instances without special-casing which one it is looking at. A consumer that
+      means "is this instance ready" should read the honest key.
 
     Args:
         version: Version of the AS.
         uptime_seconds: Seconds since process start.
         screening_data_loaded: Whether screening data is active.
+        instance: Machine identity of the instance answering; defaults to this module's.
 
     Returns:
         The health document served on ``GET /healthz``.
     """
     return {
         "status": "ok" if screening_data_loaded else "degraded",
+        "instance": instance,
         "version": version,
         "uptime_seconds": round(uptime_seconds, 3),
-        # The fraud AS has no rule set; the key is kept so one console page can render both
-        # instances without special-casing which one it is looking at.
         "rule_set_loaded": screening_data_loaded,
         "screening_data_loaded": screening_data_loaded,
     }

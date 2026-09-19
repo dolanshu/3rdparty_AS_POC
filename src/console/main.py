@@ -70,6 +70,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 </style></head><body>
 <div class="sb" id="sb">
 <div class="si"><span class="dot" id="aDot"></span><span class="sv" id="aSt">connecting</span></div>
+<div class="si"><span class="sl">instance</span><span class="sv" id="aInst">-</span></div>
 <div class="si"><span class="sl">ver</span><span class="sv" id="aVer">-</span></div>
 <div class="si"><span class="sl">uptime</span><span class="sv" id="aUp">-</span></div>
 <div class="si"><span class="sl">calls</span><span class="sv" id="aCal">0</span></div>
@@ -119,6 +120,8 @@ function E(i){return document.getElementById(i)}function C(n){n.innerHTML=""}fun
 function esc(s){if(s===null||s===undefined)return"";return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
 async function fh(){try{var r=await fetch(A+"/healthz");hd=await r.json();E("aSt").textContent=hd.status;
 E("aDot").className="dot "+(hd.status==="ok"?"ok":"er");E("aVer").textContent=hd.version||"-";
+E("aInst").textContent=hd.instance||"-";
+document.title=(hd.instance?hd.instance+" - ":"")+"3rd-party AS Console";
 E("aUp").textContent=Math.round(hd.uptime_seconds||0)+"s"}catch(e){E("aSt").textContent="unreachable";E("aDot").className="dot er"}}
 async function fm(){try{var r=await fetch(A+"/api/v1/metrics");md=await r.json();E("aCal").textContent=md.calls_total||0;
 var p=Object.entries(md.peer_status||{}).map(function(x){return x[0]+":"+x[1]}).join(", ");E("aPeer").textContent=p||"-";
@@ -145,17 +148,21 @@ if(ha){r.onclick=function(){var dl=r.querySelector(".ea");if(!dl.innerHTML){Obje
 var dt=document.createElement("dt");dt.textContent=kv[0]+":";var dd=document.createElement("dd");
 dd.textContent=typeof kv[1]==="object"?JSON.stringify(kv[1]):String(kv[1]);dl.appendChild(dt);dl.appendChild(dd)})}
 dl.classList.toggle("vis")}}c.appendChild(r)})}
-function utopo(t){var b=E("topo");var ho=t.events&&t.events.some(function(e){return e.direction==="out"});
-var rv=t.events?t.events.find(function(e){return e.rule_id}):null;
+function utopo(t){var b=E("topo");var evs=t.events||[];
+var vv=evs.find(function(e){return e.attributes&&e.attributes.verdict});
+var v=vv?vv.attributes.verdict:null;var rv=evs.find(function(e){return e.rule_id});
+var ho=v?v==="allow":evs.some(function(e){return e.direction==="out"});
+var inst=(hd&&hd.instance)?hd.instance:"AS";
 var ac=ho?"var(--in)":"var(--mut)",lc=ho?"var(--acc)":"var(--bd)";
 var la=ho?' stroke-dasharray="4 2"><animate attributeName="stroke-dashoffset" from="0" to="-12" dur=".5s" repeatCount="indefinite"/></line>':"/>";
-b.innerHTML='<svg width="210" height="46" viewBox="0 0 210 46" xmlns="http://www.w3.org/2000/svg">'+
-'<rect x="2" y="11" width="56" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/><text x="30" y="27" text-anchor="middle" fill="var(--mut)" font-size="10">S-SBC</text>'+
-'<line x1="58" y1="23" x2="104" y2="23" stroke="'+lc+'" stroke-width="2"'+la+
-'<rect x="104" y="11" width="40" height="24" rx="4" fill="var(--p2)" stroke="'+ac+'"/><text x="124" y="27" text-anchor="middle" fill="'+ac+'" font-size="10">AS</text>'+
-'<line x1="144" y1="23" x2="188" y2="23" stroke="'+lc+'" stroke-width="2"'+la+
-'<rect x="188" y="11" width="20" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/><text x="196" y="27" text-anchor="middle" fill="var(--mut)" font-size="8">NH</text>'+
-(rv?'<text x="106" y="9" fill="var(--rule)" font-size="9">'+esc(rv.rule_id)+"</text>":"")+"</svg>"}
+var tag=v?esc(v):(rv?esc(rv.rule_id):"");
+b.innerHTML='<svg width="300" height="50" viewBox="0 0 300 50" xmlns="http://www.w3.org/2000/svg"><title>'+esc(inst)+'</title>'+
+'<rect x="2" y="14" width="58" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/><text x="31" y="30" text-anchor="middle" fill="var(--mut)" font-size="10">S-SBC</text>'+
+'<line x1="60" y1="26" x2="104" y2="26" stroke="'+lc+'" stroke-width="2"'+la+
+'<rect x="104" y="14" width="110" height="24" rx="4" fill="var(--p2)" stroke="'+ac+'"/><text x="159" y="30" text-anchor="middle" fill="'+ac+'" font-size="9">'+esc(inst)+"</text>"+
+'<line x1="214" y1="26" x2="252" y2="26" stroke="'+lc+'" stroke-width="2"'+la+
+'<rect x="252" y="14" width="46" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/><text x="275" y="30" text-anchor="middle" fill="var(--mut)" font-size="9">next hop</text>'+
+(tag?'<text x="106" y="11" fill="var(--rule)" font-size="9">'+tag+"</text>":"")+"</svg>"}
 async function fr(){try{var r=await fetch(A+"/api/v1/rules");rd=await r.json();
 if(cv==="rules")rr();if(cv==="configuration")rcfg()}catch(e){}}
 function rr(){if(!rd)return;var h=E("nhT").querySelector("tbody");C(h);

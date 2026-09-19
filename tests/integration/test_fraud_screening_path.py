@@ -52,7 +52,7 @@ from typing import Any
 import pytest
 
 from anti_fraud_as.caller_state import CallerStateStore, WindowPolicy
-from as_app.sip_adapter import PASSTHROUGH_HEADERS, TRANSACTION_TIMER_NAMES
+from as_app.sip_adapter import PASSTHROUGH_HEADERS, TRANSACTION_TIMER_NAMES, outbound_call_id
 from s_sbc_mock.uac import CallScenario
 
 pytestmark = pytest.mark.integration
@@ -160,7 +160,7 @@ def invites_of(recorder: Any, call_id: str, direction: str) -> list[Any]:
     """
     return [
         message
-        for message in recorder.messages_for(call_id)
+        for message in recorder.messages_for_any((call_id, outbound_call_id(call_id)))
         if message.direction == direction and message.text.startswith("INVITE ")
     ]
 
@@ -219,7 +219,9 @@ def test_a_block_listed_caller_is_answered_608_and_never_reaches_the_core(
     # the phrase is asserted on the wire, not only against the constant table.
     response_lines = [
         message.text.split("\r\n", 1)[0]
-        for message in fraud_trunk_pair.as_messages.messages_for(call_id)
+        for message in fraud_trunk_pair.as_messages.messages_for_any(
+            (call_id, outbound_call_id(call_id))
+        )
         if message.direction == "out" and message.text.startswith("SIP/2.0 ")
     ]
     assert "SIP/2.0 608 Rejected" in response_lines, (

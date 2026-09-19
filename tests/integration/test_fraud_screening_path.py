@@ -260,8 +260,9 @@ def test_a_block_listed_caller_is_answered_608_and_never_reaches_the_core(
     )
     # The regression made explicit: the relayed leg carries its own dialog identity, derived
     # from the trunk Call-ID, so the core never sees the S-CSCF's value (REQ-NF-016, LLD
-    # section 10.2). A controller that forgot the derivation would reuse the trunk value.
-    assert outbound_call_id(allowed_call_id) != allowed_call_id
+    # section 10.2). A controller that forgot the derivation would reuse the trunk value, so
+    # the observed far-side Call-ID must differ from the trunk one.
+    assert received_call_ids[0] != allowed_call_id
 
 
 def test_a_caller_that_never_declared_sip_608_is_still_answered_608(fraud_trunk_pair) -> None:

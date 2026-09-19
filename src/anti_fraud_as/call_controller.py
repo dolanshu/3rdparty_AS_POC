@@ -17,7 +17,9 @@
 :class:`FraudCallMap` is the process-wide trunk entry point: it enforces the peer allowlist
 and creates one :class:`FraudCallController` per call. The controller takes the verdict for
 **this** call in :meth:`FraudCallController.apply_call_policy` and then either relays the
-INVITE unchanged (allow) or answers it from the answering leg (reject).
+INVITE or answers it from the answering leg (reject). On the allow path the INVITE is relayed
+with the pass-through header set and an unchanged SDP body, while the outbound leg gets its
+own dialog ``Call-ID`` derived from the trunk one (``docs/architecture/lld.md`` section 2.3).
 
 **The reject path is UAS behaviour, not B2BUA** (``docs/phase2-plan.md`` section 3, P8
 "Known collisions"): no second leg is ever originated, so ``uaO`` stays ``None`` and the

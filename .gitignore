@@ -25,6 +25,9 @@ htmlcov/
 captures/
 artifacts/
 
+# Local scratch directory (never committed)
+tmp/
+
 # Generated sample captures (regenerate with `make capture`)
 docs/specs/message-samples/*.txt
 

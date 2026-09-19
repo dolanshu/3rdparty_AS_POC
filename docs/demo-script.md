@@ -1,13 +1,13 @@
 # Demo script
 
-Duration: 5–10 minutes. Audience: architecture reviewers and operator-side reviewers.
-Rehearse it before showing it; if the script and `make demo` disagree, both are wrong
-(`AGENT.md` section 10).
+Duration: 5–10 minutes (8–12 with the anti-fraud section, §5a). Audience: architecture
+reviewers and operator-side reviewers. Rehearse it before showing it; if the script and
+`make demo` disagree, both are wrong (`AGENT.md` section 10).
 
-**Status:** the whole script runs (M0–M3 are complete): the stack probe, the rule data, a
-real translated call, the failure branches and the operations console. Every command below
-was rehearsed for M4; the run that recorded the evidence is in
-`docs/acceptance/report.md`.
+**Status:** the whole script runs. Sections 1–7 are the Phase 1 path (M0–M4): the stack probe,
+the rule data, a real translated call, the failure branches and the operations console — every
+one of them rehearsed for M4. Section 5a is the Phase 2 addition, `make demo-fraud`, rehearsed
+for P8. The runs that recorded the evidence are in `docs/acceptance/report.md`.
 
 ## 0. Setup (before the audience arrives)
 
@@ -93,6 +93,36 @@ Each branch is a call of its own — `make demo` takes the called number as an a
 
 A rejected call exits non-zero on purpose: the tool reports whether the call was answered.
 The rejection itself is the point being demonstrated.
+
+## 5a. The second AS — anti-fraud screening (2 minutes)
+
+```bash
+make demo-fraud        # two calls through the anti-fraud AS: one allowed, one rejected
+```
+
+> "Phase 2 adds a second, independently runnable AS process at the same trunk boundary. This
+> one does not translate anything: it inspects the **calling** party and returns a verdict.
+> A caller the screening data allows is relayed towards the core unchanged; a caller on the
+> block list is answered `608 Rejected` (RFC 8688) by the AS itself — no second leg, no media
+> announcement, and no `Call-Info`. The `608` is what a generic `403` or `603` cannot say: an
+> automated anti-fraud engine made the decision."
+
+What the reviewer should see, in the transcript `make demo-fraud` prints:
+
+1. The topology line `emulated S-CSCF --UDP--> anti-fraud AS (608 Rejected) --UDP--> emulated
+   core network` and the screening file in use (`config/caller_screening.yaml`).
+2. The fixed verdict order: `allow list -> block list -> call-rate window -> reputation`.
+3. Call 1 (`+86216180001`): `verdict: allow`, `signal: none`, `final status: 200`,
+   `core INVITE delta 1` — the allowed call really reached the emulated core.
+4. Call 2 (`+8613400000001`): `verdict: reject`, `signal: block_list`,
+   `list entry: BL-0001`, `final status: 608`, `second leg: none ... (RFC 8688, no
+   Call-Info)`, `core INVITE delta 0` — the rejected call never reached the core, because the
+   reject path is UAS behaviour and originates no second leg.
+
+Point out that each demo allocates its own ephemeral ports, so this section and `make demo`
+do not interfere with each other, and that the number-translation path is unchanged: a second
+AS is a second use case, not a change to the first one. `make demo-fraud` writes nothing, so it
+is as repeatable as `make demo`.
 
 ## 6. The console (1 minute)
 

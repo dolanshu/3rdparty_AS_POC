@@ -168,6 +168,58 @@ Expect: `1 passed`.
 Warning: do NOT use `+8613900000000` for the 404 branch — `+86139` is a China Mobile prefix
 covered by `R-MOB-CM-40`, so that number is translated and routed normally.
 
+#### 1.5 `make demo-fraud` — the anti-fraud AS (Phase 2, P8)
+
+```bash
+make demo-fraud        # two calls through the anti-fraud AS: one allowed, one rejected with 608
+```
+
+Shows: the screening verdict for a caller the data allows and for a caller on the block list,
+and that the rejected call never reaches the core.
+
+```text
+anti-fraud AS POC - screening demo
+topology   : emulated S-CSCF --UDP--> anti-fraud AS (608 Rejected) --UDP--> emulated core network
+ports      : anti-fraud-as 127.0.0.1:47280, trunk 47064, core 48564
+screening  : config/caller_screening.yaml
+verdict    : allow list -> block list -> call-rate window -> reputation
+
+[1/2] call allowed and relayed
+caller       : +86216180001
+verdict      : allow
+signal       : none
+reason       : no screening signal rejected the call
+sip.608 declared: True
+final status : 200
+released     : True
+
+      expected SIP 200, observed 200; core INVITE delta 1
+
+[2/2] call rejected with 608
+caller       : +8613400000001
+verdict      : reject
+signal       : block_list
+reason       : calling party is on the block list
+list entry   : BL-0001
+sip.608 declared: True
+final status : 608
+second leg   : none - the AS answered from the UAS side (RFC 8688, no Call-Info)
+
+      expected SIP 608, observed 608; core INVITE delta 0
+
+demo result: allow relayed to the core, reject answered 608 by the AS alone
+```
+
+Expect: `expected SIP 200, observed 200; core INVITE delta 1` for the allowed call and
+`expected SIP 608, observed 608; core INVITE delta 0` for the rejected one; exit status 0.
+The blocked caller is the first entry of `config/caller_screening.yaml`; swap it with
+`--blocked-caller` to screen a different number.
+
+Note: the demo tool does not install an application log handler, so the reject path's
+`WARNING` record can appear as a bare `call rejected by screening` line on stderr, interleaved
+with the transcript. It is cosmetic and changes no verdict (recorded in the P8 section of
+`docs/acceptance/report.md`).
+
 ### Part 2 — The console (long-running; independent of Part 1)
 
 The console reads a long-running AS over its internal API. The one-shot calls in Part 1

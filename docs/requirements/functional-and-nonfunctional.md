@@ -27,15 +27,15 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-F-013 | All configuration comes from the environment; switching from the mock to a real S-SBC is a configuration change only. | done | M0 | ACC-M0-005 |
 | REQ-F-014 | Startup self-check (configuration schema, rules parse and validation, port availability, peer sanity) and fail-fast on invalid configuration. | done | M0 | ACC-M0-005 |
 | REQ-F-015 | An internal error model maps `AS-*` codes to SIP status codes and log messages. | done | M0 | ACC-M0-007 |
-| REQ-F-016 | The anti-fraud AS runs as a **second, independently runnable process** reusing the shared skeleton, with its own SIP listen ports, its own declarative data file under `config/` and its own console feed; it owns its lifecycle — a startup self-check and a stop path that cancels every timer it armed (D6, P8a lesson). | planned | P8 | ACC-P8-001 |
-| REQ-F-017 | On INVITE the AS inspects the **calling** party and produces a **verdict** — allow or reject. On allow the INVITE is relayed as a B2BUA: the Request-URI (never rewritten) and the SDP body are kept and the pass-through header set is copied, with **no header added**; on reject the call is answered from the UAS side. `Feature-Caps` is not in that pass-through set, so the `sip.608` declaration does not cross the AS (D4, ADR-0007 decision 6). | planned | P8 | ACC-P8-002 |
-| REQ-F-018 | The verdict is computed from caller reputation (a score that **decays over time**), a per-caller **call-rate window** and block/allow lists, read from a declared data file under `config/` that is validated on load (D4). | planned | P8 | ACC-P8-003 |
-| REQ-F-019 | A rejected call is answered on the trunk with `608` "Rejected" (RFC 8688) and **no `Call-Info`** header; on the allow path the relayed INVITE carries **no added header** (D5). | planned | P8 | ACC-P8-002, ACC-P8-003 |
-| REQ-F-020 | The mock S-SBC's UAC side declares `Feature-Caps: *;+sip.608` in its INVITE, and the AS plays no media announcement: the reject path stays signalling-only (D5, ADR-0006). | planned | P8 | ACC-P8-003 |
-| REQ-F-021 | The allow path still drives a full B2BUA relay (`INVITE → 100 → 180 → 200 OK → ACK → BYE`); the reject path is **UAS-only** and originates no second leg (P8 "Known collisions"). | planned | P8 | ACC-P8-001, ACC-P8-002 |
-| REQ-F-022 | Cross-call anti-fraud state (the call-rate window and reputation) lives in a **process-level module** and never in the per-call `CallController` (D9). | planned | P8 | ACC-P8-004 |
-| REQ-F-023 | New `AS-FRAUD-*` error codes are added to the authoritative model in `src/as_app/errors.py` and mapped to SIP status codes and log messages (AGENT.md section 4.3). | planned | P8 | ACC-P8-005 |
-| REQ-F-024 | The verdict, its signals/score and the matched list entry are observable through counters, the Call-ID keyed trace and the console. | planned | P8 | ACC-P8-005 |
+| REQ-F-016 | The anti-fraud AS runs as a **second, independently runnable process** reusing the shared skeleton, with its own SIP listen ports, its own declarative data file under `config/` and its own console feed; it owns its lifecycle — a startup self-check and a stop path that cancels every timer it armed (D6, P8a lesson). | done | P8 | ACC-P8-001 |
+| REQ-F-017 | On INVITE the AS inspects the **calling** party and produces a **verdict** — allow or reject. On allow the INVITE is relayed as a B2BUA: the Request-URI (never rewritten) and the SDP body are kept and the pass-through header set is copied, with **no header added**; on reject the call is answered from the UAS side. `Feature-Caps` is not in that pass-through set, so the `sip.608` declaration does not cross the AS (D4, ADR-0007 decision 6). | done | P8 | ACC-P8-002 |
+| REQ-F-018 | The verdict is computed from caller reputation (a score that **decays over time**), a per-caller **call-rate window** and block/allow lists, read from a declared data file under `config/` that is validated on load (D4). | done | P8 | ACC-P8-003 |
+| REQ-F-019 | A rejected call is answered on the trunk with `608` "Rejected" (RFC 8688) and **no `Call-Info`** header; on the allow path the relayed INVITE carries **no added header** (D5). | done | P8 | ACC-P8-002, ACC-P8-003 |
+| REQ-F-020 | The mock S-SBC's UAC side declares `Feature-Caps: *;+sip.608` in its INVITE, and the AS plays no media announcement: the reject path stays signalling-only (D5, ADR-0006). | done | P8 | ACC-P8-003 |
+| REQ-F-021 | The allow path still drives a full B2BUA relay (`INVITE → 100 → 180 → 200 OK → ACK → BYE`); the reject path is **UAS-only** and originates no second leg (P8 "Known collisions"). | done | P8 | ACC-P8-002 |
+| REQ-F-022 | Cross-call anti-fraud state (the call-rate window and reputation) lives in a **process-level module** and never in the per-call `CallController` (D9). | done | P8 | ACC-P8-004 |
+| REQ-F-023 | New `AS-FRAUD-*` error codes are added to the authoritative model in `src/as_app/errors.py` and mapped to SIP status codes and log messages (AGENT.md section 4.3). | done | P8 | ACC-P8-005 |
+| REQ-F-024 | The verdict, its signals/score and the matched list entry are observable through counters, the Call-ID keyed trace and the console. | done | P8 | ACC-P8-005 |
 
 ## 2. Non-functional requirements
 
@@ -51,11 +51,11 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-NF-008 | A clean checkout runs: `uv sync` → `make lint` / `make test`; `make demo` places a real call. | done | M0 | ACC-M0-002, ACC-M0-009, ACC-M4-002 |
 | REQ-NF-009 | No performance or capacity claims: no call rate, latency or capacity target is defined for the POC. | done | M0 | ACC-M0-011 |
 | REQ-NF-010 | Console uses no third-party front-end libraries and no build step. | done | M0 | ACC-M3-001 |
-| REQ-NF-011 | The verdict is a **pure function**: no sockets, no global state and no clock access inside the engine (time is injected), unit-testable without a network (AGENT.md section 12, REQ-NF-004 precedent). | planned | P8 | ACC-P8-004 |
-| REQ-NF-012 | Cross-call anti-fraud state is **in memory**; a restart loses it. This is a registered POC gap, closed in P11 by the pluggable state store (D9). | planned | P8 | ACC-P8-004 |
-| REQ-NF-013 | No media is played. A real UAC that does not declare `sip.608` would require a media announcement; this is a registered POC gap, not a hidden defect (D5, ADR-0006). | planned | P8 | ACC-P8-003 |
-| REQ-NF-014 | Configuration is through environment variables only, declared in `.env.example`; **no new third-party dependency** is added (AGENT.md section 8). | planned | P8 | ACC-P8-001 |
-| REQ-NF-015 | The `608` reject path is verified **by running sippy**, not assumed (AGENT.md section 6). | planned | P8 | ACC-P8-006 |
+| REQ-NF-011 | The verdict is a **pure function**: no sockets, no global state and no clock access inside the engine (time is injected), unit-testable without a network (AGENT.md section 12, REQ-NF-004 precedent). | done | P8 | ACC-P8-004 |
+| REQ-NF-012 | Cross-call anti-fraud state is **in memory**; a restart loses it. This is a registered POC gap, closed in P11 by the pluggable state store (D9). | done | P8 | ACC-P8-004 |
+| REQ-NF-013 | No media is played. A real UAC that does not declare `sip.608` would require a media announcement; this is a registered POC gap, not a hidden defect (D5, ADR-0006). | done | P8 | ACC-P8-003 |
+| REQ-NF-014 | Configuration is through environment variables only, declared in `.env.example`; **no new third-party dependency** is added (AGENT.md section 8). | done | P8 | ACC-P8-001 |
+| REQ-NF-015 | The `608` reject path is verified **by running sippy**, not assumed (AGENT.md section 6). | done | P8 | ACC-P8-006 |
 
 ## 3. Traceability notes
 

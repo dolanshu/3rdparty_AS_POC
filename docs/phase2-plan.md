@@ -778,13 +778,97 @@ Four non-blocking findings, **recorded and none fixed inside the stage**:
 - **Two assertions are implied by the ones above them** (`test_chained_topology.py:191`,
   `test_chained_call_flows.py:163`). Redundant, not vacuous: both compare observed wire values.
 
-**State after stage 4.** Stages 1–4 are complete and their review gates have run; the test
-layer landed as `a14acf4` (the `ChainedPair` fixture, the integration and e2e chained flows,
-and the two structural unit invariants), adding 3 unit, 3 integration and 2 e2e tests with no
-`src/`, `config/`, `docs/` or `Makefile` change riding along. The P9 requirement rows are
-still `planned` in the SRS, which is correct: they close with the acceptance items in stage 5.
-**Stage 5 (the acceptance items `ACC-P9-001…005` and their §4.8 evidence) is next**, followed
-by the item close of §5.4.
+**Stage-5 review gate — run, clean, four non-blocking findings fixed inside the stage
+(§5.2).** The read-only review of the acceptance record ran against commit `f68ed27`, asked
+the §5.2 *Acceptance* question ("the §4.8 evidence is real, reproducible and complete"). **No
+blocking finding.** The reviewer re-ran every command the record quotes and compared the
+numbers, the exit codes and the selected test names against the claims: lint clean, unit 203,
+integration 34, e2e 9, the chained integration 3, `-k reject` `2 passed, 3 deselected`, the
+combined `5 passed`, the two structural unit selections, the probe at exit 0 with
+`distinct Call-IDs: 3` / `Call-ID per leg: True` / `ICID preserved: True`, and the demo at
+exit 0 with its five `OK` lines — all matched. It also ran the e2e file with `-s` and compared
+the emitted trace **shape** (columns, event names, summaries, the `internal -` / `internal
+trunk` rows, the `-b2b_1` derivation) against the quoted §2 block and found no structural
+mismatch, i.e. nothing suggesting the excerpt was composed rather than captured. It confirmed
+the two deliberate qualifications are accurate — ACC-P9-001 claims only the one-way import
+independence, ACC-P9-004 only the substring knob check — that every item carries all four
+§4.8 kinds either as evidence or as an explicit honest declaration, and that scope was exactly
+`docs/acceptance/criteria.md` and `docs/acceptance/report.md`.
+
+Four non-blocking findings were **fixed inside the stage** (commit `4d3e924`, so the stage is
+**not** re-reviewed). One of them was a real defect in the record rather than prose polish:
+
+- **The ACC-P9-005 verification command did not reproduce.** It quoted `grep -nE` with the
+  alternation pipes escaped as `\|` for markdown; in `grep -E` a backslash-pipe is a literal
+  `|`, so the command exited **1** with no matches while the row claimed exit 0. This is the
+  kind of finding the gate exists for: a quoted command that a reviewer cannot run. Replaced
+  with a pipe-free `grep -n -e … -e …` form, verified at exit 0 with five matches. The report's
+  own copy of the command used unescaped pipes and did reproduce, and was left as it was.
+- **A copy-pasted environment claim was false.** The P9 record read "repository `VERSION` =
+  0.5.1 at the time of the run" — inherited from the P8 section above it, while `VERSION` has
+  been `0.6.0` since `4d32e80`, an ancestor of every P9 commit. Corrected.
+- **Two criteria rows named slightly more than their commands prove.** ACC-P9-001 carried the
+  requirement's sequence including `ACK`, which **no P9 test asserts** (the mock's UAC records
+  no `ACK` in the trace); the expected result now states exactly what is asserted and the gap
+  is recorded under the accepted limitations. ACC-P9-004 named three of the four documents
+  the test checks, omitting `tools/README.md`; corrected in both the criteria row and the
+  report prose.
+- **The §3 CI wording overstates.** "No CI run **can** exist for `phase2`" is wrong as written
+  — `origin/phase2` exists, this branch is 21 commits ahead of it, and a pull request from
+  `phase2` into `main` would run CI. The conclusion (kind 3 is not producible from this
+  environment, and nothing is pushed) is correct and stands; the sentence was reworded to say
+  exactly that.
+
+**State after stage 5.** Stages 1–5 are complete and their review gates have run. The
+acceptance record is `f68ed27` (the five `ACC-P9-*` rows and the four-kind evidence) with the
+gate's findings fixed in `4d3e924`. P9's §4.8 position is: kinds 1, 2 and 4 are carried as
+evidence (kind 4 as "partial", because the tests assert the recorded wire bytes and no sample
+can be committed — `docs/specs/message-samples/` is generated and gitignored, and
+`tools/capture_call.py` drives one AS, not the chain), and kind 3 is honestly declared **not
+producible** because the CI workflow's `push` / `pull_request` triggers target `main` and
+nothing here is pushed. **What remains is the item close of §5.4**: the SRS rows to `done`,
+the chained section in `docs/demo-script.md` / `docs/demo-steps.md`, and `VERSION` /
+`CHANGELOG.md` — commit, and **do not tag**.
+
+- **Status: done (2026-09-19), worked on `phase2`; not merged into `main`, not tagged.**
+  Stages 1–5 of §5.1 were completed, each with its own read-only review gate (§5.2), and the
+  item close of §5.4 was then performed: the SRS rows `REQ-F-025 … REQ-F-028` and
+  `REQ-NF-016 … REQ-NF-018` are `done`, `docs/demo-script.md` §5b and `docs/demo-steps.md`
+  §1.6 carry the chained section, and `VERSION` / `pyproject.toml` / `uv.lock` were bumped
+  together to **`0.7.0`** with the CHANGELOG node `[0.7.0] - 2026-09-19`. Acceptance items
+  **ACC-P9-001 … ACC-P9-005** accepted with evidence in `docs/acceptance/report.md`. Merging
+  into `main` and tagging remain the maintainer's steps (`AGENT.md` §13).
+
+**What was learned (2026-09-19).**
+
+1. **The `Call-ID` premise was wrong for both AS instances, and the probe is what caught it.**
+   The plan recorded "two B2BUAs in series produce two different Call-IDs" as a design fact, but
+   the code reused the inbound `Call-ID` on every outbound leg, so the probe measured
+   `distinct Call-IDs: 1` at the start and `2` after the Phase 1 fix — never the intended `3`.
+   The premise was never argued into place; it was **observed** to be false, which is exactly
+   what `AGENT.md` §6 asks for. The fix is **per controller**, because each AS runs a bare
+   `sippy.UA` rather than `sippy.CCB2BUA`, whose own B2BUA is the thing that would have
+   regenerated the value.
+2. **The ICID is preserved end to end but nothing is keyed on it, so the chain is genuinely not
+   correlatable — measured, not argued.** `P-Charging-Vector` survives at the trunk, at AS-2 and
+   at the core (`ICID preserved: True`), yet it is a **per-scenario literal**
+   (`poc-chained-allow`) that no observability surface is keyed on, so the per-instance traces
+   still cannot be joined. The stage-2 gate had to correct a design claim that asserted the mock
+   emits no ICID at all — the design had reasoned past the wire.
+3. **Chaining needed no new code path and no new configuration knob.** Pointing AS-1's next hop
+   at AS-2's listen address is a `next_hops`-catalogue change; the demo asserts that no declared
+   `.env.example` key contains `chain`. That absence is what makes the topology
+   **configuration-only**, and it is what P10 inherits as its starting point.
+4. **The review gates found real defects that a self-check would not have.** A tautological
+   assertion (`outbound_call_id(x) != x`, true by construction); a quoted acceptance command
+   (`grep -nE` with escaped `\|`) that could not run and exited `1` while the row claimed `0`;
+   and a copy-pasted environment claim (`VERSION` = 0.5.1) that had been false since `0.6.0`.
+   Each was fixed inside its stage, and the second is the kind of finding only an independent
+   re-run produces.
+5. **The demo-as-a-guard pattern is what makes `make demo-chained` evidence rather than a
+   printout.** It asserts the properties — including the reject's short-circuit as an
+   **absence** at AS-2 and the core — and exits non-zero on any mismatch, so the five `OK` lines
+   are a verdict, not narration. That is the same shape the P8 `make demo-fraud` established.
 
 ### P9.5 — Read-only capacity probe
 

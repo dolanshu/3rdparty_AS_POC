@@ -1,13 +1,15 @@
 # Demo script
 
-Duration: 5–10 minutes (8–12 with the anti-fraud section, §5a). Audience: architecture
-reviewers and operator-side reviewers. Rehearse it before showing it; if the script and
-`make demo` disagree, both are wrong (`AGENT.md` section 10).
+Duration: 5–10 minutes (10–14 with the anti-fraud section, §5a, and the chained section, §5b).
+Audience: architecture reviewers and operator-side reviewers. Rehearse it before showing it;
+if the script and `make demo` disagree, both are wrong (`AGENT.md` section 10).
 
 **Status:** the whole script runs. Sections 1–7 are the Phase 1 path (M0–M4): the stack probe,
 the rule data, a real translated call, the failure branches and the operations console — every
-one of them rehearsed for M4. Section 5a is the Phase 2 addition, `make demo-fraud`, rehearsed
-for P8. The runs that recorded the evidence are in `docs/acceptance/report.md`.
+one of them rehearsed for M4. Sections 5a and 5b are the Phase 2 additions: §5a is
+`make demo-fraud`, the anti-fraud AS, rehearsed for P8; §5b is `make demo-chained`, the two AS
+instances in series, rehearsed for P9. The runs that recorded the evidence are in
+`docs/acceptance/report.md`.
 
 ## 0. Setup (before the audience arrives)
 
@@ -123,6 +125,45 @@ Point out that each demo allocates its own ephemeral ports, so this section and 
 do not interfere with each other, and that the number-translation path is unchanged: a second
 AS is a second use case, not a change to the first one. `make demo-fraud` writes nothing, so it
 is as repeatable as `make demo`.
+
+## 5b. The chain — two AS instances in series (2 minutes)
+
+```bash
+make demo-chained      # SBC -> AS-1 anti-fraud -> AS-2 number translation -> core, wired by config
+```
+
+> "The two AS instances chain by configuration alone: AS-1's next hop is pointed at AS-2's
+> listen address and AS-2's rule set selects the core. No iFC emulation in the mock, no code
+> shared between the two AS instances, and no new port or environment variable — it is the same
+> `next_hops` catalogue that changed. Two B2BUAs in series mean a call carries **three**
+> `Call-ID`s, one per leg, so each instance writes its own trace and there is no cross-AS
+> correlation by `Call-ID`; the end-to-end `P-Charging-Vector` ICID survives the whole chain
+> but nothing is keyed on it. The demo is a guard: it asserts all of that — including the
+> reject's silence as an absence — and exits non-zero if it does not hold."
+
+What the reviewer should see, in the transcript `make demo-chained` prints:
+
+1. The topology line `emulated S-CSCF --UDP--> AS-1 anti-fraud --UDP--> AS-2 number
+   translation --UDP--> emulated core` and the wiring line `AS-1 next hop = AS-2 listen
+   address; AS-2 next hop = the rule set`.
+2. Call 1 (`+86216180001` → `+8613800138000`): `AS-1 verdict: allow`, `AS-1 signal: none`,
+   AS-2's matched rule `R-MOB-CM-40`, `core called number: 013800138000`, `final status: 200`,
+   `released: True` — the allowed call really traversed both B2BUAs and was translated at AS-2.
+3. The three per-leg `Call-ID`s and their derivation: `S-CSCF Call-ID` `dc6cbf77…e621`,
+   `AS-2 trunk Call-ID` `dc6cbf77…e621-b2b_1`, `core Call-ID` `dc6cbf77…e621-b2b_1-b2b_1`,
+   with `distinct Call-IDs: 3` and `Call-ID per leg: True (each transition is
+   outbound_call_id of the previous one)`.
+4. The preserved ICID: `S-CSCF ICID`, `AS-2 ICID` and `core ICID` all read
+   `poc-chained-allow`, with `ICID preserved: True`.
+5. Call 2 (`+8613400000001`): `AS-1 verdict: reject`, `final status: 608 (608 Rejected, no
+   second leg)`, `AS-2 calls seen: 0` and `core INVITEs seen: 0` — the reject short-circuits
+   before AS-2 and the core, and the absence is the assertion.
+6. The five `OK` verdict lines: `allowed call completed through two B2BUAs`, `608 reject
+   short-circuited before AS-2`, `Call-ID regenerated on every leg`, `three distinct Call-IDs
+   across the chain` and `ICID preserved across every leg`.
+
+Ports and Call-IDs are ephemeral and vary per run. `make demo-chained` writes nothing, so it is
+as repeatable as `make demo`.
 
 ## 6. The console (1 minute)
 

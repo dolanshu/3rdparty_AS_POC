@@ -8,6 +8,21 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+### Fixed
+
+- The outbound leg now carries its own Call-ID instead of reusing the trunk one verbatim.
+  `CallController.apply_call_policy` derives a fresh `SipCallId` from the inbound one with
+  sippy's own suffix `-b2b_1` (the `CCB2BUA` style, `sippy/b2bua.py`), so the second leg has
+  its own dialog identity as `docs/architecture/lld.md` section 2.3 already specified. sippy
+  copies a non-`None` Call-ID from the `CCEventTry` instead of generating one
+  (`sippy/UacStateIdle.py`), and this AS runs a bare `sippy.UA` rather than `CCB2BUA`, which
+  is why nothing rewrote it before. The route number `1` is the AS's single outbound leg,
+  and every failover hop reuses the same value. `CallController.call_id` stays the trunk
+  Call-ID for the log/trace correlation key. The message samples and the affected acceptance
+  items (ACC-M1-002 / ACC-M1-005 / ACC-M2-005) were re-tested.
+
+## [0.7.0] - 2026-09-19 — P9 chained AS topology (Phase 2)
+
 ### Added
 
 - `make demo-chained`, backed by `tools/demo_chained_call.py`: it runs **both AS instances in
@@ -21,16 +36,6 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ### Fixed
 
-- The outbound leg now carries its own Call-ID instead of reusing the trunk one verbatim.
-  `CallController.apply_call_policy` derives a fresh `SipCallId` from the inbound one with
-  sippy's own suffix `-b2b_1` (the `CCB2BUA` style, `sippy/b2bua.py`), so the second leg has
-  its own dialog identity as `docs/architecture/lld.md` section 2.3 already specified. sippy
-  copies a non-`None` Call-ID from the `CCEventTry` instead of generating one
-  (`sippy/UacStateIdle.py`), and this AS runs a bare `sippy.UA` rather than `CCB2BUA`, which
-  is why nothing rewrote it before. The route number `1` is the AS's single outbound leg,
-  and every failover hop reuses the same value. `CallController.call_id` stays the trunk
-  Call-ID for the log/trace correlation key. The message samples and the affected acceptance
-  items (ACC-M1-002 / ACC-M1-005 / ACC-M2-005) were re-tested.
 - The **anti-fraud AS** had its **own copy of the same defect** on its outbound leg:
   `FraudCallController._originate_allowed` built `CCEventTry(event.getData())`, keeping the
   trunk Call-ID in element `[0]`, so the inter-AS leg reused the S-CSCF's identity. It now
@@ -41,6 +46,30 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   (`Call-ID per leg: True`, `distinct Call-IDs: 3`). `FraudCallController.call_id` stays the
   trunk Call-ID. The integration and e2e assertions that encoded the old behaviour were
   updated to assert the derived value and its difference from the trunk one.
+
+### Verified
+
+- The P9 acceptance run: **`ACC-P9-001 … ACC-P9-005` accepted** with evidence in
+  `docs/acceptance/report.md`. Local gate: `ruff format --check .` → 91 files, `ruff check .`
+  → clean, `mypy` → no issues in 28 source files, `pytest` → **203 unit / 34 integration /
+  9 e2e**. `tools/chained_as_probe.py` exits `0` with `distinct Call-IDs: 3` /
+  `Call-ID per leg: True` / `ICID preserved: True`, and `make demo-chained` exits `0` with its
+  five `OK` verdict lines (`allowed call completed through two B2BUAs`, `608 reject
+  short-circuited before AS-2`, `Call-ID regenerated on every leg`, `three distinct Call-IDs
+  across the chain`, `ICID preserved across every leg`).
+- **No CI run exists for these commits**: `.github/workflows/ci.yml` triggers on `push` /
+  `pull_request` and both target `main`, and nothing here is pushed — the local gate is not a
+  CI result (`AGENT.md` section 13).
+
+### Notes
+
+- Version node: `0.7.0` — a new user-visible capability (a chained topology and its
+  first-class demo). The Phase 1 precedent is `0.5.0` for M4; P8a, a defect fix, stayed
+  `0.5.1`. The `VERSION` / `pyproject.toml` / `uv.lock` trio was updated together and the
+  editable install re-synced, so `as_app.__version__` reports `0.7.0` and the baseline tests
+  hold.
+- Worked on `phase2` (P9 has no branch of its own — `docs/phase2-plan.md` §4). Tagging is the
+  maintainer's step; agents do not tag.
 
 ## [0.6.0] - 2026-09-19 — P8 anti-fraud AS (Phase 2)
 

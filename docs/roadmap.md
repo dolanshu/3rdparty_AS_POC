@@ -811,11 +811,11 @@ every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
   status, review-gate findings and the P9 entry state live in `docs/phase2-plan.md` §3 on
   `phase2`; the acceptance evidence is in `docs/acceptance/report.md`.
 
-- **P9 — chained demo. [Status: In progress]** (2026-09-19, on `phase2`). A pointer only: the
-  plan, the Phase 1 `Call-ID` defect that paused it, the fix that lifted the pause and the
-  findings the fix left behind live in `docs/phase2-plan.md` §3 on `phase2`. The defect was
-  fixed as a separate item on `main` and merged back into `phase2`; stage 2 is redone on the
-  fixed behaviour. It is **not** recorded here.
+- **P9 — chained demo. [Status: Done]** (2026-09-19, on `phase2`). A pointer only: the plan,
+  status, review-gate findings, the Phase 1 `Call-ID` defect that paused it, the fix that lifted
+  the pause and the findings the fix left behind live in `docs/phase2-plan.md` §3 on `phase2`;
+  the acceptance evidence is in `docs/acceptance/report.md`. Not merged into `main` and not
+  tagged.
 
 ## Conventions
 

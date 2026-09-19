@@ -215,6 +215,65 @@ Expect: `expected SIP 200, observed 200; core INVITE delta 1` for the allowed ca
 The blocked caller is the first entry of `config/caller_screening.yaml`; swap it with
 `--blocked-caller` to screen a different number.
 
+#### 1.6 `make demo-chained` — two AS instances in series (Phase 2, P9)
+
+```bash
+make demo-chained      # SBC -> AS-1 anti-fraud -> AS-2 number translation -> core, wired by config
+```
+
+Shows: the chain wired by configuration only, an allowed call traversing both B2BUAs and
+translated at AS-2, the three per-leg `Call-ID`s, the preserved ICID, and a `608` reject
+short-circuiting before AS-2 and the core.
+
+```text
+chained AS POC - two B2BUAs in series, wired by configuration only
+topology   : emulated S-CSCF --UDP--> AS-1 anti-fraud --UDP--> AS-2 number translation --UDP--> emulated core
+ports      : AS-1 127.0.0.1:47451, AS-2 127.0.0.1:47443, trunk 46327, core 48539
+wiring     : AS-1 next hop = AS-2 listen address; AS-2 next hop = the rule set
+
+[1/2] allowed call relayed through both AS instances
+caller            : +86216180001
+called            : +8613800138000
+AS-1 verdict      : allow
+AS-1 signal       : none
+AS-2 rule         : R-MOB-CM-40
+core called number: 013800138000
+final status      : 200
+released          : True
+
+  the dialog Call-ID is regenerated on every leg (three distinct values):
+S-CSCF Call-ID    : dc6cbf77a4ac2255269009915356e621
+AS-2 trunk Call-ID: dc6cbf77a4ac2255269009915356e621-b2b_1
+core Call-ID      : dc6cbf77a4ac2255269009915356e621-b2b_1-b2b_1
+distinct Call-IDs : 3
+Call-ID per leg   : True (each transition is outbound_call_id of the previous one)
+
+  the end-to-end ICID survives the whole chain (one value at every hop):
+S-CSCF ICID       : poc-chained-allow
+AS-2 ICID         : poc-chained-allow
+core ICID         : poc-chained-allow
+ICID preserved    : True
+
+[2/2] rejected call short-circuits at AS-1
+caller            : +8613400000001
+AS-1 verdict      : reject
+final status      : 608 (608 Rejected, no second leg)
+AS-2 calls seen   : 0 (the absence is the assertion)
+core INVITEs seen : 0 (the absence is the assertion)
+
+--- verdict --------------------------------------------------------
+allowed call completed through two B2BUAs : OK
+608 reject short-circuited before AS-2     : OK
+Call-ID regenerated on every leg           : OK
+three distinct Call-IDs across the chain   : OK
+ICID preserved across every leg            : OK
+```
+
+Expect: exit status 0 and the five `OK` verdict lines — `allowed call completed through two
+B2BUAs`, `608 reject short-circuited before AS-2`, `Call-ID regenerated on every leg`,
+`three distinct Call-IDs across the chain` and `ICID preserved across every leg`. Ports and
+Call-IDs are ephemeral and vary per run.
+
 ### Part 2 — The console (long-running; independent of Part 1)
 
 The console reads a long-running AS over its internal API. The one-shot calls in Part 1

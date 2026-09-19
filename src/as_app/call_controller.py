@@ -192,6 +192,14 @@ def _describe_event(event: Any) -> tuple[str, str]:
 class CallController:
     """One B2BUA call: relays events between the trunk leg and the next-hop leg.
 
+    **One-leg invariant (P8).** A call may have exactly one leg — ``uaA`` — for its whole
+    lifetime: a rejected call is *UAS behaviour, not B2BUA*, so it never originates a
+    second leg and ``uaO`` stays ``None`` from the first event to the last. Nothing here
+    may dereference ``uaO`` without a ``None`` check, and a reject must not require a
+    routing decision (see :meth:`reject_on_trunk`). This is the relaxation the anti-fraud
+    AS relies on when it mirrors the reject shape for its ``608`` answer (ADR-0007,
+    ``docs/architecture/lld.md`` section 9.6).
+
     Attributes:
         rule_set_store: Source of the currently active rule set (hot reload, ADR-0004).
         metrics: Counter registry.
@@ -199,8 +207,10 @@ class CallController:
         global_config: sippy global configuration of the AS process.
         next_hop: ``(address, port)`` of the S-SBC the outbound INVITE is sent to.
         call_id: SIP Call-ID of the call, known once the INVITE has been terminated.
-        uaA: Answering UA, the leg towards the S-SBC.
-        uaO: Originating UA, the leg towards the next hop.
+        uaA: Answering UA, the leg towards the S-SBC; always present once the INVITE is
+            terminated.
+        uaO: Originating UA, the leg towards the next hop; ``None`` until the call is
+            routed, and ``None`` for the whole lifetime of a UAS-only (rejected) call.
     """
 
     def __init__(
@@ -543,32 +553,63 @@ class CallController:
         self._cancel_no_answer_timer()
 
     def _reject_on_trunk(self, error: AsError) -> None:
-        """Answer the trunk leg with the SIP status the error carries.
+        """Answer the trunk leg with the SIP status a routing decision carries.
 
         Used by the translation seam when the routing decision is a rejection
         (``404`` / ``603`` / ``480`` / ``500``) so the caller sees the right status and
-        the error code is counted and traced.
+        the error code is counted and traced. The disposition is derived from the routing
+        decision; the emission itself is decision-free (see :meth:`reject_on_trunk`).
 
         Args:
             error: The :class:`AsError` built from the routing decision.
         """
-        self._cancel_no_answer_timer()
         decision = self._decision
-        assert decision is not None, "rejection requires a routing decision"
-        # The error code is already counted in :meth:`route_call`; only the disposition
-        # is recorded here so the counters do not double-count the same failure.
-        self.metrics.record_call_disposition(self.disposition_for(decision))
+        self.reject_on_trunk(
+            error,
+            self.disposition_for(decision) if decision is not None else CallDisposition.REJECTED,
+            rule_id=decision.rule_id if decision is not None else None,
+        )
+
+    def reject_on_trunk(
+        self, error: AsError, disposition: CallDisposition, *, rule_id: str | None = None
+    ) -> None:
+        """Answer the trunk leg with the SIP status an error carries — decision-free.
+
+        A reject needs a SIP status, its reason phrase and an :class:`AsError`; it does
+        **not** need a routing decision. Removing that requirement is the point of the
+        one-leg relaxation: an AS that decides on the *calling* party rejects from a
+        verdict, with no routing decision anywhere (ADR-0007,
+        ``docs/architecture/lld.md`` section 9.6).
+
+        This is also where the one-leg invariant is enforced. A reject is exactly the
+        UAS-only case, so the answer goes out on ``uaA`` and ``uaO`` — which is ``None`` —
+        is never touched.
+
+        The anti-fraud AS mirrors this shape rather than calling it: its decision input,
+        its log event and its error family differ, and the controller lives in its own
+        package. The duplication is recorded as friction for P10.
+
+        Args:
+            error: The :class:`AsError` carrying the SIP status, the phrase and the code.
+            disposition: Outcome to count for this call, supplied rather than derived.
+            rule_id: Rule identifier for the trace, when the caller has one.
+        """
+        self._cancel_no_answer_timer()
+        # For the first AS the error code is already counted in :meth:`route_call`; only
+        # the disposition is recorded here so the counters do not double-count the same
+        # failure. A caller with no route_call counts its own code.
+        self.metrics.record_call_disposition(disposition)
         self.tracer.record(
             self.call_id,
             LogDirection.OUTBOUND,
             str(error.sip_status),
             f"{error.sip_status} {error.sip_phrase} relayed to the trunk leg",
             peer=self.trunk_peer,
-            rule_id=decision.rule_id,
+            rule_id=rule_id,
             attributes={
                 "leg": LEG_TRUNK,
                 "error_code": error.code.code,
-                "rule_id": decision.rule_id or "",
+                "rule_id": rule_id or "",
             },
         )
         log_event(

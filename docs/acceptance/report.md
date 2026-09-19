@@ -2475,7 +2475,8 @@ its documentation and the recorded friction.
 Result: **accepted**, with the limitations recorded under *Accepted limitations and open items*.
 
 Environment of this run: Linux x86-64, loopback only; Python 3.10.12; sippy 2.4.2; `uv`
-0.12.15; repository `VERSION` = 0.5.1 at the time of the run.
+0.12.15; repository `VERSION` = 0.6.0 at the time of the run (`0.5.1` was released with
+P8; `0.6.0` landed in `4d32e80`, an ancestor of every P9 commit).
 
 ### 1. Command and output
 
@@ -2633,7 +2634,7 @@ ICID preserved across every leg            : OK
 
 The unit tests behind the `-k` selection are
 `test_make_demo_chained_is_a_documented_first_class_entry_point` (the `Makefile` target plus
-the command named in `AGENT.md` §10, `README.md` and `docs/README.md`) and
+the command named in `AGENT.md` §10, `README.md`, `docs/README.md` and `tools/README.md`) and
 `test_chaining_added_no_new_configuration_knob` (no declared `.env.example` key contains
 `chain`). The demo is the same tool the `make demo-chained` target runs
 (`tools/demo_chained_call.py`).
@@ -2709,15 +2710,18 @@ trunk `Call-ID` fresh each time, and neither is normalised.
 
 ### 3. CI
 
-**No CI run can exist for `phase2`, and none exists.** `.github/workflows/ci.yml` triggers on
-`push` / `pull_request` **targeting `main` only**; the only other trigger is `workflow_dispatch`,
-which a maintainer would have to start by hand and which no agent may start. So there is no run
-to link, no badge for this branch and no per-job conclusion to report. `AGENT.md` §13 is
-explicit that the local pre-commit gate is **not** CI and must never be presented as a CI
-result, so the gate in §1 above (ruff format / ruff check / mypy clean; `203` / `34` / `9` in
-the three layers) is recorded as a **local** run, not as kind-3 evidence. This is the one
-`AGENT.md` §4.8 evidence kind P9 cannot supply from this environment; it follows the P8 section
-above and the P3 precedent, and nothing here claims a CI result.
+**No CI run exists for these commits, and none can be produced from this environment.**
+`.github/workflows/ci.yml` triggers on `push` / `pull_request` **targeting `main`** (plus
+`workflow_dispatch`, which a maintainer would have to start by hand and which no agent may
+start), and `origin/phase2` (`7df94f2`) means a pull request from `phase2` into `main` *would*
+run CI — but nothing here is pushed, so no run exists for these commits and none can be
+produced from here. So there is no run to link, no badge for these commits and no per-job
+conclusion to report. `AGENT.md` §13 is explicit that the local pre-commit gate is **not** CI
+and must never be presented as a CI result, so the gate in §1 above (ruff format / ruff check /
+mypy clean; `203` / `34` / `9` in the three layers) is recorded as a **local** run, not as
+kind-3 evidence. This is the one `AGENT.md` §4.8 evidence kind P9 cannot supply from this
+environment; it follows the P8 section above and the P3 precedent, and nothing here claims a CI
+result.
 
 ### 4. Capture
 
@@ -2794,6 +2798,11 @@ Consistent with the stage-4 position, and not hidden:
   what `test_as_app_does_not_import_the_anti_fraud_as` asserts. ACC-P9-001 claims only that
   one-way independence. The wording question is escalated as `docs/phase2-plan.md` §7 item 10,
   not settled here (`AGENT.md` §14 rule 2).
+- **`REQ-F-025`'s literal call sequence includes `ACK`, but no P9 test asserts it.** The e2e test
+  asserts `INVITE`, `180`, `200` and `BYE` in each instance's trace; the emitted AS-1 trace
+  contains **no `ACK` row** (the mock's UAC does not record `ACK` in the trace), so the criterion
+  quotes the requirement's sequence but the Expected result column states only what is asserted.
+  The `ACK` leg is therefore **not covered** by P9; recorded here so the gap is not implicit.
 - **AS-2's wire recorder is built but discarded** (`tests/conftest.py`), so `REQ-F-027`'s absence
   is proven through `tracer.known_call_ids()` rather than AS-2's received bytes. Adequate — AS-2
   traces on INVITE — but it is a **proxy**, registered as such in the stage-4 record.

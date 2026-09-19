@@ -54,7 +54,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/as_app", "src/console", "src/s_sbc_mock"]
+packages = ["src/anti_fraud_as", "src/as_app", "src/console", "src/s_sbc_mock"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -108,7 +108,7 @@ docstring-code-format = true
 [tool.mypy]
 python_version = "3.10"
 mypy_path = "src"
-packages = ["as_app", "console", "s_sbc_mock"]
+packages = ["anti_fraud_as", "as_app", "console", "s_sbc_mock"]
 explicit_package_bases = true
 # The sippy override below is forward-looking: sippy is imported from M1 onwards.
 warn_unused_configs = false

@@ -11,9 +11,9 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | Document | Status | What it answers |
 | --- | --- | --- |
 | `AGENT.md` §1–§5, §15 | ready | Positioning, boundaries, non-goals, delivery standards, roadmap |
-| `docs/architecture/hld.md` | ready | System context, deployment view, interface view, quality attributes, key flows |
-| `docs/architecture/lld.md` | ready | Modules, data structures, state machines, error codes, process model, log fields |
-| `docs/architecture/adr/` | ready | ADR-0001 … ADR-0006: sippy, process separation, UDP only, YAML rules, mock strategy, signalling only |
+| `docs/architecture/hld.md` | ready | System context, deployment view, interface view, quality attributes, key flows — including the second AS instance (§8) |
+| `docs/architecture/lld.md` | ready | Modules, data structures, state machines, error codes, process model, log fields — including the anti-fraud AS (§9) |
+| `docs/architecture/adr/` | ready | ADR-0001 … ADR-0007: sippy, process separation, UDP only, YAML rules, mock strategy, signalling only, anti-fraud AS / `608 Rejected` |
 | `docs/production-gaps.md` | ready | Every POC shortcut and what production would require |
 | `docs/glossary.md` | ready | Terminology |
 | `docs/requirements/functional-and-nonfunctional.md` | ready | `REQ-F-*` / `REQ-NF-*` capability list with milestone status |
@@ -26,7 +26,7 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `README.md` | ready | Positioning, quickstart, repository tour, non-goals |
 | `CONTRIBUTING.md` | ready | How to work in this repository |
 | `docs/specs/index.md` | ready | Normative references |
-| `docs/specs/message-samples/` | ready | Real SIP messages on the trunk, generated with `make capture` and gitignored (only the folder `README.md` is tracked); the `office-to-mobile` call is 14 files, the translated outbound INVITE included |
+| `docs/specs/message-samples/` | ready | Real SIP messages on the trunk, generated with `make capture` and gitignored (only the folder `README.md` is tracked); the `office-to-mobile` call is 14 files, the translated outbound INVITE included. The anti-fraud AS's own calls are narrated live by `make demo-fraud` |
 | `tools/README.md` | ready | Probe, rule viewer, capture helper and the call capture tool |
 
 ## Deployment and operations

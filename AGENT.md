@@ -225,6 +225,14 @@ src/as_app/                   the third-party AS (sippy application)
   observability/metrics.py    counters and dispositions
   observability/tracing.py    per-Call-ID trace and console event feed
   internal_api.py             internal REST + WebSocket for the console
+src/anti_fraud_as/            the second AS: caller screening, 608 Rejected (P8, ADR-0007)
+  main.py                     its own SipConf + SipTransactionManager + ED2.loop()
+  bootstrap.py                FraudAsSettings, startup self-check
+  call_controller.py          the verdict seam, allow relay, UAS-only 608 reject
+  screening.py                pure verdict function (no sockets, no global state, no clock)
+  caller_state.py             process-level call-rate window and reputation decay
+  screening_data.py           caller_screening.yaml model, validation, reload
+  internal_api.py             internal REST + WebSocket for the console
 src/console/                  FastAPI + plain HTML/CSS/JS (separate process)
 src/s_sbc_mock/               UAC (emulates S-CSCF trigger) + UAS (emulates core)
 deploy/                       docker-compose.yml + per-service Dockerfiles
@@ -303,6 +311,21 @@ Key knobs (finalised in M0, kept in sync with `README.md` and the deployment gui
 - `ALLOWED_PEERS` — source addresses accepted on the trunk
 - `INTERNAL_API_ADDRESS/PORT` — how the console reaches the AS
 - `LOG_LEVEL`, payload logging switch
+
+The **anti-fraud AS** (P8, ADR-0007) is a second process with its own knobs. Its
+instance-identifying variables are prefixed so one `.env` cannot configure the wrong
+process; the observability and runtime knobs are shared with the AS above because they
+describe the process, not the instance:
+
+- `FRAUD_SIP_LISTEN_ADDRESS`, `FRAUD_SIP_LISTEN_PORT` — where the anti-fraud AS receives the
+  trunk (default port `5062`, deliberately not `5060`, so both AS instances can run on one
+  host)
+- `FRAUD_SBC_PEER_ADDRESS`, `FRAUD_SBC_PEER_PORT` — next hop an **allowed** INVITE is
+  relayed to
+- `FRAUD_ALLOWED_PEERS` — source addresses accepted on the anti-fraud trunk
+- `FRAUD_SCREENING_FILE` — path to the declarative screening data file
+- `FRAUD_INTERNAL_API_ADDRESS`, `FRAUD_INTERNAL_API_PORT` — how the console reaches it
+  (default port `8082`)
 
 **Switching from mock to a real S-SBC must be a configuration change only.**
 

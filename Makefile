@@ -11,8 +11,8 @@ PYTHONPATH_LOCAL := $(CURDIR)/src
 export PYTHONPATH := $(PYTHONPATH_LOCAL)
 
 .DEFAULT_GOAL := help
-.PHONY: help sync dev as mock console lint format type test unit integration e2e demo rules \
-        capture probe docker-up docker-down clean
+.PHONY: help sync dev as mock console fraud lint format type test unit integration e2e demo \
+        demo-fraud probe probe-608 rules capture docker-up docker-down clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -31,6 +31,9 @@ mock: sync ## Run only the mock S-SBC process (ARGS="--call +86216180001=+999123
 
 console: sync ## Run only the console process
 	$(RUN) python -m console.main
+
+fraud: sync ## Run only the anti-fraud AS process (listens on FRAUD_SIP_LISTEN_PORT, 5062)
+	$(RUN) python -m anti_fraud_as.main
 
 lint: sync ## ruff format --check + ruff check + mypy
 	$(RUN) ruff format --check .
@@ -58,6 +61,9 @@ e2e: sync ## E2E layer: complete call flows
 demo: sync ## Place one real trunk call and narrate the translation on the wire
 	$(RUN) python tools/demo_call.py --rules-file config/routing_rules.yaml
 
+demo-fraud: sync ## Screening demo: one allowed call and one call rejected with 608
+	$(RUN) python tools/demo_fraud_call.py --screening-file config/caller_screening.yaml
+
 rules: sync ## Show the active rule set and the decision for the sample numbers
 	$(RUN) python tools/show_rules.py --rules-file config/routing_rules.yaml
 
@@ -66,6 +72,9 @@ capture: sync ## Complete one call and capture its messages as samples
 
 probe: sync ## Probe the sippy stack and print what it really does
 	$(RUN) python tools/sippy_probe.py
+
+probe-608: sync ## Probe the sippy 608 Rejected path over real UDP (ADR-0007 design evidence)
+	$(RUN) python tools/anti_fraud_probe.py
 
 docker-up: ## Start the three services with docker compose
 	docker compose -f deploy/docker-compose.yml up --build

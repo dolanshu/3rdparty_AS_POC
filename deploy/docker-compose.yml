@@ -81,6 +81,80 @@ services:
         ipv4_address: 172.28.0.3
     restart: unless-stopped
 
+  # The second AS instance (P8, ADR-0007). It is started independently of `as`, on its own
+  # ports, with its own data file and its own mock: P8 demonstrates each instance on its
+  # own, and the chained SBC -> anti-fraud -> translation topology is P9's.
+  anti-fraud-as:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.as
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-${PIP_INDEX_URL:-https://pypi.org/simple}}
+    command: ["python", "-m", "anti_fraud_as.main"]
+    environment:
+      # Same reasoning as `as` above: a stable, mutually reachable trunk address, never
+      # 0.0.0.0. 5062 and 8082 keep the two AS instances off each other's ports.
+      FRAUD_SIP_LISTEN_ADDRESS: 172.28.0.4
+      FRAUD_SIP_LISTEN_PORT: "5062"
+      # Next hop for the INVITE the anti-fraud AS relays when it ALLOWS a call (mock UAS).
+      FRAUD_SBC_PEER_ADDRESS: 172.28.0.5
+      FRAUD_SBC_PEER_PORT: "15062"
+      # The INVITEs arrive from the fraud mock's fixed container IP 172.28.0.5.
+      FRAUD_ALLOWED_PEERS: 172.28.0.5
+      FRAUD_SCREENING_FILE: config/caller_screening.yaml
+      FRAUD_INTERNAL_API_ADDRESS: 0.0.0.0
+      FRAUD_INTERNAL_API_PORT: "8082"
+      LOG_LEVEL: INFO
+      LOG_STRUCTURED: "true"
+      LOG_PAYLOADS: "false"
+    ports:
+      - "5062:5062/udp"
+      - "8082:8082/tcp"
+    networks:
+      trunk:
+        ipv4_address: 172.28.0.4
+    restart: unless-stopped
+
+  # Mock S-SBC dedicated to the anti-fraud AS. It places two calls on startup: one from a
+  # caller the shipped screening data allows, and one from a caller on the block list, so
+  # the anti-fraud AS log shows an allow and a 608 Rejected without any further command.
+  s-sbc-mock-fraud:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.mock
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-${PIP_INDEX_URL:-https://pypi.org/simple}}
+    command:
+      - python
+      - -m
+      - s_sbc_mock.main
+      - --listen-address
+      - 172.28.0.5
+      - --listen-port
+      - "15062"
+      # 15063/udp for the UAC side so it cannot be confused with the other mock's ports.
+      - --trunk-port
+      - "15063"
+      - --as-address
+      - 172.28.0.4
+      - --as-port
+      - "5062"
+      - --call
+      - +86216180001=+8613800138000
+      - --call
+      - +8613400000001=+8613800138000
+    ports:
+      # 15063/udp is the UAC side (emulated S-CSCF trigger), 15062/udp the UAS side
+      # (emulated core network) that receives the INVITEs the anti-fraud AS relays.
+      - "15062:15062/udp"
+      - "15063:15063/udp"
+    networks:
+      trunk:
+        ipv4_address: 172.28.0.5
+    restart: unless-stopped
+
   console:
     build:
       context: ..
@@ -90,11 +164,14 @@ services:
         UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-${PIP_INDEX_URL:-https://pypi.org/simple}}
     command: ["python", "-m", "console.main", "--address", "0.0.0.0", "--port", "8081"]
     environment:
+      # The console renders either instance: set this to http://anti-fraud-as:8082 to watch
+      # the screening flow (verdicts, the screening data panel) instead of the translation.
       AS_INTERNAL_API_URL: http://as:8080
     ports:
       - "8081:8081/tcp"
     depends_on:
       - as
+      - anti-fraud-as
     networks:
       - trunk
     restart: unless-stopped

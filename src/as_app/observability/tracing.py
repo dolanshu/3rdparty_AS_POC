@@ -29,6 +29,7 @@ from __future__ import annotations
 import re
 import threading
 from collections import OrderedDict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -265,6 +266,24 @@ class SipMessageRecorder:
         """
         with self._lock:
             return [message for message in self.messages if message.call_id == call_id]
+
+    def messages_for_any(self, call_ids: Iterable[str]) -> list[RecordedSipMessage]:
+        """Return the messages carrying any of the given Call-IDs, in capture order.
+
+        A B2BUA call spans two Call-IDs, one per leg (see
+        :data:`as_app.sip_adapter.B2BUA_CALL_ID_SUFFIX`); a consumer that wants the whole
+        exchange of one call passes both. Ordering is kept across the legs, which
+        concatenating per-Call-ID results would not do.
+
+        Args:
+            call_ids: SIP Call-IDs to select.
+
+        Returns:
+            The messages carrying any of those Call-IDs, in the order they were captured.
+        """
+        wanted = set(call_ids)
+        with self._lock:
+            return [message for message in self.messages if message.call_id in wanted]
 
     def clear(self) -> None:
         """Drop every captured message."""

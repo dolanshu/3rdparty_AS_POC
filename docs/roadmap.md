@@ -751,9 +751,9 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   resolved and records the one remaining caveat (a wheel installed without its metadata).
 - **P6 — sippy retransmission-timer shutdown fix.** Cancel per-transaction timers on
   `SipTransactionManager.shutdown()` to remove the rare failover test flake (registered gap,
-  deferred). **[Optional · Status: Done]** (2026-09-18, executed as **P8a** in
-  `docs/phase2-plan.md` §3 on branch `fix/sippy-retransmission-timer`; merged into `main` as
-  `d0d0501` and released as `v0.5.1`)
+  deferred). **[Optional · Status: Done]** (2026-09-18, executed as **P8a** — §3 of
+  `docs/phase2-plan.md`, on the `phase2` branch; fixed on `fix/sippy-retransmission-timer`,
+  merged into `main` as `d0d0501` and released as `v0.5.1`)
 
   **Done in this conversation (2026-09-18).** `AsStack.stop()` now cancels everything the
   stack armed before sippy's own `shutdown()` runs:
@@ -800,7 +800,7 @@ Phase 2 item status, entry states and handover notes live in `docs/phase2-plan.m
 the `phase2` branch**. This board deliberately does not duplicate them — the reason is the
 paragraph above, and the table that used to sit here had already drifted twice (it showed P8a
 as "not started" after the plan recorded it done, and its P8a row named
-`fix/sippy-retransmission-timer`, a branch deleted on 2026-09-18).
+`fix/sippy-retransmission-timer`, a branch deleted once its work had been merged into `main`).
 
 Per-item status and handover notes are kept in `docs/phase2-plan.md` **on `phase2`**, which
 every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).

@@ -21,6 +21,7 @@ These tests exist because the repository itself is a deliverable: the skeleton o
 from __future__ import annotations
 
 import importlib.metadata
+import re
 from pathlib import Path
 
 import pytest
@@ -220,3 +221,78 @@ def test_env_example_declares_every_configuration_knob(repo_root: Path) -> None:
         "LOG_LEVEL",
     ):
         assert knob in content, knob
+
+
+#: Package the number-translation AS must never depend on: chaining is configuration only
+#: and the two AS instances stay independent processes (REQ-F-026, ADR-0008 decision 1).
+FORBIDDEN_AS_APP_IMPORT = "anti_fraud_as"
+
+#: Documents that must name the chain's first-class run command (REQ-NF-017).
+DEMO_CHAINED_DOCUMENTS = ("AGENT.md", "README.md", "docs/README.md", "tools/README.md")
+
+
+def imports_module(text: str, module: str) -> bool:
+    """Tell whether a Python source imports a module, in any of the import forms.
+
+    Args:
+        text: The source file content.
+        module: The dotted top-level module name to look for.
+
+    Returns:
+        ``True`` for ``import module``, ``import module.sub``, ``from module import x`` and
+        ``from module.sub import x``, including indented imports inside functions.
+    """
+    pattern = re.compile(rf"^\s*(?:import|from)\s+{re.escape(module)}(?:\s|\.|$)", re.MULTILINE)
+    return pattern.search(text) is not None
+
+
+def test_as_app_does_not_import_the_anti_fraud_as(repo_root: Path) -> None:
+    """The two AS instances stay independent: AS-1 is never imported by AS-2 (REQ-F-026).
+
+    The reverse direction is by design — ``anti_fraud_as`` reuses ``as_app``'s
+    use-case-agnostic modules (ADR-0007 decision 9) — so only the forbidden direction is
+    asserted. The chain is configuration only, and a shared import would couple the two
+    processes and break that premise.
+    """
+    offenders = [
+        str(path)
+        for path in (repo_root / "src/as_app").rglob("*.py")
+        if imports_module(path.read_text(encoding="utf-8"), FORBIDDEN_AS_APP_IMPORT)
+    ]
+    assert not offenders, "src/as_app must not import anti_fraud_as (REQ-F-026): " + ", ".join(
+        offenders
+    )
+
+
+def test_make_demo_chained_is_a_documented_first_class_entry_point(repo_root: Path) -> None:
+    """``make demo-chained`` is a real target and is documented (REQ-NF-017).
+
+    The command is the chain's first-class entry point, mirroring ``make demo`` /
+    ``make demo-fraud`` (ADR-0008 decision 6). The assertion pins the command name in the
+    ``Makefile`` and in the four documents that must carry it — not the prose around it.
+    """
+    makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
+    assert re.search(r"^demo-chained:", makefile, re.MULTILINE), (
+        "the Makefile has no `demo-chained` target"
+    )
+    for relative in DEMO_CHAINED_DOCUMENTS:
+        assert "demo-chained" in (repo_root / relative).read_text(encoding="utf-8"), (
+            f"`make demo-chained` is not named in {relative}"
+        )
+
+
+def test_chaining_added_no_new_configuration_knob(repo_root: Path) -> None:
+    """The chained wiring reuses the existing peer/listen knobs (REQ-NF-017).
+
+    P9 added no environment variable: AS-1's next hop is the existing ``FRAUD_SBC_PEER_*``
+    and AS-2's is the routing catalogue (ADR-0008 decision 1), so ``.env.example`` gained no
+    key for the chain. Only the absence of a chaining knob is asserted.
+    """
+    content = (repo_root / ".env.example").read_text(encoding="utf-8")
+    declared = {
+        line.split("=", 1)[0].strip()
+        for line in content.splitlines()
+        if "=" in line and not line.lstrip().startswith("#")
+    }
+    chaining_keys = sorted(key for key in declared if "chain" in key.lower())
+    assert not chaining_keys, f"chaining introduced new configuration keys: {chaining_keys}"

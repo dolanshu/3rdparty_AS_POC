@@ -1972,3 +1972,349 @@ the same flow with narration.
   `http.client.BadStatusLine: GET /healthz HTTP/1.1` (20/20 green in isolation). Registered as
   its own row in `docs/production-gaps.md` and as a follow-up in `docs/phase2-plan.md` §7
   item 7; deliberately left unfixed here (`AGENT.md` §14 rule 4).
+
+## Phase 2 — P8 anti-fraud AS (2026-09-19)
+
+Branch `phase2` (item **P8** in `docs/phase2-plan.md` §3; under the branch model of §4 P8 is
+worked directly on `phase2`). Acceptance items **ACC-P8-001 … ACC-P8-006** in
+`docs/acceptance/criteria.md`; their requirements are `REQ-F-016 … REQ-F-024` and
+`REQ-NF-011 … REQ-NF-015`. Design rationale is **ADR-0007**.
+
+What was verified: a **second, independently runnable** AS process that screens the **calling**
+party and returns a verdict — an allowed INVITE is relayed as a B2BUA unchanged, a rejected one
+is answered `608 Rejected` from the UAS side with **no second leg** and **no `Call-Info`**. The
+cross-call state (call-rate window, reputation decay, block/allow lists) is a process-level,
+in-memory store; the verdict itself is a pure function. Nothing in the number-translation AS's
+behaviour changed, and `make demo` still passes (below).
+
+Result: **accepted**, with the limitations recorded under *Accepted limitations and open items*.
+
+Environment of this run: Linux x86-64, loopback only; Python 3.10.12; sippy 2.4.2; `uv`
+0.12.15; repository `VERSION` = 0.5.1 at the time of the run.
+
+### 1. Command and output
+
+Every command below was run from the repository root on `phase2`; the outputs are pasted
+verbatim (ports and Call-IDs are ephemeral and vary per run).
+
+**The gate (`AGENT.md` §13: local, before the commit — not a CI result, see §3).**
+
+```text
+$ uv run ruff format --check .
+86 files already formatted
+$ uv run ruff check .
+All checks passed!
+$ uv run mypy
+Success: no issues found in 28 source files
+$ uv run pytest tests -q
+237 passed in 34.22s
+```
+
+**ACC-P8-001** — second process, own ports/file/feed, self-check, stop path, no new dependency:
+
+```text
+$ uv run python -m anti_fraud_as.main --self-check-only ; echo $?
+{"timestamp": "2026-09-19T16:27:19+0800", "level": "info", "module": "main", "call_id": "-",
+ "direction": "internal", "peer": "-", "event": "anti-fraud application server starting",
+ "version": "0.5.1", "listen": "127.0.0.1:5062", "next_hop": "127.0.0.1:15061"}
+{"timestamp": "2026-09-19T16:27:19+0800", "level": "info", "module": "main", "call_id": "-",
+ "direction": "internal", "peer": "-", "event": "startup self-check passed",
+ "screening_file": "config/caller_screening.yaml"}
+0
+
+$ uv run pytest tests/integration/test_fraud_screening_path.py tests/unit/test_fraud_configuration.py -q
+28 passed in 14.06s
+```
+
+**ACC-P8-002** — allow relay with nothing added, `608 Rejected` reject with no second leg:
+
+```text
+$ uv run pytest tests/e2e/test_fraud_call_flows.py tests/integration/test_fraud_screening_path.py -q
+15 passed in 14.80s
+```
+
+**ACC-P8-003** — verdict inputs, declarative data, `sip.608` declaration, no media:
+
+```text
+$ uv run pytest tests/unit/test_screening_engine.py tests/unit/test_screening_data.py tests/integration/test_fraud_screening_path.py -q
+58 passed in 14.19s
+```
+
+**ACC-P8-004** — pure verdict, process-level in-memory state, injected clock:
+
+```text
+$ uv run pytest tests/unit/test_caller_state.py tests/unit/test_screening_engine.py -q
+37 passed in 0.05s
+```
+
+**ACC-P8-005** — `AS-FRAUD-*` error model and observability surfaces:
+
+```text
+$ uv run pytest tests/unit/test_fraud_error_model.py -q
+18 passed in 0.27s
+```
+
+**ACC-P8-006** — the `608` reject path verified by running sippy over real UDP:
+
+```text
+$ uv run python tools/anti_fraud_probe.py ; echo $?
+# (before this block the tool echoes the INVITE and the responses through sippy's own
+#  SipLogger; that echo is omitted here because the same messages appear below)
+python      : 3.10.12
+sippy       : 2.4.2
+stack port  : 127.0.0.1:48458  (client port 47300)
+reject      : 608 Rejected  via CCEventFail((status, phrase, None))
+--- INVITE sent -------------------------------------------------
+INVITE sip:+8613800138000@127.0.0.1:48458;user=phone SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:47300;branch=z9hG4bK608probe0001;rport
+Max-Forwards: 70
+From: <sip:+86216180001@127.0.0.1>;tag=608probe-from-0001
+To: <sip:+8613800138000@127.0.0.1>
+Call-ID: 608probe-23172@example.invalid
+CSeq: 1 INVITE
+Contact: <sip:127.0.0.1:47300>
+Feature-Caps: *;+sip.608
+Content-Length: 0
+--- responses received -------------------------------------------
+[1] SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:47300;branch=z9hG4bK608probe0001;rport=47300
+From: <sip:+86216180001@127.0.0.1>;tag=608probe-from-0001
+To: <sip:+8613800138000@127.0.0.1>
+Call-ID: 608probe-23172@example.invalid
+CSeq: 1 INVITE
+Server: AS POC anti-fraud probe
+Content-Length: 0
+[2] SIP/2.0 608 Rejected
+Via: SIP/2.0/UDP 127.0.0.1:47300;branch=z9hG4bK608probe0001;rport=47300
+From: <sip:+86216180001@127.0.0.1>;tag=608probe-from-0001
+To: <sip:+8613800138000@127.0.0.1>;tag=98fda71522ce3e6c0e6c69c69ab4c8f4
+Call-ID: 608probe-23172@example.invalid
+CSeq: 1 INVITE
+Server: AS POC anti-fraud probe
+Content-Length: 0
+handler: CCEventTry -> CCEventFail((608, 'Rejected', None))
+--- verdict --------------------------------------------------------
+final status line: SIP/2.0 608 Rejected
+expected         : SIP/2.0 608 Rejected
+CCEventFail 608 'Rejected' reject path: OK
+0
+```
+
+**Demo rehearsals** (narrated in `docs/demo-script.md`, checklist in `docs/demo-steps.md`).
+
+`make demo` — the Phase 1 path, unchanged and non-regressed, exit 0, Call-ID
+`25fb6631a8f499efe683987779ec8e8d`:
+
+```text
+[2/5] routing decision
+rule        : R-MOB-CM-40
+disposition : route
+translation : called number -> 013800138000
+next hops   : s-sbc-primary -> s-sbc-failover
+served by   : s-sbc-primary
+...
+[4/5] message flow (14 messages on the wire)
+...
+[5/5] outcome
+status      : 200
+released    : True
+cancelled   : False
+
+demo result: call answered and released; number translation applied on the wire
+```
+
+`make demo-fraud` — the new capability, exit 0 (allow Call-ID
+`55bfaf10a1f65dedf82bb81c700754be`, reject Call-ID `22aea7e5add0dc10f702066db1c0849f`):
+
+```text
+anti-fraud AS POC - screening demo
+topology   : emulated S-CSCF --UDP--> anti-fraud AS (608 Rejected) --UDP--> emulated core network
+ports      : anti-fraud-as 127.0.0.1:47280, trunk 47064, core 48564
+screening  : config/caller_screening.yaml
+verdict    : allow list -> block list -> call-rate window -> reputation
+
+[1/2] call allowed and relayed
+caller       : +86216180001
+called       : +8613800138000
+Call-ID      : 55bfaf10a1f65dedf82bb81c700754be
+verdict      : allow
+signal       : none
+reason       : no screening signal rejected the call
+reputation   : 100.0
+calls in window: 1
+sip.608 declared: True
+final status : 200
+released     : True
+
+      expected SIP 200, observed 200; core INVITE delta 1
+
+[2/2] call rejected with 608
+caller       : +8613400000001
+called       : +8613800138000
+Call-ID      : 22aea7e5add0dc10f702066db1c0849f
+verdict      : reject
+signal       : block_list
+reason       : calling party is on the block list
+list entry   : BL-0001
+reputation   : 100.0
+calls in window: 1
+sip.608 declared: True
+final status : 608
+released     : True
+second leg   : none - the AS answered from the UAS side (RFC 8688, no Call-Info)
+
+      expected SIP 608, observed 608; core INVITE delta 0
+
+demo result: allow relayed to the core, reject answered 608 by the AS alone
+```
+
+### 2. Log excerpt
+
+Call-ID **`b1d66c2e342409d7f4a2093614961769`** — the **allow** path, produced by running the
+anti-fraud AS as a real process (`python -m anti_fraud_as.main`, `LOG_STRUCTURED=true`) with the
+mock S-SBC driving two calls. Structured logging on, real lines, verbatim:
+
+```text
+{"timestamp": "2026-09-19T16:28:32+0800", "level": "info", "module": "call_controller", "call_id": "b1d66c2e342409d7f4a2093614961769", "direction": "in", "peer": "127.0.0.1:46163", "event": "invite received on the trunk", "method": "INVITE"}
+{"timestamp": "2026-09-19T16:28:32+0800", "level": "info", "module": "call_controller", "call_id": "b1d66c2e342409d7f4a2093614961769", "direction": "internal", "peer": "127.0.0.1:46163", "event": "screening verdict taken", "verdict": "allow", "screen_source": "none", "screen_reason": "no screening signal rejected the call", "reputation": 100.0, "calls_in_window": 1, "identity_present": true, "sip_608_declared": true, "list_entry": ""}
+{"timestamp": "2026-09-19T16:28:32+0800", "level": "info", "module": "call_controller", "call_id": "b1d66c2e342409d7f4a2093614961769", "direction": "out", "peer": "127.0.0.1:46162", "event": "invite relayed towards the next hop", "method": "INVITE", "verdict": "allow"}
+{"timestamp": "2026-09-19T16:28:33+0800", "level": "info", "module": "call_controller", "call_id": "b1d66c2e342409d7f4a2093614961769", "direction": "internal", "peer": "-", "event": "call finished", "disposition": "completed"}
+```
+
+Call-ID **`688fdcca0121b71f333688fedf432bf1`** — the **`608` reject** path, from the same run.
+It carries the verdict (`reject`), the matched list entry (`BL-0001`), the `608` and the
+`AS-FRAUD-001` code; it carries **no** `invite relayed towards the next hop` event, i.e. no
+second leg was originated:
+
+```text
+{"timestamp": "2026-09-19T16:28:34+0800", "level": "info", "module": "call_controller", "call_id": "688fdcca0121b71f333688fedf432bf1", "direction": "in", "peer": "127.0.0.1:46163", "event": "invite received on the trunk", "method": "INVITE"}
+{"timestamp": "2026-09-19T16:28:34+0800", "level": "info", "module": "call_controller", "call_id": "688fdcca0121b71f333688fedf432bf1", "direction": "internal", "peer": "127.0.0.1:46163", "event": "screening verdict taken", "verdict": "reject", "screen_source": "block_list", "screen_reason": "calling party is on the block list", "reputation": 100.0, "calls_in_window": 1, "identity_present": true, "sip_608_declared": true, "list_entry": "BL-0001"}
+{"timestamp": "2026-09-19T16:28:34+0800", "level": "warning", "module": "call_controller", "call_id": "688fdcca0121b71f333688fedf432bf1", "direction": "out", "peer": "127.0.0.1:46163", "event": "call rejected by screening", "method": "608", "sip_608_declared": true, "error_code": "AS-FRAUD-001", "sip_status": "608", "error_detail": "calling party is on the block list", "screen_source": "block_list"}
+```
+
+The same run's **trunk-side** view (the mock S-SBC) confirms what the caller received, keyed by
+the same Call-ID, and that the AS identified itself as the anti-fraud instance:
+
+```text
+SIP/2.0 608 Rejected
+Via: SIP/2.0/UDP 127.0.0.1:46163;rport=46163;branch=z9hG4bK94de000137268f15809fcb5c3144ec96
+From: <sip:+8613400000001@127.0.0.1>;tag=9a76fd70b5a6eec3f38af1edf018457b
+To: <sip:+8613800138000@127.0.0.1>;tag=666a5439be72cb3aa9a77d822a8e2d05
+Call-ID: 688fdcca0121b71f333688fedf432bf1
+CSeq: 1699667635 INVITE
+Server: 3rd-party AS POC anti-fraud
+Content-Length: 0
+```
+
+### 3. CI
+
+**No CI run can exist for `phase2`, and none exists.** `.github/workflows/ci.yml` triggers on
+`push` / `pull_request` **targeting `main` only**; the only other trigger is `workflow_dispatch`,
+which a maintainer would have to start by hand and which no agent may start. So there is no run
+to link, no badge for this branch and no per-job conclusion to report. `AGENT.md` §13 is explicit
+that the local pre-commit gate is **not** CI and must never be presented as a CI result, so the
+gate in §1 above (ruff format / ruff check / mypy / `pytest tests -q` → `237 passed`) is recorded
+as a **local** run, not as kind-3 evidence.
+
+This is the one `AGENT.md` §4.8 evidence kind that P8 cannot supply from this environment.
+Following the precedent of the P3 section above, it is recorded here as **the maintainer's action
+required**: once P8 lands on the final `phase2` → `main` merge, a run of
+`.github/workflows/ci.yml` on `main` is the kind-3 artefact, and it must be recorded then by
+whoever can read it. Nothing in this report claims a CI result.
+
+### 4. Capture
+
+**There is no capture path for the anti-fraud flows, and this section records that plainly
+rather than manufacturing a reference.** The generated samples under
+`docs/specs/message-samples/` (gitignored; reproduced with `make capture`) come from
+`tools/capture_call.py`, which drives the **number-translation** AS (`as_app.main.AsStack`), not
+`anti_fraud_as.main.FraudAsStack`; there is no `--fraud` variant. So there is no committed pcap
+or message-sample set of the anti-fraud allow/reject flows.
+
+What **does** exist, and is reproducible from the committed tree:
+
+- The wire-level guard is the **integration test's own recorded bytes**: the AS-side
+  `SipMessageRecorder` (`as_messages`) is asserted for the full final status line
+  `SIP/2.0 608 Rejected`, for the absence of `Call-Info` / `Content-Type` on the `608`, and for
+  the absence of any second-leg INVITE. That is the wire reference for this item and it is
+  reproduced by the ACC-P8-002 command above — it is not a file that can be committed
+  (`AGENT.md` §13 forbids committing captures).
+- The mock UAC INVITE that the anti-fraud AS screens — including the `sip.608` declaration — is
+  reproducible with the committed capture tool, exactly as ADR-0007 records it:
+
+  ```text
+  $ uv run python tools/capture_call.py --output-dir captures/probe
+  captured   : 14 messages
+  $ grep -rin 'feature-caps' captures/probe/
+  captures/probe/01-in-invite-trunk.txt:18:Feature-caps: *;+sip.608
+  ```
+
+  (`captures/` is gitignored.) Key excerpt of that sample, `01-in-invite-trunk.txt` line 18 —
+  note the on-wire casing `Feature-caps`, sippy's generic-header rendering, which RFC 3261 §7.3.1
+  makes case-insensitive; the anti-fraud AS does not depend on this sample, it is the same mock
+  UAC.
+
+**What is missing:** a capture of the anti-fraud allow and reject exchanges (the `608` on the
+trunk, the relayed INVITE on the allow path). Producing one needs either a `--fraud` mode for the
+capture tool, or a committed in-repo recorder dump; neither exists today. Recorded as an open
+item below, not worked around.
+
+### Item results
+
+| ID | Result |
+| --- | --- |
+| ACC-P8-001 | **accepted** — self-check exit `0`; `28 passed`. Real-process lifecycle (health, `SIGTERM` exit `0`), loop-owned reload, stop path cancels the controller timer and leaves no timer of the stopped manager scheduled; own port `5062`, own `FRAUD_*` knobs, no new dependency |
+| ACC-P8-002 | **accepted** — `15 passed`. Full `SIP/2.0 608 Rejected` on the wire, no `Call-Info`, no second-leg INVITE; allow path relays with no header added, Request-URI and SDP kept |
+| ACC-P8-003 | **accepted** — `58 passed`. Signal order, window/reputation thresholds, declarative file validation and fail-safe reload, `sip.608` declared/undeclared handling, no media |
+| ACC-P8-004 | **accepted** — `37 passed`. Pure engine (no clock), process-level bounded store with injected clock and exponential decay. The "restart loses it" half has **no test** (gap register) |
+| ACC-P8-005 | **accepted** — `18 passed`. `AS-FRAUD-001 … 006` in the shared error model; the `AS-FRAUD-006` fallback itself is **untested** (see below) |
+| ACC-P8-006 | **accepted** — probe exit `0`, `CCEventFail 608 'Rejected' reject path: OK`. The probe is a design instrument, **not** a test and **not** in the gate; the on-wire guard is ACC-P8-002's assertion |
+
+### Evidence kinds per item
+
+| Item | Kind 1 (command + output) | Kind 2 (Call-ID log) | Kind 3 (CI) | Kind 4 (capture) |
+| --- | --- | --- | --- | --- |
+| ACC-P8-001 | yes (§1) | yes (§2, both Call-IDs) | **not producible** (§3: no CI for `phase2`) | **not applicable** — process/lifecycle, no distinct wire artefact |
+| ACC-P8-002 | yes (§1) | yes (§2, reject excerpt) | **not producible** (§3) | **partial** (§4: recorded wire bytes asserted in-test; no committed sample) |
+| ACC-P8-003 | yes (§1) | yes (§2) | **not producible** (§3) | **partial** (§4) |
+| ACC-P8-004 | yes (§1) | yes (§2, allow/reject verdict lines) | **not producible** (§3) | **not applicable** — pure/state behaviour, no wire artefact |
+| ACC-P8-005 | yes (§1) | yes (§2) | **not producible** (§3) | **partial** (§4) |
+| ACC-P8-006 | yes (§1) | yes (§2) | **not producible** (§3) | yes (§4/§1: the probe emits the real INVITE and the `SIP/2.0 608 Rejected` response) |
+
+Kind 3 is the one kind P8 cannot supply (no CI can run for `phase2`); it is recorded honestly
+above, and the maintainer's post-merge `main` run replaces it then. This carries forward the same
+caveat the P3 section states.
+
+### Accepted limitations and open items
+
+Consistent with the stage-4 position, and not hidden:
+
+- **`REQ-NF-015` is satisfied by a design instrument plus an on-wire assertion, not by a test.**
+  The probe (`tools/anti_fraud_probe.py`, recorded in ADR-0007) is what "verified by running
+  sippy" means; the new integration test asserts the full on-wire line `SIP/2.0 608 Rejected`.
+  The probe is **not a pytest test** and **does not run in CI**.
+- **Two requirement halves have no test because they are non-behaviours:**
+  `REQ-NF-012`'s *"a restart loses it"* half and `REQ-NF-013`'s *"a real UAC that does not
+  declare `sip.608` would require an announcement"* half. Both are covered by registered rows in
+  `docs/production-gaps.md`; neither is an executed check.
+- **`CallScenario.expect_status` is a dead Phase 1 field.** It is set by tests but read nowhere;
+  the assert is always on the observed `CallOutcome.status`. Not modified here (`AGENT.md` §14
+  rule 4) — recorded so it is not mistaken for coverage.
+- **The `AS-FRAUD-006` fallback and the `next_hop is None` branch are untested.**
+  `_error_code_for` falls back to `FRAUD_NO_VERDICT` and `_originate_allowed` answers `AS-CFG-001`
+  when no next hop is configured; neither path is exercised (the stack always configures a next
+  hop). Accepted, not hidden.
+- **`tools/capture_call.py` exits non-zero when `--output-dir` is a relative path.**
+  Observed while reproducing ADR-0007's command: the 14 samples are written, then the final
+  `path.relative_to(REPO_ROOT)` raises
+  `ValueError: 'captures/probe/01-in-invite-trunk.txt' is not in the subpath of '<repo>'` and the
+  tool exits `1`. This is the same class of bug fixed in `tools/demo_call.py` at M4
+  (`CHANGELOG.md` 0.5.0 *Fixed*) but never fixed here. `make capture` (absolute default output
+  dir) is unaffected. **Found, reported, not fixed** — outside P8's scope (`AGENT.md` §14 rule 4).
+- **`make demo-fraud` leaks one unformatted log line to stderr.** The tool does not call
+  `configure_logging`, so the reject path's `WARNING` record reaches `logging.lastResort` and
+  prints a bare `call rejected by screening` line; it appears interleaved with the transcript
+  depending on buffering. Cosmetic; **found, reported, not changed** (the demo tool's logging
+  setup, not application behaviour).
+- **No anti-fraud capture path** — see §4; recorded as missing rather than manufactured.
+

@@ -372,12 +372,15 @@ outbound leg, derived from the value AS-2 received). `Call-ID` is not a pass-thr
 originates** (`docs/architecture/lld.md` section 2.3, ADR-0008 decision 2). Two consequences
 follow, and both are stated rather than discovered:
 
-- **Cross-AS correlation is not solved**, and cannot be solved on `Call-ID`. Each instance
-  still writes its own `Call-ID` keyed trace and console feed — keyed by the value *it* saw
-  on its trunk leg — so a chained call is **three independent per-instance traces**, which is
-  what `REQ-NF-016` registers as a POC gap. The standard end-to-end key is
-  `P-Charging-Vector`'s ICID, which both instances already pass through but which the mock
-  never generates, so the POC has no end-to-end key on the wire at all (ADR-0008 decision 4).
+- **Cross-AS correlation is not solved** on `Call-ID`, and cannot be: each instance writes
+  its own trace and console feed keyed by the value *it* saw on its trunk leg, so a chained
+  call is **three independent per-instance traces**, which is what `REQ-NF-016` registers as
+  a POC gap. **The standard end-to-end key is nevertheless on the wire**: the
+  `P-Charging-Vector`'s ICID is in `PASSTHROUGH_HEADERS` (section 3), both instances copy it
+  verbatim, and the probe measures it surviving every hop — but **no observability surface is
+  keyed on it**, and the mock's ICID is a per-scenario literal rather than a per-call
+  identity. Re-keying the traces on the ICID is a change to both instances' observability
+  contract and is P10's material, not P9's (ADR-0008 decision 4).
 - **The demo makes the distinct values visible** by printing the `Call-ID` each hop saw,
   rather than presenting a correlation that does not exist (`REQ-F-028`, ADR-0008 decision 4).
 

@@ -910,11 +910,14 @@ Consequences for the implementation, stated so they are not rediscovered:
   those values differ, so there is no shared key and no correlation to demonstrate. This is
   the POC gap `REQ-NF-016` registers, and it is registered rather than hidden: the demo
   prints the distinct value each hop saw.
-- **The end-to-end key is not on the wire.** The standard correlation key is
+- **The end-to-end key is on the wire but unused.** The standard correlation key is
   `P-Charging-Vector`'s ICID, and both instances **do** forward it (`PASSTHROUGH_HEADERS`,
-  section 2.3), but the mock never generates a `P-Charging-Vector`, so the POC has no
-  end-to-end key at all (ADR-0008 decision 4; the gap is registered in the implementation
-  commit).
+  section 2.3): `tools/chained_as_probe.py` measures the same ICID at the trunk, at AS-2 and
+  at the core (`ICID preserved: True`). It does not make the two traces correlate, because
+  **no observability surface is keyed on it** — the trace, the log, the metrics and the
+  console all use the local `Call-ID` — and because the mock writes a **per-scenario**
+  literal (`poc-{scenario.name}`, `MockUac._isc_headers`) rather than a per-call identity.
+  Re-keying those surfaces on the ICID is P10's material (ADR-0008 decision 4).
 - **The derivation is the controller's job, and was omitted twice.** `Call-ID` is not in
   `PASSTHROUGH_HEADERS`, but reading that table does not answer the question: the value
   crosses inside the `CCEventTry`, and the **controller** decides whether it survives. The
@@ -975,10 +978,14 @@ documented entry point runnable from a clean checkout, and it writes nothing.
   section 10.2 is visible rather than papered over. It asserts that each transition is exactly
   `outbound_call_id()` of the previous one, which is `REQ-NF-016`'s premise made observable and
   is what turns `REQ-F-028`'s "observable per instance" into something a reviewer can read.
+- **The ICID per hop.** It also prints the `P-Charging-Vector` ICID each hop saw and asserts
+  they are equal, so a reviewer sees both halves of the correlation question: the dialog
+  identity is regenerated per leg, while the standard end-to-end key is passed through and
+  unused (section 10.2, ADR-0008 decision 4).
 - **It is a guard.** It exits non-zero when any of those properties fails, like the probe and
   unlike a pure printout.
 
-The design instrument `tools/chained_as_probe.py` already exercises the same three properties
+The design instrument `tools/chained_as_probe.py` already exercises the same four properties
 and is the evidence for ADR-0008; the demo is the narrated, documented form of it
 (`docs/demo-script.md` / `docs/demo-steps.md` gain the section at the item's close).
 
@@ -994,7 +1001,7 @@ stage**, and the ADR index range is updated in the implementation commit exactly
 | New run command `make demo-chained` | `AGENT.md` section 10 (the command list), `Makefile` (target), `README.md` quickstart, `docs/README.md` |
 | New tool `tools/demo_chained_call.py` | `tools/README.md` (row plus the running block), which already carries `tools/chained_as_probe.py` |
 | New design artefact `docs/architecture/adr/0008-*.md` | the **ADR index range** in **`README.md`** and **`docs/README.md`**, which both read *"ADR-0001 … ADR-0007"* today, becomes *"ADR-0001 … ADR-0008"*, with the one-line description of ADR-0008 alongside the others |
-| New gaps accepted | `docs/production-gaps.md` (no iFC/ISC emulation; **no end-to-end correlation key on the wire — `Call-ID` cannot correlate once every leg regenerates it, and the mock emits no `P-Charging-Vector`**; no shared state; catalogue coupling; no chain failure/ordering semantics) |
+| New gaps accepted | `docs/production-gaps.md` (no iFC/ISC emulation; **no cross-AS trace correlation — `Call-ID` cannot correlate once every leg regenerates it, and although the ICID is passed through the whole chain it is a per-scenario literal that no observability surface is keyed on**; no shared state; catalogue coupling; no chain failure/ordering semantics) |
 | Anti-fraud outbound `Call-ID` (section 9.6) | `src/anti_fraud_as/call_controller.py` — the defect fix, with its own unit/integration assertion; `CHANGELOG.md` under `[Unreleased] ### Fixed`, alongside the Phase 1 fix already recorded there |
 | New acceptance items `ACC-P9-*` and evidence | `docs/acceptance/criteria.md`, `docs/acceptance/report.md` |
 | Demo documentation | `docs/demo-script.md`, `docs/demo-steps.md` — the chained section, at the item's close |

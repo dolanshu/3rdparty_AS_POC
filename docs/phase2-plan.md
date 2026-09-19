@@ -662,6 +662,21 @@ consequence of the fix that only the chain makes observable.
   is **not** new POC friction the fix introduced, and the fix's own conversation was right
   not to register it there.
 
+**Stage-2 review gate — run, with one blocking finding, fixed and recorded here (§5.2).** The
+deferred read-only review of the redone design ran against commit `381f741`. One finding was
+**blocking** and is worth recording because it is the kind of error the pipeline exists to
+catch: ADR-0008 decision 4 asserted that the mock emits **no** `P-Charging-Vector` and that
+the POC therefore has **no** end-to-end correlation key at all. That was **false** — the mock
+has always written one (`MockUac._isc_headers`), `p-charging-vector` is in
+`PASSTHROUGH_HEADERS`, and the probe now **measures** the same ICID at the trunk, at AS-2 and
+at the core. It was wrong because it was reasoned from the design instead of observed, which
+is precisely what `AGENT.md` §6 forbids. **Fixed inside the stage, not carried forward**: the
+probe gained an ICID observation and an assertion, and ADR-0008 decision 4, the *Gaps
+accepted* row, HLD §9.3, LLD §10.2 and LLD §10.5 now state the measured position — the key is
+on the wire and preserved, but it is a **per-scenario literal** that **no observability
+surface is keyed on**, so the *traces* still do not correlate. Per §5.2 the stage is **not
+re-reviewed**; the remaining findings were non-blocking and are folded in above.
+
 **Entry state for resuming P9.** `main` carries the `Call-ID` fix and `phase2` carries it by
 merge; the requirements of decision 4 are unchanged, so `REQ-NF-016` / `REQ-F-028` and this
 plan's §6 and §3 wording are **not touched**; stage 2 is redone on the fixed behaviour — the

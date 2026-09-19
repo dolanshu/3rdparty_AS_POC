@@ -123,21 +123,52 @@ assignment are withdrawn with it.
 `Call-ID` keyed trace and console feed, keyed by the `Call-ID` **it** saw on its trunk leg,
 so a chained call is observable per instance even though the values now differ.
 
-### 4. Cross-AS correlation is not solved, and is registered as a gap
+### 4. Cross-AS correlation on `Call-ID` is not solved; the ICID is on the wire but nothing uses it
 
 Because every leg regenerates the identity, **the `Call-ID` cannot be used to correlate
 across the two AS instances**: the value the S-CSCF used, the value AS-2 saw on its trunk
 leg and the value the core saw are three different strings. P9 therefore **registers the
-absence** rather than demonstrating a correlation, exactly as `REQ-NF-016` states.
+absence** rather than demonstrating a correlation on `Call-ID`, exactly as `REQ-NF-016`
+states.
 
-**The reliance is stated, not hidden.** The correlation key a production deployment uses is
-the standard end-to-end one: `P-Charging-Vector`'s **ICID**, which ties both legs to one
-charging record and **is** in `PASSTHROUGH_HEADERS`, so both instances already forward it.
-The POC cannot demonstrate that hop because the **mock never generates a
-`P-Charging-Vector`** — there is no end-to-end key on the wire at all — which is what the
-registered gap says. Adding one to the mock is not P9's work: `AGENT.md` section 12 forbids
-building what only production would need, and the mock's job is to behave like an S-SBC on
-the trunk, not to invent a charging identity.
+**The standard alternative key is present and is preserved — measured, not assumed.** The
+correlation key a production deployment uses is the `P-Charging-Vector`'s **ICID** (3GPP
+TS 24.229), which ties both legs to one charging record. The probe now reads it at each hop
+and it survives the whole chain:
+
+```text
+S-CSCF ICID   : poc-chained-allow
+AS-2 ICID     : poc-chained-allow
+core ICID     : poc-chained-allow
+ICID preserved: True
+```
+
+That is expected rather than surprising: `p-charging-vector` **is** in `PASSTHROUGH_HEADERS`,
+so both controllers copy it verbatim, and it is the pass-through set — not the `Call-ID` —
+that decides this. **The first pass of this ADR claimed the mock emitted no
+`P-Charging-Vector` at all and that the POC therefore had no end-to-end key; that was
+wrong**, and it was wrong because it was reasoned from the design instead of measured. The
+mock has always emitted one (`MockUac._isc_headers`).
+
+**So the gap is narrower and more precise than "no key exists".** Two things are still true,
+and they are what the register records:
+
+1. **The mock's ICID is a per-scenario literal, not a per-call identity.**
+   `MockUac._isc_headers` writes `icid-value=poc-{scenario.name}`, so two calls placed from
+   the same scenario carry the **same** ICID. It therefore proves pass-through but does not
+   identify a call, and it could not be used to correlate real traffic.
+2. **Nothing in the AS consumes it.** Each instance keys its trace, its structured log, its
+   metrics and its console feed on the `Call-ID` **it** saw on its trunk leg
+   (`AGENT.md` section 4.3, `REQ-NF-005`). The end-to-end key is on the wire but no
+   observability surface is keyed on it, so an operator wanting to follow one call across two
+   instances has to join the two feeds out of band. Correlating the **traces** is what is
+   unsolved, which is the sense in which `REQ-NF-016` is true.
+
+Demonstrating a working cross-AS correlation would mean re-keying both instances' trace and
+console feeds on the ICID, or emitting an explicit correlation record. That is a change to
+the observability contract of both AS instances — a platform concern, and therefore P10's
+material, not P9's. `AGENT.md` section 12 forbids building it here because P9 has no second
+requirement for it.
 
 ### 5. A reject short-circuits the chain
 
@@ -203,8 +234,9 @@ Call-ID preserved: True
 stage.** The reworked probe asserts the *intended* per-leg property instead, and reports
 **three** distinct values as the target. It measured two, because AS-1 still carries its own
 copy of the defect (decision 2, finding (A)) — so the probe is **red until P9 stage 3 fixes
-the anti-fraud controller**, which is precisely what a design-stage guard is for. Ports and
-`Call-ID`s are ephemeral and vary per run; the rest is verbatim:
+the anti-fraud controller**, which is precisely what a design-stage guard is for. It also
+reads the ICID at each hop, which is what corrected decision 4. Ports and `Call-ID`s are
+ephemeral and vary per run; the rest is verbatim:
 
 ```text
 chained AS POC - two B2BUAs in series, wired by configuration only
@@ -217,15 +249,19 @@ caller        : +86216180001
 called        : +8613800138000
 AS-1 verdict  : allow
 AS-1 signal   : none
-S-CSCF Call-ID: 3f29687fb529ab15c96bb208cc8cc676
-AS-2 trunk Call-ID: 3f29687fb529ab15c96bb208cc8cc676
+S-CSCF Call-ID: 3030128278b9cedf429594ad44fe7e28
+AS-2 trunk Call-ID: 3030128278b9cedf429594ad44fe7e28
 AS-2 rule     : R-MOB-CM-40
-core Call-ID  : 3f29687fb529ab15c96bb208cc8cc676-b2b_1
+core Call-ID  : 3030128278b9cedf429594ad44fe7e28-b2b_1
 core called number: 013800138000
 final status  : 200
 released      : True
 distinct Call-IDs: 2
 Call-ID per leg: False
+S-CSCF ICID   : poc-chained-allow
+AS-2 ICID     : poc-chained-allow
+core ICID     : poc-chained-allow
+ICID preserved: True
 
 [2/2] rejected call short-circuits at AS-1
 caller        : +8613400000001
@@ -238,15 +274,17 @@ core INVITEs seen: 0
 allowed call completed through two B2BUAs : OK
 608 reject short-circuited before AS-2     : OK
 Call-ID regenerated on every leg           : FAILED
+ICID preserved across every leg            : OK
 ```
 
-**Conclusion.** Two of the three design assumptions hold on the fixed base: an allowed call
+**Conclusion.** Three of the four design assumptions hold on the fixed base: an allowed call
 completes through both B2BUAs (`200`, released, the core saw the translated number
-`013800138000` under rule `R-MOB-CM-40`), and a `608` reject never reaches AS-2 or the core.
-The third now reads correctly and **localises the remaining defect**: `core Call-ID` differs
-from `AS-2 trunk Call-ID` by exactly `-b2b_1`, proving AS-2 regenerates, while `AS-2 trunk
-Call-ID` still **equals** `S-CSCF Call-ID`, proving AS-1 does not. That is finding (A)
-measured, not argued.
+`013800138000` under rule `R-MOB-CM-40`), a `608` reject never reaches AS-2 or the core, and
+the end-to-end ICID survives every hop. The fourth now reads correctly and **localises the
+remaining defect**: `core Call-ID` differs from `AS-2 trunk Call-ID` by exactly `-b2b_1`,
+proving AS-2 regenerates, while `AS-2 trunk Call-ID` still **equals** `S-CSCF Call-ID`,
+proving AS-1 does not. That is finding (A) measured, not argued. The ICID row is the
+measurement that **refuted the first pass's decision 4**.
 
 **What the probe does not prove.** It runs the two stacks in **one interpreter**, as
 `tools/demo_call.py` and `tools/demo_fraud_call.py` do, because that is how the repository's
@@ -265,7 +303,9 @@ instances' traces and hide the very thing being measured.
   anti-fraud controller's outbound `Call-ID` (decision 2) — a defect fix, not chaining.
 - **A chained call is three per-instance traces, not one.** Each instance keys its trace on
   the `Call-ID` it saw on its trunk leg, and those values differ, so there is no shared key.
-  The demo prints the distinct values and the gap is registered (decision 4).
+  The demo prints the distinct values, and the gap is registered (decision 4). The
+  end-to-end ICID **is** on the wire and preserved, but no surface is keyed on it, so it does
+  not make the traces correlate today.
 - **A reject is observable as an absence.** The chain's short-circuit property is asserted by
   what AS-2 and the core did *not* receive, which is stronger evidence than a status code.
 - **The chain exposes the two next-hop mechanisms.** That AS-1 relays to a configured peer
@@ -290,11 +330,14 @@ exists.
   deployment triggers each AS from the S-CSCF by iFC and applies Initial Filter Criteria to
   route one AS's output into the next. Production: model the S-CSCF trigger and the iFC that
   inserts a second AS in the chain.
-- **No end-to-end correlation key on the wire.** `Call-ID` cannot correlate across two
-  B2BUAs once each leg regenerates it (decision 4), and the standard alternative —
-  `P-Charging-Vector`'s ICID, which both instances already pass through — is never generated
-  by the mock, so the POC has **no** end-to-end key at all. Production: correlate on the ICID
-  and require the S-SBC to generate it.
+- **No cross-AS trace correlation.** `Call-ID` cannot correlate across two B2BUAs once each
+  leg regenerates it (decision 4), and although the standard end-to-end key — the
+  `P-Charging-Vector`'s ICID — **is** passed through the whole chain (measured), no
+  observability surface is keyed on it: both instances key their trace, log, metrics and
+  console feed on the `Call-ID` of their own trunk leg. The mock's ICID is also a
+  per-scenario literal (`poc-{scenario.name}`), not a per-call identity, so it proves
+  pass-through but does not identify a call. Production: key the trace and console on the
+  ICID, with a per-call ICID generated by the S-SBC.
 - **No shared state between the two instances.** AS-1's screening state and AS-2's rule set are
   independent and neither sees the other's decision; the chain has no shared call context.
   Production: a shared session/charging context if the chain has to make a joint decision.

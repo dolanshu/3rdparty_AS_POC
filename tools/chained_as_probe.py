@@ -27,7 +27,10 @@ rather than assumed (``AGENT.md`` section 6):
 2. an INVITE AS-1 **rejects** is answered ``608`` on the trunk and never reaches AS-2 or the
    core, because the reject path originates no second leg (REQ-F-021, REQ-F-027);
 3. the dialog ``Call-ID`` **every leg** carries, which is what the cross-AS correlation
-   question of ``docs/phase2-plan.md`` section 6 and REQ-NF-016 is about.
+   question of ``docs/phase2-plan.md`` section 6 and REQ-NF-016 is about;
+4. the ``P-Charging-Vector``'s **ICID** every leg carries — the standard end-to-end
+   correlation key — which settles the other half of that question: the key is on the wire
+   and is preserved, but nothing keys an observability surface on it.
 
 **Each B2BUA gives its outbound leg its own ``Call-ID``** — the design intent of
 ``docs/architecture/lld.md`` section 2.3, implemented by ``outbound_call_id()`` in
@@ -99,6 +102,11 @@ CALL_TIMEOUT_SECONDS = 15.0
 POLL_SECONDS = 0.02
 
 
+#: The header whose ``icid-value`` is the standard end-to-end correlation key on an IMS
+#: trunk (3GPP TS 24.229). It is in ``PASSTHROUGH_HEADERS``, so both AS instances forward it.
+_CHARGING_VECTOR_HEADER = "p-charging-vector"
+
+
 def draw_loop_until(predicate: Any, timeout_seconds: float = CALL_TIMEOUT_SECONDS) -> bool:
     """Drive the sippy event loop until a condition holds or the timeout expires.
 
@@ -158,6 +166,63 @@ def decision_rule(stack: AsStack, call_id: str) -> str | None:
     return None
 
 
+def _icid_of(value: str | None) -> str | None:
+    """Return the ``icid-value`` parameter of a ``P-Charging-Vector`` header value.
+
+    Args:
+        value: The header value, for example ``icid-value=poc-x;icid-generated-at=y``.
+
+    Returns:
+        The ``icid-value``, or ``None`` when the parameter is absent.
+    """
+    if not value:
+        return None
+    for parameter in value.split(";"):
+        key, _, parameter_value = parameter.partition("=")
+        if key.strip().lower() == "icid-value":
+            return parameter_value.strip()
+    return None
+
+
+def _header_value(headers: dict[str, str] | None, name: str) -> str | None:
+    """Return a header value by case-insensitive name.
+
+    Args:
+        headers: The captured header mapping.
+        name: Header name to look up, compared lower-cased.
+
+    Returns:
+        The header value, or ``None`` when the header is absent.
+    """
+    for header_name, header_value in (headers or {}).items():
+        if header_name.lower() == name:
+            return header_value
+    return None
+
+
+def received_invite_icid(recorder: SipMessageRecorder) -> str | None:
+    """Return the ICID of the INVITE an AS received on its trunk leg.
+
+    Reads the header case-insensitively off the raw message text, because sippy renders an
+    unknown header name with only its first letter capitalised (``SipGenericHF``), so the
+    wire spelling is ``P-charging-vector``.
+
+    Args:
+        recorder: The SIP message recorder given to that AS.
+
+    Returns:
+        The ICID, or ``None`` when the recorder holds no received INVITE.
+    """
+    for message in recorder.messages:
+        if message.direction != "in" or not message.text.upper().startswith("INVITE"):
+            continue
+        for line in message.text.splitlines():
+            header_name, _, header_value = line.partition(":")
+            if header_name.strip().lower() == _CHARGING_VECTOR_HEADER:
+                return _icid_of(header_value)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the chained-topology probe and print the observed behaviour.
 
@@ -195,7 +260,10 @@ def main(argv: list[str] | None = None) -> int:
     chained_rules = rewrite_next_hop_ports(args.rules_file, core_port, rules_dir)
 
     # Each stack gets its own trace recorder and metrics registry, because both default to
-    # process-wide singletons and a shared recorder would mix the two instances' traces.
+    # process-wide singletons and a shared recorder would mix the two instances' traces. The
+    # SIP message recorders are held by name so the ICID each hop saw can be read back.
+    as1_recorder = SipMessageRecorder()
+    as2_recorder = SipMessageRecorder()
     as1 = FraudAsStack(
         FraudAsSettings(
             _env_file=None,
@@ -209,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         metrics=MetricsRegistry(),
         tracer=TraceRecorder(),
-        sip_logger=SipMessageRecorder(),
+        sip_logger=as1_recorder,
     )
     as2 = AsStack(
         AsSettings(
@@ -224,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         metrics=MetricsRegistry(),
         tracer=TraceRecorder(),
-        sip_logger=SipMessageRecorder(),
+        sip_logger=as2_recorder,
     )
     mock = SMockApplication(
         MockConfig(
@@ -300,6 +368,15 @@ def main(argv: list[str] | None = None) -> int:
         ) and core_call_id == outbound_call_id(as2_trunk_call_id)
         print(f"{'distinct Call-IDs':<{_LABEL_WIDTH}}: {len(set(hop_call_ids))}")
         print(f"{'Call-ID per leg':<{_LABEL_WIDTH}}: {per_leg_ok}")
+        core_icid = _icid_of(
+            _header_value(core_invite.headers, _CHARGING_VECTOR_HEADER) if core_invite else None
+        )
+        icids = [received_invite_icid(as1_recorder), received_invite_icid(as2_recorder), core_icid]
+        icid_preserved = all(icid is not None for icid in icids) and len(set(icids)) == 1
+        print(f"{'S-CSCF ICID':<{_LABEL_WIDTH}}: {icids[0]}")
+        print(f"{'AS-2 ICID':<{_LABEL_WIDTH}}: {icids[1]}")
+        print(f"{'core ICID':<{_LABEL_WIDTH}}: {icids[2]}")
+        print(f"{'ICID preserved':<{_LABEL_WIDTH}}: {icid_preserved}")
         print()
 
         allowed_ok = (
@@ -345,6 +422,7 @@ def main(argv: list[str] | None = None) -> int:
         rejected_ok = rejected_final.status == 608 and as2_delta == 0 and core_delta == 0
         results.append(rejected_ok)
         results.append(per_leg_ok)
+        results.append(icid_preserved)
     finally:
         as1.stop()
         as2.stop()
@@ -355,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"allowed call completed through two B2BUAs : {'OK' if results[0] else 'FAILED'}")
     print(f"608 reject short-circuited before AS-2     : {'OK' if results[1] else 'FAILED'}")
     print(f"Call-ID regenerated on every leg           : {'OK' if results[2] else 'FAILED'}")
+    print(f"ICID preserved across every leg            : {'OK' if results[3] else 'FAILED'}")
     return 0 if all(results) else 1
 
 

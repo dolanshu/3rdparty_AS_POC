@@ -44,7 +44,11 @@ from typing import Any
 
 import pytest
 
-from as_app.sip_adapter import PASSTHROUGH_HEADERS, TRANSACTION_TIMER_NAMES
+from as_app.sip_adapter import (
+    PASSTHROUGH_HEADERS,
+    TRANSACTION_TIMER_NAMES,
+    outbound_call_id,
+)
 from s_sbc_mock.uac import CallScenario
 
 pytestmark = pytest.mark.integration
@@ -160,7 +164,10 @@ def test_headers_and_sdp_pass_through(trunk_pair) -> None:
     assert finished, "the call did not finish within the timeout"
     assert trunk_pair.mock.uas.received_invites, "no INVITE reached the core side"
 
-    messages = trunk_pair.as_messages.messages_for(call_id)
+    # One B2BUA call spans two Call-IDs: the trunk leg keeps the one the mock generated
+    # and the AS gives its outbound leg a derived one (`<trunk>-b2b_1`). Select both, in
+    # capture order, so both INVITEs of the one call this fixture places are seen.
+    messages = trunk_pair.as_messages.messages_for_any((call_id, outbound_call_id(call_id)))
     inbound = [m for m in messages if m.direction == "in" and m.text.startswith("INVITE ")]
     outbound = [m for m in messages if m.direction == "out" and m.text.startswith("INVITE ")]
     assert len(inbound) == 1, f"expected one inbound INVITE, got {len(inbound)}"
@@ -180,7 +187,10 @@ def test_headers_and_sdp_pass_through(trunk_pair) -> None:
         )
     # Headers the AS owns or regenerates must not be copied from the trunk leg.
     assert forwarded_headers["user-agent"] != sent_headers["user-agent"]
-    assert forwarded_headers["call-id"] == sent_headers["call-id"]
+    # The second leg has its own dialog identity: its Call-ID is derived from the trunk
+    # one with sippy's `-b2b_1` suffix and is therefore not the inbound value.
+    assert forwarded_headers["call-id"] == outbound_call_id(sent_headers["call-id"])
+    assert forwarded_headers["call-id"] != sent_headers["call-id"]
 
     assert body_of(outbound[0].text) == body_of(inbound[0].text), "SDP body changed"
     assert body_of(outbound[0].text) == scenario.sdp_offer.strip()

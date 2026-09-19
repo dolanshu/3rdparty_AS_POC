@@ -8,6 +8,19 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+### Fixed
+
+- The outbound leg now carries its own Call-ID instead of reusing the trunk one verbatim.
+  `CallController.apply_call_policy` derives a fresh `SipCallId` from the inbound one with
+  sippy's own suffix `-b2b_1` (the `CCB2BUA` style, `sippy/b2bua.py`), so the second leg has
+  its own dialog identity as `docs/architecture/lld.md` section 2.3 already specified. sippy
+  copies a non-`None` Call-ID from the `CCEventTry` instead of generating one
+  (`sippy/UacStateIdle.py`), and this AS runs a bare `sippy.UA` rather than `CCB2BUA`, which
+  is why nothing rewrote it before. The route number `1` is the AS's single outbound leg,
+  and every failover hop reuses the same value. `CallController.call_id` stays the trunk
+  Call-ID for the log/trace correlation key. The message samples and the affected acceptance
+  items (ACC-M1-002 / ACC-M1-005 / ACC-M2-005) were re-tested.
+
 ## [0.5.1] - 2026-09-18
 
 ### Added

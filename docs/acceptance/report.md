@@ -382,8 +382,10 @@ on 2026-09-16 and stored verbatim in `docs/specs/message-samples/` (generated an
 gitignored — reproduce with `make capture`):
 
 - `01-in-invite-trunk.txt` — the INVITE that arrives on the trunk.
-- `03-out-invite-core.txt` — the INVITE the AS originates; same Call-ID, same
-  pass-through headers, same SDP.
+- `03-out-invite-core.txt` — the INVITE the AS originates; its own Call-ID
+  (`<trunk Call-ID>-b2b_1`), the same pass-through headers, the same SDP. *(The "same
+  Call-ID" recorded at the M1 run was the pre-fix behaviour, corrected on 2026-09-19 —
+  see the post-fix re-test at the end of this report.)*
 - `05-in-180-core.txt` / `06-out-180-trunk.txt` — the 180 on both legs.
 - `07-in-200-core.txt` / `09-out-200-trunk.txt` — the 200 OK on both legs.
 - `08-out-ack-core.txt` / `10-in-ack-trunk.txt` — the ACK on both legs.
@@ -404,10 +406,10 @@ with `make capture` rather than reading them from the repository.
 | ID | Criterion | Result | Evidence |
 | --- | --- | --- | --- |
 | ACC-M1-001 | Complete call `INVITE → 100 → 180 → 200 OK → ACK → BYE` | **accepted** | 1 (`pytest tests/e2e -q -k complete_call`, trace with Call-ID `4dad63799c88fe9482e804a862613323`), 2 (two-process run, Call-ID `21804554c2c3bc64b74ea8b64fe1aad0`), 3, 4 (samples `01` … `14`) |
-| ACC-M1-002 | Headers and SDP pass through unmodified | **accepted** | 1 (`pytest tests/integration -q -k pass_through`, header comparison), 2 (side-by-side of `01-in-invite-trunk.txt` and `03-out-invite-core.txt`), 4 (samples `01`, `03`) |
+| ACC-M1-002 | Headers and SDP pass through unmodified | **accepted (re-tested 2026-09-19)** | 1 (`pytest tests/integration -q -k pass_through`, pass-through header comparison + SDP body equality; `From` tag / `CSeq` / Call-ID / `User-Agent` asserted to differ), 2 (side-by-side of `01-in-invite-trunk.txt` and `03-out-invite-core.txt`), 4 (samples `01`, `03`) |
 | ACC-M1-003 | Unlisted source rejected with `403` / `AS-PEER-001` | **accepted** | 1 (`pytest tests/integration -q -k peer`, real `SIP/2.0 403 Forbidden`), 2 (log line with `AS-PEER-001`, Call-ID `peer-demo-4711@example.invalid`), 3 |
 | ACC-M1-004 | Counters, health endpoint and graceful `SIGTERM` shutdown | **accepted** | 1 (`pytest tests/integration -q -k lifecycle`), 2 (`shutdown complete`, `reason: signal SIGTERM`, exit code 0, `/healthz` → `{"status":"ok"}`), 3 |
-| ACC-M1-005 | Message samples captured, not hand-written | **accepted** | 1 (`uv run python tools/capture_call.py` → 14 files), 4 (samples `01` … `14` in `docs/specs/message-samples/`; generated and gitignored, reproduce with `make capture`), 2 (same Call-ID on both legs of the capture) |
+| ACC-M1-005 | Message samples captured, not hand-written | **accepted (re-tested 2026-09-19)** | 1 (`uv run python tools/capture_call.py` → 14 files), 4 (samples `01` … `14` in `docs/specs/message-samples/`; generated and gitignored, reproduce with `make capture`), 2 (log lines keyed by the trunk Call-ID; the outbound leg carries `<trunk>-b2b_1` — corrected post-fix, see the re-test section at the end of this report) |
 | ACC-M1-006 | Mock S-SBC runs as its own process on configurable ports | **accepted** | 1 (`docker compose config` exit `0`; `python -m s_sbc_mock.main --help` lists the port options), 2 (two-process run: mock on `127.0.0.1:47333` core / `127.0.0.1:46826` trunk, exit code `0` on `SIGTERM`) |
 
 ### Open items raised by this run
@@ -517,8 +519,9 @@ samples and change with every capture, so they are not quoted here —
 
 The pass-through headers (`P-Asserted-Identity`, `P-Charging-Vector`, `Subject`,
 `Organization`, `Priority`, `Privacy`, `P-Visited-Network-ID`) and the SDP body are
-byte-identical across the two legs; only the Request-URI, `Via`, `Contact`, `To` and
-`User-Agent` change.
+byte-identical across the two legs; only the Request-URI, the dialog identity (`Call-ID`
+`<trunk>-b2b_1`, regenerated `From` tag and `CSeq`), `Via`, `Contact`, `To` and `User-Agent`
+change.
 
 ### 3. CI
 
@@ -549,7 +552,9 @@ gitignored — reproduce with `make capture`):
 - `01-in-invite-trunk.txt` — INVITE from the emulated S-CSCF, Request-URI carrying the
   called number as received (`+8613800138000`).
 - `03-out-invite-core.txt` — INVITE the AS originates, Request-URI carrying the translated
-  number (`013800138000`), same Call-ID, same pass-through headers, same SDP.
+  number (`013800138000`), its own Call-ID (`<trunk Call-ID>-b2b_1`), the same pass-through
+  headers, the same SDP. *(The "same Call-ID" recorded at the M2 run was the pre-fix
+  behaviour, corrected on 2026-09-19 — see the post-fix re-test at the end of this report.)*
 - `05-in-180-core.txt` / `06-out-180-trunk.txt` — the 180 on both legs.
 - `07-in-200-core.txt` / `09-out-200-trunk.txt` — the 200 OK on both legs.
 - `08-out-ack-core.txt` / `10-in-ack-trunk.txt` — the ACK on both legs.
@@ -564,7 +569,7 @@ gitignored — reproduce with `make capture`):
 | ACC-M2-002 | Next hop failover when the first hop is unavailable | **accepted** | 1 (`pytest tests/integration -q -k failover`, call completes via second hop), 2 (`next hop failed; trying failover hop`) |
 | ACC-M2-003 | Error branches `404`, `603`, `CANCEL` | **accepted** | 1 (`pytest tests/e2e -q`: 5 passed, 0 skipped), 2 (404/AS-ROUTE-001 and 603/AS-ROUTE-002 log lines), 3 |
 | ACC-M2-004 | YAML hot reload (ADR-0004) | **accepted** | 1 (`pytest tests/integration -q -k reload`: 2 passed), 2 (fail-safe reload keeps previous rule set) |
-| ACC-M2-005 | Translated-call message samples captured | **accepted** | 1 (`tools/capture_call.py` -> 14 files), 4 (samples `01`..`14` in `docs/specs/message-samples/`; generated and gitignored, reproduce with `make capture`) |
+| ACC-M2-005 | Translated-call message samples captured | **accepted (re-tested 2026-09-19)** | 1 (`tools/capture_call.py` -> 14 files), 4 (samples `01`..`14` in `docs/specs/message-samples/`; generated and gitignored, reproduce with `make capture`; the core-leg Call-ID is `<trunk>-b2b_1` — corrected post-fix, see the re-test section at the end of this report) |
 
 ### Open items raised by this run
 
@@ -1239,7 +1244,8 @@ third-party-as-poc-s-sbc-mock-1   third-party-as-poc-s-sbc-mock   "python -m s_s
 
 The mock places its default `office-to-mobile` call
 (`+86216180001` → `+8613800138000`) on start-up, so no further command is needed. The mock's
-SIP message log for that call (one Call-ID, both legs):
+SIP message log for that call (one Call-ID on both legs as recorded at the P1 run; the core
+leg now carries `<trunk>-b2b_1` — see the post-fix re-test at the end of this report):
 
 ```text
 SENDING   to 172.28.0.2:5060     INVITE sip:+8613800138000@172.28.0.2 SIP/2.0   (trunk leg in)
@@ -1539,7 +1545,9 @@ translated number and the matched rule name (**c**):
  "event": "call finished", "disposition": "completed"}
 ```
 
-The translated Request-URI as received by the mock's core side (same Call-ID):
+The translated Request-URI as received by the mock's core side (log kept as captured at
+the P1 run; the core leg carried the same Call-ID then — since the 2026-09-19 fix it
+carries `<trunk>-b2b_1`, see the re-test section at the end of this report):
 
 ```text
 2026-09-16 21:42:53,040 INFO s_sbc_mock.uas core side received INVITE \
@@ -1972,3 +1980,108 @@ the same flow with narration.
   `http.client.BadStatusLine: GET /healthz HTTP/1.1` (20/20 green in isolation). Registered as
   its own row in `docs/production-gaps.md` and as a follow-up in `docs/phase2-plan.md` §7
   item 7; deliberately left unfixed here (`AGENT.md` §14 rule 4).
+
+## Post-fix re-test — Call-ID of the second leg (2026-09-19)
+
+**Cause.** Phase 1 defect: the AS originated its outbound leg with the *inbound* Call-ID
+verbatim, inconsistent with `docs/architecture/lld.md` section 2.3 ("`Call-ID` … belong to
+the dialog and the second leg has its own"). sippy copies a non-`None` Call-ID from the
+`CCEventTry` instead of generating one (`sippy/UacStateIdle.py`) and only its `CCB2BUA`
+rewrites it (`sippy/b2bua.py`); this AS runs its own controller over a bare `sippy.UA`, so
+nothing rewrote it. The M1/M2 records of "same Call-ID" above encoded that defect.
+
+**Fix.** `CallController.apply_call_policy` derives a fresh `SipCallId` from the trunk one
+with sippy's own `-b2b_1` suffix (`B2BUA_CALL_ID_SUFFIX` in `src/as_app/sip_adapter.py`), so
+the outbound Call-ID is `<trunk Call-ID>-b2b_1`. The inbound object is never mutated;
+`CallController.call_id` stays the **trunk** Call-ID and remains the log/trace correlation
+key across both legs (`REQ-NF-005` is unaffected).
+
+No requirement change is needed: `REQ-F-008` ("headers and SDP passed through unmodified")
+is satisfied by the pass-through header set, which is unchanged; no `REQ-*` states the old
+wire behaviour.
+
+### 1. Command and output
+
+The three re-run acceptance items (real output):
+
+```text
+$ uv run pytest tests/integration -q -k pass_through
+.                                                                        [100%]
+1 passed, 16 deselected in 1.10s
+```
+
+```text
+$ uv run python tools/capture_call.py
+as port    : 127.0.0.1:45111
+core port  : 127.0.0.1:47543  (AS next hop)
+trunk port : 127.0.0.1:44913  (emulated S-CSCF)
+captured   : 14 messages
+  docs/specs/message-samples/01-in-invite-trunk.txt
+  docs/specs/message-samples/02-out-100-trunk.txt
+  docs/specs/message-samples/03-out-invite-core.txt
+  docs/specs/message-samples/04-in-100-core.txt
+  docs/specs/message-samples/05-in-180-core.txt
+  docs/specs/message-samples/06-out-180-trunk.txt
+  docs/specs/message-samples/07-in-200-core.txt
+  docs/specs/message-samples/08-out-ack-core.txt
+  docs/specs/message-samples/09-out-200-trunk.txt
+  docs/specs/message-samples/10-in-ack-trunk.txt
+  docs/specs/message-samples/11-in-bye-core.txt
+  docs/specs/message-samples/12-out-200-core.txt
+  docs/specs/message-samples/13-out-bye-trunk.txt
+  docs/specs/message-samples/14-in-200-trunk.txt
+```
+
+The DoD gate (`AGENT.md` section 16), real output:
+
+```text
+$ make lint
+70 files already formatted
+All checks passed!
+Success: no issues found in 20 source files
+
+$ uv run pytest tests/unit -m unit
+106 passed in 0.84s
+$ uv run pytest tests/integration -m integration
+17 passed in 16.41s
+$ uv run pytest tests/e2e -m e2e
+5 passed in 2.49s
+```
+
+### 2. Log excerpt
+
+The Call-ID relationship proven on the regenerated samples — the trunk INVITE
+(`01-in-invite-trunk.txt`) and the outbound INVITE (`03-out-invite-core.txt`):
+
+```text
+01-in-invite-trunk.txt                   03-out-invite-core.txt
+From: <sip:+86216180001@127.0.0.1>       From: <sip:+86216180001@127.0.0.1>
+  ;tag=7c0fec83db0a6b88878089b2690d4041    ;tag=2ec852e5d64013ad937f71bc2232b9f0
+Call-ID: 17233166dce30dd4c7b9e7c9da765121
+                                          Call-ID: 17233166dce30dd4c7b9e7c9da765121-b2b_1
+CSeq: 1088793733 INVITE                   CSeq: 1420853115 INVITE
+```
+
+The pass-through headers (`P-Asserted-Identity`, `P-charging-vector`,
+`P-visited-network-id`, `Privacy`, `Subject`, `Organization`, `Priority`) and the SDP body
+are byte-identical across the two files; `From` tag and `CSeq` (regenerated for the
+outbound dialog) and the Call-ID differ.
+
+### 3. CI
+
+`n/a` — the fix branch is not pushed, so no CI run exists. A local gate is not CI
+(`AGENT.md` section 13); the gate above is local evidence only.
+
+### 4. Capture
+
+`docs/specs/message-samples/` regenerated on 2026-09-19 (14 files; generated and
+gitignored — reproduce with `make capture`). Key files: `01-in-invite-trunk.txt` (trunk
+Call-ID) and `03-out-invite-core.txt` (same Call-ID plus `-b2b_1`).
+
+### Item results
+
+| ID | Result |
+| --- | --- |
+| ACC-M1-002 | **accepted (re-tested)** — `pytest tests/integration -q -k pass_through`: 1 passed. |
+| ACC-M1-005 | **accepted (re-tested)** — `tools/capture_call.py` wrote 14 files; the outbound Call-ID is the trunk one plus `-b2b_1`. |
+| ACC-M2-005 | **accepted (re-tested)** — as above; the translated call's samples show `<trunk>-b2b_1` on the core leg. |

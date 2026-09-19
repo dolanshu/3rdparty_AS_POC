@@ -60,6 +60,7 @@ from sippy.Time.Timeout import Timeout  # noqa: E402
 from as_app.bootstrap import AsSettings  # noqa: E402
 from as_app.main import AsStack  # noqa: E402
 from as_app.observability.tracing import SipMessageRecorder, TraceRecorder  # noqa: E402
+from as_app.sip_adapter import outbound_call_id  # noqa: E402
 from s_sbc_mock.main import MockConfig, SMockApplication  # noqa: E402
 from s_sbc_mock.uac import CallOutcome, CallScenario  # noqa: E402
 
@@ -330,7 +331,9 @@ def write_samples(
 
     Args:
         recorder: The recorder the AS stack was writing to.
-        call_id: SIP Call-ID of the call to write.
+        call_id: Call-ID of the call on the trunk leg. The outbound leg carries a Call-ID
+            derived from it (``<trunk>-b2b_1``), so both are selected to write the whole
+            exchange of the one call.
         output_dir: Directory the samples are written to.
         trunk_port: UDP port of the trunk side of the mock.
         core_port: UDP port of the core side of the mock.
@@ -343,7 +346,8 @@ def write_samples(
         if stale.is_file() and stale.name != "README.md":
             stale.unlink()
     written: list[Path] = []
-    for index, message in enumerate(recorder.messages_for(call_id), start=1):
+    messages = recorder.messages_for_any((call_id, outbound_call_id(call_id)))
+    for index, message in enumerate(messages, start=1):
         leg = "core" if message.peer.endswith(f":{core_port}") else "trunk"
         name = f"{index:02d}-{message.direction}-{message_token(message.text)}-{leg}.txt"
         path = output_dir / name

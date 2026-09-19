@@ -170,9 +170,9 @@ AS-1 verdict      : allow
 AS-2 rule         : R-MOB-CM-40
 core called number: 013800138000
 final status      : 200
-S-CSCF Call-ID    : 26ff07318cf3f35251bed09f7106c224
-AS-2 trunk Call-ID: 26ff07318cf3f35251bed09f7106c224-b2b_1
-core Call-ID      : 26ff07318cf3f35251bed09f7106c224-b2b_1-b2b_1
+S-CSCF Call-ID    : 4696dce542819a4c743c5acde2fb43cc
+AS-2 trunk Call-ID: 4696dce542819a4c743c5acde2fb43cc-b2b_1
+core Call-ID      : 4696dce542819a4c743c5acde2fb43cc-b2b_1-b2b_1
 distinct Call-IDs : 3
 ICID preserved    : True
 [2/2] rejected call short-circuits at AS-1

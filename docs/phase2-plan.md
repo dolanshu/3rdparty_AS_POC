@@ -562,13 +562,17 @@ retransmission population, so P9.5 inherits the P8a timer population unchanged.
 - **Deliberate output.** The friction this surfaces — what in the skeleton turned out to be
   number-translation specific — is the primary input to P10 and must be written down here.
 - **Known issue.** Two B2BUAs in series produce **two different Call-IDs**; cross-AS
-  correlation is a real problem, not a cosmetic one. *(That is the intended behaviour, not
-  what the code does today — the AS reuses the inbound `Call-ID` on its outbound leg, which
-  the maintainer has ruled a Phase 1 defect. The statement becomes true when that defect is
-  fixed; see the pause below.)*
+  correlation is a real problem, not a cosmetic one. *(This was false of the code when P9
+  started — both AS instances reused the inbound `Call-ID` on their outbound leg, which the
+  maintainer ruled a **Phase 1 defect**. The number-translation instance was fixed on `main`
+  and merged back; the **anti-fraud instance still carries the defect and is fixed as part of
+  P9's implementation stage**. See the record below.)*
 
-**P9 is paused — a Phase 1 `Call-ID` defect in the second leg must be fixed first
-(maintainer ruling, 2026-09-19).**
+**P9 was paused on a Phase 1 `Call-ID` defect in the second leg; the pause is lifted
+(maintainer ruling, 2026-09-19).** This subsection records the defect, the fix that closed
+it, and the findings the fix left behind. It is kept as history rather than deleted: a
+reader arriving at "P9 resumed" needs to know what was measured on the defective code and
+what changed.
 
 **Classification.** This is a **Phase 1 defect** — the code contradicts its own design
 document — **not** a P9 design fact and **not** an accepted deviation. It is recorded in
@@ -614,12 +618,59 @@ the outbound `CCEventTry` with `original[0]` — the inbound `Call-ID`, unchange
    assign a rewording of `REQ-NF-016` / `REQ-F-028` and of this plan to the implementation
    commit, are **withdrawn** by this ruling.
 
+**How the fix landed (2026-09-19).** The fix was carried out in its own conversation, on its
+own branch, exactly as decision 1 requires. `main` now carries
+`f1b4186` (`fix(m1): land the second-leg Call-ID fix on main`, on top of the fix commit
+`d8dad31`) and `d8cabad` (the removal of the then-unused
+`SipMessageRecorder.messages_for`); both were merged into `phase2` as `76a95da` and
+`1676b6d`, and the one phase2-only call site left behind by the removal was adapted in
+`d26d5c4`. The mechanism is a single source of truth in
+`src/as_app/sip_adapter.py` — `B2BUA_CALL_ID_SUFFIX` / `outbound_call_id()` — and
+`docs/architecture/lld.md` §2.3 now states it. **Nothing was pushed and no tag was created**
+(`AGENT.md` §13, §15); the phase2 CI evidence is still a maintainer step, because
+`.github/workflows/ci.yml` triggers on `main` only.
+
+**What the fix left behind — three findings that are P9's, not the fix's (maintainer ruling,
+2026-09-19).** The fix could not reach them: two are phase2-only artefacts and one is a
+consequence of the fix that only the chain makes observable.
+
+- **(A) The anti-fraud AS still has the defect.** `src/anti_fraud_as/call_controller.py`
+  builds its outbound `CCEventTry` as `CCEventTry(event.getData())`, so event element `[0]`
+  — the trunk `Call-ID` — is still reused. The file exists only on `phase2`, so the Phase 1
+  fix could not touch it, and it is not a P8 regression: it has been there since P8 landed.
+  It is **in P9's scope**, for two reasons: the chain is where a preserved `Call-ID` becomes
+  observable (`REQ-NF-016`), and the requirement is written as satisfied only when both
+  instances regenerate. **It is recorded here as a P9 stage-2 finding and fixed in P9's
+  stage 3** (the implementation stage), following §5.1 rather than being patched in passing.
+- **(B) The phase2-only adaptation `d26d5c4` is kept.** It changes two calls in
+  `tests/integration/test_fraud_screening_path.py` from `messages_for(call_id)` to
+  `messages_for_any((call_id, outbound_call_id(call_id)))`. That looks premature today —
+  the anti-fraud AS reuses the trunk `Call-ID`, so both lookups return the same set — but it
+  becomes **necessary** the moment finding (A) is fixed, and it is the correct formulation
+  under (A). It is a phase2-only test file adapted to a `main`-side removal; keeping it is
+  the ruling, and its justification is this bullet rather than the commit message.
+- **(C) A phase2 integration flake is registered.** While the fix ran its gates, the phase2
+  integration suite failed once in roughly six runs with
+  `AssertionError: ... status=500` in
+  `tests/integration/test_fraud_screening_path.py::test_a_broken_edit_keeps_the_previous_screening_data`,
+  alongside `anti_fraud_as.call_controller: next hop did not answer in time` and
+  `WARNING anti_fraud_as.call_controller`. The two merges' diff contained **zero bytes** of
+  `src/anti_fraud_as/**`, so it is not a symptom of the fix; the test is green in isolation
+  and the failure is a **timing flake** around the 3-second no-answer timeout of the relayed
+  leg. Following the §7 item 7 precedent (register, do not improvise a fix — `AGENT.md` §14
+  rule 4), it is registered in `docs/production-gaps.md` and listed as §7 item 9 below. It
+  is **not** new POC friction the fix introduced, and the fix's own conversation was right
+  not to register it there.
+
 **Entry state for resuming P9.** `main` carries the `Call-ID` fix and `phase2` carries it by
-merge; the requirements of decision 4 are unchanged; stage 2 is redone from scratch on the
-fixed behaviour (the probe re-run, ADR-0008 reworked, HLD §9 and LLD §10 reworked and the
-LLD §2.3 statement restored to the pre-stage-2 design intent), its read-only review gate runs
-then, and stages 3–5 follow. The stored measurements are kept, because they are true
-observations of the code as it stood.
+merge; the requirements of decision 4 are unchanged, so `REQ-NF-016` / `REQ-F-028` and this
+plan's §6 and §3 wording are **not touched**; stage 2 is redone on the fixed behaviour — the
+probe re-run, ADR-0008 reworked, HLD §9 and LLD §10 reworked, and the two artefacts that the
+merge left self-contradictory (LLD §2.3, and the "pending rework" banners in ADR-0008, HLD
+§9, LLD §10.2 and §10.5) restored to **one coherent statement of the fixed intent** rather
+than left pending. Its read-only review gate (§5.2) runs then, and stages 3–5 follow. The
+stored measurements are kept, because they are true observations of the code as it stood;
+stage 2 re-run records the new ones beside them.
 
 ### P9.5 — Read-only capacity probe
 
@@ -950,11 +1001,11 @@ item inherits. All were established by running the stack, not by assumption.
   already differ only by address and are synchronised by hand. Adding a second AS turns two
   copies into four. Prefer expanding the address from the environment at load time rather
   than maintaining another copy.
-- **Chained Call-IDs.** Two B2BUAs in series mean two Call-IDs; correlation across AS
-  instances has to be solved, not assumed away (P9). *(Not true of the code today: the AS
-  reuses the inbound `Call-ID` on its outbound leg, so a chained call carries **one**
-  `Call-ID` — a Phase 1 defect, not an accepted deviation. The bullet becomes true when that
-  defect is fixed on `main` and merged back into `phase2`; see §3 P9.)*
+- **Chained Call-IDs.** Two B2BUAs in series mean several Call-IDs; correlation across AS
+  instances has to be solved, not assumed away (P9). *(True again, and now for **both** AS
+  instances: the number-translation instance was fixed on `main` and merged back on
+  2026-09-19, and the anti-fraud instance's own copy of the same defect is fixed in P9's
+  implementation stage — §3 P9, findings (A)–(C).)*
 
 ## 7. Open items and registered gaps
 
@@ -983,13 +1034,26 @@ Not blocking, but each must be handled rather than discovered mid-implementation
    let the server bind port `0` and report the port it received. Whoever picks it up should
    also make the health poll distinguish "not up yet" from "something else is listening" —
    P9.5 will run far more processes in one host and will meet this much more often.
-8. **Phase 1 `Call-ID` defect — blocks P9; registered 2026-09-19, not fixed here.** The AS
-   reuses the inbound `Call-ID` on its outbound leg, contradicting the design intent of
-   `docs/architecture/lld.md` §2.3; the maintainer has ruled it a **Phase 1 defect**, not an
-   accepted deviation. It is fixed as a **separate item in a separate conversation**, on
-   **`main`**, then merged back into `phase2`; **P9 is paused** until that has landed, and
-   P9's stage 2 is redone afterwards (§3 P9). Nothing about the fix is registered **here** —
-   its own conversation owns its `CHANGELOG` / `VERSION` and any `ACC-*` row.
+8. **Phase 1 `Call-ID` defect — fixed and merged back; closed 2026-09-19.** The AS reused
+   the inbound `Call-ID` on its outbound leg, contradicting the design intent of
+   `docs/architecture/lld.md` §2.3; the maintainer ruled it a **Phase 1 defect**, not an
+   accepted deviation. It was fixed as a **separate item in a separate conversation**, on
+   **`main`** (`f1b4186`, plus `d8cabad` for the dead-code removal), merged back into
+   `phase2` (`76a95da`, `1676b6d`) with the one phase2-only call site adapted (`d26d5c4`),
+   and the pause on P9 is lifted. Its own conversation owned its `CHANGELOG` / `VERSION` and
+   any `ACC-*` row, so nothing about the fix is registered **here**; what it left behind is
+   §3 P9, findings (A)–(C). **Not pushed, not tagged.**
+9. **Phase 2 integration timing flake — registered 2026-09-19, not fixed.**
+   `tests/integration/test_fraud_screening_path.py::test_a_broken_edit_keeps_the_previous_screening_data`
+   fails with `AssertionError: ... status=500` in roughly one run in six, together with
+   `anti_fraud_as.call_controller: next hop did not answer in time`. It is green in isolation
+   and the failure is a timing race around the relayed leg's **3-second** no-answer timeout
+   (`_DEFAULT_NEXT_HOP_EXPIRE` in `src/anti_fraud_as/call_controller.py`). Row in
+   `docs/production-gaps.md`. **Follow-up item, not part of P9** (`AGENT.md` §14 rule 4):
+   the honest repair is to make the test deterministic — drive the timeout from a test
+   setting, or wait on the trace event rather than on wall-clock — not to widen the timeout.
+   The same precedent as item 7: register the harness defect rather than improvise a fix
+   inside the item that happened to observe it.
 
 ## 8. Decisions requiring maintainer approval
 

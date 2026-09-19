@@ -25,8 +25,13 @@ injected, so the verdict itself stays a pure function (REQ-NF-011). One lock gua
 structures, because sippy callbacks and the console feed run on different threads — the same
 reason the metrics registry and the trace recorder are lock-guarded.
 
-In-memory only: a restart loses the window and the reputation history. That is a registered
-POC gap, closed in P11 by the pluggable state store (``docs/phase2-plan.md`` D9).
+The window and the ledger no longer own their records: they keep them in the platform
+library's :class:`as_platform.state_store.StateStore` seam, keyed by caller, and
+:class:`as_platform.state_store.InMemoryStateStore` is its only implementation until P11
+(ADR-0009 decision 5). The seam sits **beneath** this process-level store — the window itself
+never moves to the per-call controller (D9). A restart still loses the window and the
+reputation history: that registered POC gap is closed in P11 by the store's second
+implementation (``docs/phase2-plan.md`` D9).
 """
 
 from __future__ import annotations
@@ -34,9 +39,11 @@ from __future__ import annotations
 import math
 import threading
 import time
-from collections import OrderedDict, deque
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+
+from as_platform.state_store import InMemoryStateStore, StateStore
 
 __all__ = [
     "CallRateWindow",
@@ -89,12 +96,21 @@ class CallRateWindow:
     The window is evaluated when a call arrives — the only moment its answer is needed — so
     nothing is scheduled and no timer is armed. Each caller's deque is bounded to
     ``max_calls + 1`` entries: once the threshold is passed, more detail is never needed.
-    The number of tracked callers is bounded too, oldest caller first.
+    The number of tracked callers is bounded too, least recently used caller first. The
+    records live in the injected :class:`StateStore`, so the window reads a caller's deque,
+    mutates a local copy and writes it back rather than mutating a stored object in place.
     """
 
-    def __init__(self) -> None:
-        """Create an empty window."""
-        self._events: OrderedDict[str, deque[float]] = OrderedDict()
+    #: Key prefix under which this window's records live in the store.
+    _PREFIX = "window:"
+
+    def __init__(self, store: StateStore) -> None:
+        """Create a window backed by the given store.
+
+        Args:
+            store: Where the per-caller deques are kept.
+        """
+        self._store = store
 
     def record(
         self,
@@ -117,19 +133,17 @@ class CallRateWindow:
         Returns:
             Number of calls of this caller inside the window, this one included.
         """
-        events = self._events.get(caller)
-        if events is None:
-            events = deque()
-            self._events[caller] = events
-        self._events.move_to_end(caller)
+        key = f"{self._PREFIX}{caller}"
+        stored = self._store.read(key)
+        events: deque[float] = deque(stored) if stored is not None else deque()
         events.append(at)
         oldest_allowed = at - window_seconds
         while events and events[0] <= oldest_allowed:
             events.popleft()
         while len(events) > max_calls + 1:
             events.popleft()
-        while len(self._events) > max(1, max_tracked_callers):
-            self._events.popitem(last=False)
+        self._store.write(key, events)
+        self._store.trim(self._PREFIX, max(1, max_tracked_callers))
         return len(events)
 
 
@@ -139,12 +153,20 @@ class ReputationLedger:
     Only ``(score, updated_at)`` is stored per caller; the decay and penalty parameters are
     read from the active policy on every access, so a reload can change them without
     discarding the history. A score decays towards ``default_score`` with the configured
-    half-life, so a burst of suspicious calls fades instead of persisting forever.
+    half-life, so a burst of suspicious calls fades instead of persisting forever. The
+    records live in the injected :class:`StateStore`.
     """
 
-    def __init__(self) -> None:
-        """Create an empty ledger."""
-        self._entries: OrderedDict[str, tuple[float, float]] = OrderedDict()
+    #: Key prefix under which this ledger's records live in the store.
+    _PREFIX = "reputation:"
+
+    def __init__(self, store: StateStore) -> None:
+        """Create a ledger backed by the given store.
+
+        Args:
+            store: Where the per-caller scores are kept.
+        """
+        self._store = store
 
     def effective_score(
         self, caller: str, now: float, *, default_score: float, half_life_seconds: float
@@ -160,11 +182,10 @@ class ReputationLedger:
         Returns:
             The decayed score; the default score for an unknown caller.
         """
-        entry = self._entries.get(caller)
+        entry = self._store.read(f"{self._PREFIX}{caller}")
         if entry is None:
             return default_score
         score, updated_at = entry
-        self._entries.move_to_end(caller)
         return _decay(
             score,
             updated_at,
@@ -200,10 +221,8 @@ class ReputationLedger:
             caller, now, default_score=default_score, half_life_seconds=half_life_seconds
         )
         score -= reject_penalty
-        self._entries[caller] = (score, now)
-        self._entries.move_to_end(caller)
-        while len(self._entries) > max(1, max_tracked_callers):
-            self._entries.popitem(last=False)
+        self._store.write(f"{self._PREFIX}{caller}", (score, now))
+        self._store.trim(self._PREFIX, max(1, max_tracked_callers))
         return score
 
 
@@ -245,19 +264,26 @@ class CallerStateStore:
     """
 
     def __init__(
-        self, policy: WindowPolicy, *, clock: Callable[[], float] = time.monotonic
+        self,
+        policy: WindowPolicy,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        state: StateStore | None = None,
     ) -> None:
         """Create the store for one process.
 
         Args:
             policy: Window and reputation parameters, from the screening data file.
             clock: Monotonic clock; injected so tests can advance time deterministically.
+            state: Where the caller records are kept; an in-memory store is created when
+                omitted, which is the only implementation until P11.
         """
         self._clock = clock
         self._lock = threading.Lock()
         self.policy = policy
-        self._window = CallRateWindow()
-        self._reputation = ReputationLedger()
+        self._state = state or InMemoryStateStore()
+        self._window = CallRateWindow(self._state)
+        self._reputation = ReputationLedger(self._state)
 
     def reconfigure(self, policy: WindowPolicy) -> None:
         """Adopt new parameters after a screening-data reload.

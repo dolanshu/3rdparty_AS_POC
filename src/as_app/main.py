@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from as_platform.main import BaseAsStack
+from as_platform.transport import UdpTransport
 
 from as_app import __version__
 from as_app.bootstrap import (
@@ -139,8 +140,7 @@ class AsStack(BaseAsStack[AsSettings]):
         self.rule_set_store = rule_set_store or RuleSetStore(settings.rules_file)
         super().__init__(
             settings,
-            sip_address=settings.sip_listen_address,
-            sip_port=settings.sip_listen_port,
+            transport=UdpTransport(settings.sip_listen_address, settings.sip_listen_port),
             peer_address=settings.sbc_peer_address,
             peer_port=settings.sbc_peer_port,
             allowed_peers=tuple(settings.allowed_peers),

@@ -166,8 +166,8 @@ def test_a_callers_window_is_bounded(store: CallerStateStore) -> None:
     for _ in range(50):
         store.observe(CALLER)
 
-    window = store._window  # noqa: SLF001 - the bound is the property under test
-    assert len(window._events[CALLER]) == POLICY.max_calls + 1
+    # The bound is asserted through the count the store reports, not through the deque.
+    assert store.observe(CALLER).calls_in_window == POLICY.max_calls + 1
 
 
 def test_the_store_is_bounded_across_callers(store: CallerStateStore) -> None:
@@ -186,8 +186,9 @@ def test_the_store_is_bounded_across_callers(store: CallerStateStore) -> None:
     for caller in ("+8613400000001", "+8613400000002", "+8613400000003"):
         bounded.observe(caller)
 
-    assert len(bounded._window._events) == 2  # noqa: SLF001 - the bound is under test
-    # The oldest caller was evicted, so its next call is seen as its first.
+    # The cap is exactly two and the caller dropped is the oldest: the second caller is
+    # still tracked (two calls) while the first is seen as new (one call).
+    assert bounded.observe("+8613400000002").calls_in_window == 2
     assert bounded.observe("+8613400000001").calls_in_window == 1
 
 

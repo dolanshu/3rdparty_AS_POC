@@ -48,6 +48,7 @@ from as_platform.observability.logging import (
 )
 from as_platform.observability.metrics import MetricsRegistry
 from as_platform.observability.tracing import TraceRecorder
+from as_platform.transport import UdpTransport
 
 from anti_fraud_as import __version__
 from anti_fraud_as.bootstrap import (
@@ -149,8 +150,9 @@ class FraudAsStack(BaseAsStack[FraudAsSettings]):
         self.caller_state = caller_state or CallerStateStore(self.screening_data.current.policy)
         super().__init__(
             settings,
-            sip_address=settings.fraud_sip_listen_address,
-            sip_port=settings.fraud_sip_listen_port,
+            transport=UdpTransport(
+                settings.fraud_sip_listen_address, settings.fraud_sip_listen_port
+            ),
             peer_address=settings.fraud_sbc_peer_address,
             peer_port=settings.fraud_sbc_peer_port,
             allowed_peers=tuple(settings.fraud_allowed_peers),

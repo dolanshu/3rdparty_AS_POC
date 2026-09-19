@@ -39,14 +39,18 @@ name = "as-platform"
 version = "0.1.0"
 source = { editable = "../as_platform" }
 dependencies = [
+    { name = "fastapi" },
     { name = "pydantic" },
     { name = "sippy" },
+    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.110" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "sippy", specifier = "==2.4.2" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.27" },
 ]
 
 [package.metadata.requires-dev]

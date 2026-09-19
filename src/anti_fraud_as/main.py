@@ -35,6 +35,17 @@ import signal
 from pathlib import Path
 from typing import Any
 
+from as_platform.bootstrap import ShutdownController, install_signal_handlers
+from as_platform.errors import AsError
+from as_platform.observability.logging import (
+    LogDirection,
+    configure_logging,
+    get_logger,
+    log_event,
+)
+from as_platform.observability.metrics import MetricsRegistry, get_metrics_registry
+from as_platform.observability.tracing import TraceRecorder, get_trace_recorder
+from as_platform.sip_adapter import cancel_transaction_timers
 from sippy.Core.EventDispatcher import ED2
 from sippy.SipConf import SipConf
 from sippy.SipLogger import SipLogger
@@ -50,12 +61,6 @@ from anti_fraud_as.call_controller import FraudCallMap
 from anti_fraud_as.caller_state import CallerStateStore
 from anti_fraud_as.internal_api import InternalApiServer
 from anti_fraud_as.screening_data import ScreeningDataStore
-from as_app.bootstrap import ShutdownController, install_signal_handlers
-from as_app.errors import AsError
-from as_app.observability.logging import LogDirection, configure_logging, get_logger, log_event
-from as_app.observability.metrics import MetricsRegistry, get_metrics_registry
-from as_app.observability.tracing import TraceRecorder, get_trace_recorder
-from as_app.sip_adapter import cancel_transaction_timers
 
 __all__ = ["FraudAsStack", "main"]
 

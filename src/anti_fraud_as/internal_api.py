@@ -32,13 +32,13 @@ import threading
 import time
 from typing import Any, Final
 
+from as_platform.observability.metrics import MetricsRegistry
+from as_platform.observability.tracing import CallTrace, TraceEvent, TraceRecorder
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from anti_fraud_as.screening_data import ListMatch, ScreeningDataStore
-from as_app.observability.metrics import MetricsRegistry
-from as_app.observability.tracing import CallTrace, TraceEvent, TraceRecorder
 
 __all__ = [
     "INSTANCE_NAME",

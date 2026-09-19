@@ -43,6 +43,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from as_platform.observability.logging import LogDirection, get_logger, log_event
+from as_platform.observability.metrics import (
+    CallDisposition,
+    MetricsRegistry,
+    PeerStatus,
+    get_metrics_registry,
+)
+from as_platform.observability.tracing import TraceRecorder, get_trace_recorder
+from as_platform.sip_adapter import PASSTHROUGH_HEADERS, is_allowed_peer, outbound_call_id
 from sippy.CCEvents import (
     CCEventConnect,
     CCEventDisconnect,
@@ -70,15 +79,6 @@ from anti_fraud_as.screening import (
     screen,
 )
 from anti_fraud_as.screening_data import ListMatchResult, ScreeningDataStore
-from as_app.observability.logging import LogDirection, get_logger, log_event
-from as_app.observability.metrics import (
-    CallDisposition,
-    MetricsRegistry,
-    PeerStatus,
-    get_metrics_registry,
-)
-from as_app.observability.tracing import TraceRecorder, get_trace_recorder
-from as_app.sip_adapter import PASSTHROUGH_HEADERS, is_allowed_peer, outbound_call_id
 
 __all__ = ["FraudCallController", "FraudCallMap", "LEG_NEXT_HOP", "LEG_TRUNK"]
 

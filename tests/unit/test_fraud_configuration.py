@@ -51,11 +51,13 @@ FRAUD_KNOBS = (
 )
 
 #: Top-level modules the anti-fraud package may import: the standard library it uses, sippy,
-#: the already-pinned configuration/API packages, and the shared ``as_app`` modules.
+#: the already-pinned configuration/API packages, the shared ``as_platform`` modules and
+#: ``as_app`` (only for the repository version it re-exports).
 ALLOWED_IMPORTS = frozenset(
     {
         "anti_fraud_as",
         "as_app",
+        "as_platform",
         "sippy",
         "pydantic",
         "pydantic_settings",

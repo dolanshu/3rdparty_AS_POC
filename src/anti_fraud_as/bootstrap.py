@@ -31,12 +31,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any
 
+from as_platform.bootstrap import check_port_available
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from anti_fraud_as.errors import AsError, FraudErrorCode, SkeletonErrorCode
 from anti_fraud_as.screening_data import load_screening_data
-from as_app.bootstrap import check_port_available
 
 __all__ = ["DEFAULT_ENV_FILE", "FraudAsSettings", "run_startup_self_check"]
 

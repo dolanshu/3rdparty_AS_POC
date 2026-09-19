@@ -27,7 +27,7 @@ distinguished by code, not by status, because they share one status. The ``AS-FR
 
 from __future__ import annotations
 
-from as_app.errors import (
+from as_platform.errors import (
     SIP_PHRASES,
     AsError,
     ErrorCode,

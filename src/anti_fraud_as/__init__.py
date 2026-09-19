@@ -19,10 +19,11 @@ verdict: relay the INVITE unchanged, or answer ``608 Rejected`` (RFC 8688). The 
 `docs/architecture/adr/0007-anti-fraud-as-and-608-rejection.md` and
 `docs/architecture/lld.md` section 9.
 
-The package reuses the use-case-agnostic modules of :mod:`as_app` — the error model,
-structured logging, counters, tracing, generic sippy plumbing — by direct import. It is a
+The package reuses the use-case-agnostic modules of :mod:`as_platform` — the error model,
+structured logging, counters, tracing, generic sippy plumbing — by direct import, and takes
+its version from :mod:`as_app` so both AS instances report the repository version. It is a
 concrete second application, **not** a framework: no registry, no plugin protocol and no
-shared base class (ADR-0007 decision 9; extracting the common skeleton is P10's job).
+shared base class (ADR-0007 decision 9; the common skeleton is the library, ADR-0009).
 """
 
 from __future__ import annotations

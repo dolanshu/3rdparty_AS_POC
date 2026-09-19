@@ -1134,7 +1134,7 @@ interface induced from two instances; no second transport / store / harness; no 
 in the library; the naming debt; the library gate not in this repository's CI; the `REQ-F-023`
 location delta; the scratch probe), and `ACC-P10-*` in the acceptance stage.
 
-**Unsettled, and recorded rather than hidden.**
+**Unsettled at the time of this record, and recorded rather than hidden.**
 
 - **The HLD/LLD deltas that §5.1 also assigns to the design stage are not written.** The ADR
   states what they must contain (a new LLD section naming the library boundary; the HLD deployment
@@ -1150,6 +1150,42 @@ location delta; the scratch probe), and `ACC-P10-*` in the acceptance stage.
   wrong, not the tests"* meets the split, and it is reported plainly rather than smoothed over.
 - **`REQ-F-023` and `AGENT.md` §4.3 name a location the split moves**, and a stage may not reword
   a frozen requirement (§5.2). Escalated to the maintainer, like §7 item 10.
+
+**P10 design stage (stage 2) — the HLD/LLD deltas and the three rulings (2026-09-19).** The
+stage's design artefact is completed by the two deltas §5.1 also assigns to it: a new
+**`## 10. The platform library (P10)`** in `docs/architecture/hld.md` and a new
+**`## 11. The platform library (P10)`** in `docs/architecture/lld.md`. Both mirror the P8/P9
+section shape and cite ADR-0009 rather than re-arguing it: the HLD section states the library is
+a build-time dependency (no new process, port or listener), the two-repository checkout
+(REQ-F-032) and that nothing observable moves (REQ-F-031); the LLD section gives the module
+split and its inverse, the `PolicyDecision` seam, the error families, the two seams, the
+consumption mechanism and the seven-step order (11.1–11.7). Nothing under `src/` or `tests/` is
+touched, so §8 item 2's "the plan is written and reviewed before any code moves" is still the
+operative gate and the implementation stage has not started.
+
+The three points the ADR had escalated to the maintainer were **ruled on, and the rulings are
+recorded in the ADR** (each with its reasoning kept visible), and the SRS traceability note
+carries the `REQ-F-023` delta:
+
+- **`REQ-F-023` is not reworded.** The row's text was true when written and a stage may not
+  reword a frozen requirement (§5.2); the delta goes in the SRS **traceability note**, the
+  repository's established precedent (P8a records the `REQ-F-011` delta the same way).
+  `AGENT.md` §4.3 is a structural document, not a frozen requirement, so `AGENT.md` §13 requires
+  it to be updated **in the implementation commit** to name the library mechanism and the three
+  families.
+- **The bounded test edit is accepted and recorded.** A test that reads a moved enum member off
+  `AsErrorCode` (`CFG_*`, `PEER_*`, `FRAUD_*`) imports it from the family enum that now owns it;
+  the assertions do not change. `REQ-F-031` promises the three layers **stay green**, not that no
+  test file's import line ever changes — this is the only class of test change the extraction is
+  allowed to make.
+- **`TrunkMessage` is deleted with the move, not carried into the library.** It is provably dead
+  (two references, both inside its own module: `src/as_app/sip_adapter.py:41` and `:122`), and
+  carrying known-dead code into a brand-new artefact is the wrong default; the deletion is
+  behaviour-neutral and is performed as part of the move, with its `__all__` entry. LLD §9.1's
+  friction note now records that P10 removed it rather than inherited it.
+
+**The design-stage review gate is the next step and has not run.** The stage is not claimed to
+pass it, and no code has moved.
 
 ### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 

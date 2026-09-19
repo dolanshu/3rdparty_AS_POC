@@ -7,8 +7,9 @@
   section 8 item 2 · `docs/requirements/functional-and-nonfunctional.md`
   (REQ-F-029…REQ-F-033, REQ-NF-019…REQ-NF-021) · ADR-0001 (sippy) · ADR-0002 (process
   separation) · ADR-0007 (decision 9 — a second process, not a framework) · ADR-0008
-  (decision 7 — the chain is P10's input) · `docs/architecture/hld.md` section 8 ·
-  `docs/architecture/lld.md` section 2.3, section 9.1, section 9.6, section 10.5 ·
+  (decision 7 — the chain is P10's input) · `docs/architecture/hld.md` sections 8 and 10 ·
+  `docs/architecture/lld.md` section 2.3, section 9.1, section 9.6, section 10.5,
+  section 11 ·
   `AGENT.md` sections 4.1, 4.3, 10, 12, 14 rule 3
 
 ## Context
@@ -76,7 +77,7 @@ the shells the two applications currently duplicate:
 | Library module | Moved from | Responsibility |
 | --- | --- | --- |
 | `observability/` | `as_app.observability` | structured logging, counters/dispositions/peer status, per-Call-ID trace and console feed |
-| `sip_adapter` | `as_app.sip_adapter` | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `outbound_call_id`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `CallLeg`, `TrunkMessage` |
+| `sip_adapter` | `as_app.sip_adapter` | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `outbound_call_id`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `CallLeg` (`TrunkMessage` is not carried — deleted with the move, below) |
 | `errors` (mechanism) | `as_app.errors` | the memberless `ErrorCode` base, `SIP_PHRASES`, `sip_status_for`, `AsError` (decision 3) |
 | `bootstrap` (plumbing) | `as_app.bootstrap` | `ShutdownController`, `install_signal_handlers`, `check_port_available` |
 | `version` | `as_app.__init__` | the distribution → `VERSION` chain |
@@ -109,10 +110,19 @@ permanent part of the design, not a migration shim.
 **`extract_called_number` keeps its name.** LLD section 9.1 records that the name is wrong
 for the anti-fraud caller (it parses a URI user part). Renaming it during the move would
 touch both applications and is a drive-by change (`AGENT.md` section 14 rule 4); the naming
-debt is recorded, not fixed. The same applies to `TrunkMessage`, which is unused today
-(LLD section 9.1) and moves as-is; deleting it is a separate, approved cleanup.
+debt is recorded, not fixed.
 
-### 3. The error model is split by family over one mechanism, and `REQ-F-023` needs a wording delta
+**`TrunkMessage` is not carried into the library; it is deleted with the move.** LLD
+section 9.1 records that it is never populated and never used, and it is provably dead:
+exactly two references exist in the whole repository, both inside its own module —
+`src/as_app/sip_adapter.py:41` (its `__all__` entry) and `src/as_app/sip_adapter.py:122`
+(the class). **The maintainer's ruling (2026-09-19): carrying known-dead code into a
+brand-new artefact is the wrong default, and removing it is behaviour-neutral.** The deletion
+is performed as part of the move, not as a drive-by change (`AGENT.md` section 14 rule 4),
+and the `__all__` entry is removed with it. LLD section 9.1's friction note records that P10
+removed it rather than inherited it.
+
+### 3. The error model is split by family over one mechanism, and the `REQ-F-023` delta is recorded in the traceability note
 
 **One mechanism, per-family code sets.** Python forbids subclassing an `Enum` that has
 members, so a single `AsErrorCode` cannot be extended by the library and the applications.
@@ -138,27 +148,36 @@ Each family is a subclass in the package that owns the vocabulary:
 `AS-*` error codes" holds and no wire behaviour moves. `SIP_PHRASES` (including
 `608: "Rejected"`) moves once, so the phrase cannot drift between families.
 
-**The `REQ-F-023` delta.** That row — written for P8 — says the `AS-FRAUD-*` codes are added
-to *"the authoritative model in `src/as_app/errors.py`"*, and `AGENT.md` section 4.3 repeats
-the same location. After the split the **mechanism** is the library's and the `AS-FRAUD-*`
-family lives in `src/anti_fraud_as/errors.py`; `src/as_app/errors.py` holds only the
-translation families plus the facade re-exports. The requirement's *intent* — one model, no
+**The `REQ-F-023` delta — the requirement is not reworded; the traceability note carries it.**
+That row — written for P8 — says the `AS-FRAUD-*` codes are added to *"the authoritative model
+in `src/as_app/errors.py`"*. After the split the **mechanism** is the library's and the
+`AS-FRAUD-*` family lives in `src/anti_fraud_as/errors.py`; `src/as_app/errors.py` holds only
+the translation families plus the facade re-exports. The requirement's *intent* — one model, no
 second error vocabulary, codes mapped to SIP status and log message — is preserved and is in
-fact enforced by the shared base; its *location* is not. A stage review may not reword a
-frozen requirement (plan section 5.2), so this delta is recorded and escalated the same way
-§7 item 10 was: the maintainer decides whether `REQ-F-023` and `AGENT.md` section 4.3 are
-reworded, or whether "the authoritative model" is read as the mechanism. The implementation
-commit updates `AGENT.md` section 4.3 only if the maintainer rules that way.
+fact enforced by the shared base; its *location* is not. **The maintainer's ruling
+(2026-09-19): the requirement's text stays exactly as it is** — it was true when written, and a
+stage may not reword a frozen requirement (plan section 5.2). The delta is recorded where this
+repository already records such deltas: in the SRS **traceability note**, exactly as P8a
+handles `REQ-F-011` (its text is unchanged and the note carries the change). That note records
+that after P10 the authoritative *model* is the library's mechanism, that the `AS-FRAUD-*`
+family lives in `src/anti_fraud_as/errors.py`, and that every code, status and message is
+unchanged. **`AGENT.md` section 4.3 is different**: it is a structural document, not a frozen
+requirement, and `AGENT.md` section 13 requires structural changes to update it — so section
+4.3 is updated **in the implementation commit** to name the library mechanism and the three
+families.
 
-**The one bounded test edit.** The extraction's anti-regression promise is that this
-repository's suite does not change (REQ-F-031). One class of unit test is a **bounded
-exception**: a test that reads a member off `AsErrorCode` (`AsErrorCode.CFG_*`, `PEER_*`,
-`FRAUD_*`) must import it from the family enum that now owns it (`SkeletonErrorCode` /
+**The one bounded test edit — accepted and recorded.** The extraction's anti-regression promise
+is that this repository's suite does not change (REQ-F-031). One class of unit test is a
+**bounded exception**: a test that reads a member off `AsErrorCode` (`AsErrorCode.CFG_*`,
+`PEER_*`, `FRAUD_*`) must import it from the family enum that now owns it (`SkeletonErrorCode` /
 `FraudErrorCode`). The **assertions are unchanged**; only the module the member is read from
 changes, and it changes because the member genuinely moved. This is the one place where the
 literal sentence *"If that suite has to change to accommodate the extraction, the extraction
 is wrong, not the tests"* (requirements traceability note) meets the split, and it is
-recorded here rather than discovered in the implementation stage.
+recorded here rather than discovered in the implementation stage. **The maintainer's ruling
+(2026-09-19): the bounded edit is accepted and recorded.** `REQ-F-031`'s promise is that the
+three layers **stay green**, which holds — it is not a promise that no test file's import line
+ever changes. This is the only class of test change the extraction is allowed to make.
 
 ### 4. The controller seam: the base owns the relay, the application owns the decision, `PolicyDecision` is the one value between them
 
@@ -406,12 +425,13 @@ this repository's three layers and the committed probes are for.
   stale lock is caught by `--locked` in CI, not by `uv sync` (*Verified facts*, (d)).
 - **`py.typed` is a hard requirement.** Without it this repository's `make lint` fails, so it
   is part of the library's definition of done, not a later addition.
-- **The error model is one mechanism with three code sets, and `REQ-F-023` / `AGENT.md`
-  section 4.3 name a location that moves** (decision 3). Escalated to the maintainer like §7
-  item 10 — not silently reworded by this stage.
+- **The error model is one mechanism with three code sets** (decision 3). `REQ-F-023`'s text is
+  **not reworded**; the delta is recorded in the SRS traceability note, and `AGENT.md` section
+  4.3 is updated in the implementation commit.
 - **The three-layer suite is the anti-regression guard.** The only test edit the extraction
-  forces is the bounded import change of decision 3; the assertions themselves do not change
-  (REQ-F-031).
+  forces is the bounded import change of decision 3 — accepted by the maintainer on 2026-09-19
+  and the only class of test change the extraction is allowed to make; the assertions
+  themselves do not change (REQ-F-031).
 - **The reference implementation has an update obligation.** When the library changes, this
   repository follows in the same piece of work: it is the first user, not a consumer at a
   distance (D8).
@@ -436,12 +456,14 @@ this repository's three layers and the committed probes are for.
 - **The library carries no mock S-SBC and no console.** A library-only consumer brings its
   own trunk peer and its own UI; the mock and the console stay in this repository.
 - **`extract_called_number` keeps a name that is wrong for one caller** (decision 2, LLD
-  section 9.1), and the unused `TrunkMessage` moves as-is. Both are recorded; fixing them is
-  a separate, approved change.
+  section 9.1). The naming debt is recorded, not fixed; renaming it is a separate, approved
+  change. The unused `TrunkMessage` is **not** carried: it is deleted with the move
+  (decision 2).
 - **The library's gate does not run in this repository's CI.** A library change can pass here
   while failing the library's own gate until the library's CI is wired (decision 8).
-- **`REQ-F-023` and `AGENT.md` section 4.3 are inaccurate about the error model's location**
-  after the split (decision 3). Escalated to the maintainer; not reworded by this stage.
+- **`REQ-F-023`'s text names a location the split moves** (decision 3). The requirement is
+  **not reworded** — the delta is recorded in the SRS traceability note, and `AGENT.md` section
+  4.3 is updated in the implementation commit.
 - **The probe is scratch.** It is not committed and cannot be re-run from this repository
   (*Verified facts*); the recorded output is the evidence, and the implementation stage cannot
   re-measure it without rebuilding the throwaway library.

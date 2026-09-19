@@ -176,6 +176,20 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
   carried no named verification, so that row was amended to cite the library's own suite. These
   were findings of the section 5.2 review gate, fixed inside the stage; the gate's verdict is
   recorded in `docs/phase2-plan.md`, not here.
+- **P10 platform extraction — design stage (2026-09-19), the `REQ-F-023` delta.** `REQ-F-023`'s
+  text is **unchanged**: it was true when written (P8 added the `AS-FRAUD-*` codes to the
+  then-single authoritative model), and a stage may not reword a frozen requirement (plan
+  section 5.2). After P10 the authoritative *model* is the **library's mechanism** — the
+  memberless `ErrorCode` base, `SIP_PHRASES`, `sip_status_for` and `AsError` in
+  `as_platform.errors` — while the `AS-FRAUD-*` family lives in `src/anti_fraud_as/errors.py`
+  and the translation families (`AS-RULE-*`, `AS-ROUTE-*`) stay in `src/as_app/errors.py`
+  (ADR-0009 decision 3). Every code, SIP status and log message is **unchanged**, so the row's
+  intent — one model, no second error vocabulary, codes mapped to SIP status and log message —
+  holds; only the location the row names has moved. This is the same way P8a records the
+  `REQ-F-011` delta: the requirement text is unchanged and the note carries the change.
+  `AGENT.md` section 4.3 is a structural document, not a frozen requirement, and is updated in
+  P10's implementation commit to name the library mechanism and the three families (`AGENT.md`
+  section 13).
 - Milestones M0–M3 are delivered, so no requirement above is left `planned` or `partial`
   for want of a milestone. The `docker compose` stack (both AS instances, two mocks and the
   console) is validated with `docker compose config`; its SIP path still carries the

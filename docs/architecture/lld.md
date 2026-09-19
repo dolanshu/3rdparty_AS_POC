@@ -364,8 +364,9 @@ Two consequences worth stating, because both are friction P10 inherits:
   The mismatch is not fixed now (renaming it would touch the first AS), but it is recorded.
 - `sip_adapter.TrunkMessage` already has a `calling_number` field, but it is **never
   populated and `TrunkMessage` is not used anywhere** in the codebase today; the controller
-  reads the sippy request directly, as the first AS does. The unused plain-data view is
-  noted rather than adopted or deleted (`AGENT.md` section 14 rule 4).
+  reads the sippy request directly, as the first AS does. It was noted here rather than
+  adopted; **P10 removed it** — the class and its `__all__` entry are deleted with the move
+  into the library, not inherited (ADR-0009 decision 2, section 11.1).
 
 **What deliberately stays use-case-specific** (not generalised, not shared):
 
@@ -1015,4 +1016,256 @@ the reuse of the inbound `Call-ID` is a **Phase 1 defect**, not accepted behavio
 rows described a change to *intended* behaviour and **do not stand**: the requirement and plan
 wording is correct as written and is not changed, and the **code** is what was brought into
 line (`docs/phase2-plan.md` section 3, P9 decisions 3 and 4; ADR-0008 decision 3).
+
+## 11. The platform library (P10)
+
+The library of `docs/architecture/hld.md` section 10, at module level. P10 moves the skeleton
+both AS instances duplicate into `src/as_platform/` in a new repository (`../as_platform`); this
+repository becomes its **reference implementation**, and the two applications keep their use
+cases and their public names. This section is the low-level design of the module split, the
+controller seam, the error families, the two seams, the consumption mechanism and the staged
+order — each citing ADR-0009 rather than re-arguing it.
+
+### 11.1 Module responsibilities of `src/as_platform/`
+
+The library is a package `as_platform` (distribution `as-platform`) in its own repository,
+checked out beside this one. Its modules are the parts section 9.1 calls use-case-agnostic, plus
+the shells the two applications currently duplicate (ADR-0009 decision 2):
+
+| Module | Responsibility |
+| --- | --- |
+| `observability/` | structured logging, counters/dispositions/peer status, per-Call-ID trace and console feed (moved from `as_app.observability`) |
+| `sip_adapter` | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `outbound_call_id`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `CallLeg` (moved from `as_app.sip_adapter`; `TrunkMessage` is **not** carried — deleted with the move, ADR-0009 decision 2) |
+| `errors` (mechanism) | the memberless `ErrorCode` base, `SIP_PHRASES`, `sip_status_for`, `AsError`, and the `SkeletonErrorCode` family (`AS-CFG-*`, `AS-PEER-*`, `AS-INT-*`) (section 11.3) |
+| `bootstrap` (plumbing) | `ShutdownController`, `install_signal_handlers`, `check_port_available` (moved from `as_app.bootstrap`) |
+| `version` | the distribution → `VERSION` chain (moved from `as_app.__init__`) |
+| `internal_api` (shell) | the app factory, `InternalApiServer` and the payload builders, generalised over a payload provider instead of bound to a `RuleSetStore` |
+| `call_controller` (shell) | `BaseCallController`, `BaseCallMap`, `PolicyDecision` (section 11.2) |
+| `main` (shell) | `BaseAsStack` |
+| `transport` | `Transport` / `UdpTransport` (section 11.4) |
+| `state_store` | `StateStore` / `InMemoryStateStore` (section 11.4) |
+| `py.typed` | the PEP 561 marker; load-bearing, not optional (ADR-0009 decision 1 and *Verified facts* (e)) |
+
+**What deliberately stays use-case-specific in this repository** — and the reason per row, which
+is section 9.1's table extended to the routing catalogue:
+
+| Part | Why it stays here |
+| --- | --- |
+| `routing/` (`rules.py`, `engine.py`) | the routing catalogue and the translation engine *are* the number-translation use case's data and algorithm; a shared routing interface would shape the platform like one of the two samples (section 9.1's reasoning for `screening_data.py`, applied to the other use case) |
+| `screening.py` | the verdict algorithm *is* the anti-fraud use case; there is exactly one implementation, so an interface would be a guess (section 9.1) |
+| `caller_state.py` | cross-call state is introduced by that use case; a pluggable state store is P11, and D9 forbids solving it early (section 9.1, section 11.4) |
+| `screening_data.py` | the schema is that use case's data; forcing a common schema with the routing rules would shape the platform like these two samples (section 9.1) |
+| `as_app/errors.py` — the `AsErrorCode` family | the `AS-RULE-*` / `AS-ROUTE-*` codes are the translation vocabulary; the family lives in the package that owns it (section 11.3) |
+| `anti_fraud_as/errors.py` — the `FraudErrorCode` family | the `AS-FRAUD-*` codes are the anti-fraud vocabulary (section 11.3) |
+| entry points, settings, API routes | `AsStack` / `FraudAsStack`, `AsSettings` / `FraudAsSettings` and the routes are instance identity, not skeleton |
+
+**Two surfaces keep a thin re-export facade in `as_app`.** `as_app.sip_adapter` and
+`as_app.observability.*` are referenced **by path** in `tools/`, `tests/` and the frozen ADRs
+and LLD; the implementation moves to the library and the modules stay as re-export facades, so
+those references keep resolving and the three layers stay the unchanged anti-regression guard
+(REQ-F-031, ADR-0009 decision 2). A facade adds no behaviour and no state, and it is permanent,
+not a migration shim.
+
+### 11.2 The controller seam and `PolicyDecision`
+
+The base owns the relay mechanics both controllers duplicate; the application owns the decision.
+The seam keeps the name `apply_call_policy`, because the LLD calls it "the single seam"
+(section 9.6) and every call site uses that name (ADR-0009 decision 4):
+
+```text
+BaseCallController.apply_call_policy(event)   # library: relay, failover walk, timers, trace, log
+        │
+        │  self.decide(event)   <-- the only override; the application's single hook
+        ▼
+   PolicyDecision          (plain data, below — the base applies it without either vocabulary)
+        │
+        ├── CallController.decide()          (number translation)
+        │       routing.engine.decide(...) -> RELAY
+        │         outbound_event = the translated CCEventTry
+        │         next_hops      = the matched rule's hops
+        │         attributes     = rule_id
+        │
+        └── FraudCallController.decide()     (anti-fraud)
+                CallerStateStore.observe(...) -> screening.screen(...)
+                -> REJECT: error = FraudErrorCode, disposition = REJECTED,
+                           attributes = screen_source / list_entry / sip_608_declared
+                -> RELAY:  outbound_event = the unchanged CCEventTry,
+                           next_hops = the single configured hop
+```
+
+`PolicyDecision` is plain data, so the base can apply a decision without knowing either use
+case's vocabulary:
+
+| Field | Meaning |
+| --- | --- |
+| `action` | `PolicyAction.RELAY` or `PolicyAction.REJECT` |
+| `outbound_event` | relay path: the `CCEventTry` to originate (already rewritten, or the original for a pass-through) |
+| `next_hops` | relay path: ordered `NextHop` list; empty means no failover |
+| `error` | reject path: the `AsError` carrying the family code, its SIP status and its phrase |
+| `disposition` | the `CallDisposition` to record, supplied rather than derived (section 9.6) |
+| `attributes` | extra trace/log fields for this decision (for example `rule_id`, `screen_source`, `sip_608_declared`) |
+
+**The base owns the failover walk; the anti-fraud's single hop is a one-element list.**
+`CallController._relay_from_next_hop` walks a failover list while the anti-fraud controller has
+no failover path; the base implements the failover version, and the anti-fraud's `next_hops`
+being a one-element list reproduces its current behaviour exactly. There is therefore **no
+branch on "which application am I"** anywhere in the base (ADR-0009 decision 4).
+
+**`BaseCallMap` and `BaseAsStack` carry the process shell.** `BaseCallMap` enforces the peer
+allowlist and creates one controller per INVITE (section 9.2); `BaseAsStack` owns `SipConf`
+identity pinning, the `SipTransactionManager`, the `ED2` loop, the loop-owned shutdown/reload
+timers and the stop ordering of section 9.7. The `Base` prefix avoids shadowing the
+applications' public `AsStack` / `FraudAsStack`, which `tools/` and `tests/` import by name.
+
+**The one-leg relaxations of section 9.6 become base invariants.** The four guarantees section
+9.6 states for the anti-fraud reject — `uaO` may stay `None` for a call's whole lifetime, a
+reject needs no `RoutingDecision`, the disposition is supplied, and `dispose()` guards `None` —
+move into the base as stated invariants, because the number-translation AS already tolerates
+them on its error branches. They are no longer an anti-fraud special case (ADR-0009 decision 4).
+
+### 11.3 The error model families
+
+Python forbids subclassing an `Enum` that has members, so a single `AsErrorCode` cannot be
+extended by the library and the applications. The library therefore owns the **memberless** base
+and the mechanism, and each family is a subclass in the package that owns the vocabulary
+(ADR-0009 decision 3):
+
+| Family | Enum | Home | Codes |
+| --- | --- | --- | --- |
+| skeleton | `SkeletonErrorCode(ErrorCode)` | `as_platform` | `AS-CFG-*`, `AS-PEER-*`, `AS-INT-*` |
+| number translation | `AsErrorCode(ErrorCode)` | `src/as_app/errors.py` | `AS-RULE-*`, `AS-ROUTE-*` |
+| anti-fraud | `FraudErrorCode(ErrorCode)` | `src/anti_fraud_as/errors.py` | `AS-FRAUD-*` |
+
+**The base carries no members** — `ErrorCode(Enum)` with `__init__(code, sip_status, message)`
+and no values — because a member would make it non-subclassable; `SIP_PHRASES`, `sip_status_for`
+and `AsError` (typed on `ErrorCode`, so it carries any family) live beside it. The code rows
+themselves are in the authoritative table of section 4, and the `608 Rejected` phrase and its
+resolution are in section 9.5; neither is repeated here. **Every code, SIP status and log
+message stays byte-identical**, so REQ-F-031's "the same `AS-*` error codes" holds and no wire
+behaviour moves. `SIP_PHRASES` moves once, so the phrase cannot drift between families.
+
+**`REQ-F-023`'s text is unchanged.** The row names a location (`src/as_app/errors.py`) that the
+split moves; a stage may not reword a frozen requirement, so the delta is recorded in the SRS
+traceability note, as P8a records the `REQ-F-011` delta (ADR-0009 decision 3). `AGENT.md`
+section 4.3 is a structural document and is updated in the implementation commit (section 11.6).
+
+**The bounded test edit.** A unit test that reads a moved member off `AsErrorCode` (`CFG_*`,
+`PEER_*`, `FRAUD_*`) must import it from the family enum that now owns it; the **assertions do
+not change**, only the module a genuinely-moved member is read from. It is the one class of
+test change the extraction is allowed to make, and REQ-F-031's promise is that the layers **stay
+green**, not that no import line ever changes (ADR-0009 decision 3).
+
+### 11.4 The two pluggable seams
+
+P10 defines the boundaries and stops there (REQ-NF-020, D9, D10). The library exposes two
+interfaces and ships exactly one implementation of each (ADR-0009 decision 5):
+
+| Seam | Interface | Abstracts | P10 implementation | P11 second implementation |
+| --- | --- | --- | --- | --- |
+| transport | `Transport` | the socket the stack binds and sends on | `UdpTransport` (the existing behaviour) | TLS |
+| state store | `StateStore` | where cross-call state is kept | `InMemoryStateStore` | Redis |
+
+**No second implementation is written, no external service is added and no load harness is
+built.** The in-memory cross-call state (REQ-NF-012) remains the only store, and `make demo`
+keeps running fully offline with no container. Two implementations do not exist yet, so there
+is no registry, no plugin protocol and no factory that selects one — that would be the framework
+`AGENT.md` section 12 forbids; P11 adds the second class and, only then, the selection. The
+capacity harness is a P11 capability and is **not** a seam: it is a capability, not a swappable
+dimension.
+
+**The state-store seam does not move the anti-fraud's ownership boundary.** `CallerStateStore` —
+the call-rate window and the reputation ledger — stays in `src/anti_fraud_as/` and stays
+**process-level, never in the per-call controller** (D9, section 9.2); the seam is the storage
+**beneath** it. Putting the window itself behind the seam, or on the controller, is the silent
+failure D9 names. The transport seam is used by the stack's socket binding, not by the
+controller.
+
+### 11.5 Consumption and the `path` source
+
+This repository consumes the library through a `path` source with `editable = true` (ADR-0009
+decision 6):
+
+```toml
+[project]
+dependencies = ["as-platform", ...]
+
+[tool.uv.sources]
+as-platform = { path = "../as_platform", editable = true }
+```
+
+The measured consequences (ADR-0009 *Verified facts*, (a)–(g)) are operational facts an
+implementer needs, quoted rather than re-derived:
+
+- **`editable = true` is mandatory.** The default for a `path` source is a **copy**, not a link:
+  with no `editable` key, or with `editable = false`, `direct_url.json` records
+  `{"dir_info":{"editable":false}}` and `site-packages` holds a copy. During the staged
+  extraction a step edits the library and immediately runs this repository's gate against it, so
+  only `editable = true` — which produces the `_editable_impl_as_platform.pth` link — makes the
+  library edits visible; a plain `uv sync` will not rebuild a copied install.
+- **A version constraint in `dependencies` is silently ignored.** `dependencies =
+  ["as-platform>=99.0"]` against a `0.4.0` checkout installed `0.4.0` and exited `0`. The pin is
+  not a guard; the lockfile is.
+- **The source is mandatory.** A dependency key with no `[tool.uv.sources]` entry does not
+  resolve at all: `uv sync` fails with *"Because as-platform was not found in the package
+  registry and your project depends on as-platform, we can conclude that your project's
+  requirements are unsatisfiable."* That is the error a **single-repository clone** produces
+  (`docs/architecture/hld.md` section 10.2).
+- **The lock is the guard, and `--frozen` is not.** `uv sync --locked` refuses when the library's
+  version changed; `uv sync --frozen` accepted the same skew and installed the new version
+  silently, so CI's lock verification (`AGENT.md` section 4.7) is the only thing that catches a
+  library move under a stale lock.
+- **The library must ship `py.typed`.** Without it `mypy` reports `import-untyped` and this
+  repository's `make lint` fails (*Verified facts* (e)); it is part of the library's definition
+  of done, not a later addition.
+
+The `path` is resolved relative to the consuming `pyproject.toml`, so `../as_platform` means a
+sibling of this repository's root — the layout REQ-F-032 names (*Verified facts* (f)).
+
+### 11.6 Structural changes for the implementation commit
+
+The implementation commit mirrors these into `AGENT.md`, `README.md` and `docs/README.md` in
+the same commit (`AGENT.md` sections 12 and 13). **None of those files is edited at design
+stage**, and the ADR index range is updated in the implementation commit exactly as P8's and
+P9's were (sections 9.10, 10.5).
+
+| Change | Files the implementation commit must update |
+| --- | --- |
+| New library package `as_platform` (modules of section 11.1) | the **new repository**: `src/as_platform/**`, `pyproject.toml`, `VERSION`, `README.md`, `LICENSE`, `CHANGELOG.md`, a `Makefile` gate, CI, and `py.typed` |
+| Library-standard documents (REQ-NF-019, D8) | the **new repository**: API reference, integration guide, compatibility matrix |
+| Library's own suite and gate (REQ-NF-021) | the **new repository**: `tests/**` and the `ruff` / `mypy` / `pytest` configuration and CI workflow |
+| Consumption mechanism (section 11.5) | this repository's `pyproject.toml` — `[project].dependencies` **and** `[tool.uv.sources]` — and the regenerated `uv.lock` |
+| CI resolves the path source | `.github/workflows/ci.yml` — each of the five jobs checks out the library repository into `../as_platform` before `uv sync --frozen`, because a runner-side sync resolves the path source and a single checkout fails (*Verified facts* (a)) |
+| `Makefile` gate targets | **unchanged** — every target already depends on `sync` (`$(UV) sync`), which resolves the path source once the sibling checkout exists; no target is added, because the library carries its own gate (ADR-0009 decision 8) |
+| Moved modules become facades | `src/as_app/sip_adapter.py`, `src/as_app/observability/*` (re-export only, permanent) |
+| Both controllers rewired to `decide()` | `src/as_app/call_controller.py`, `src/anti_fraud_as/call_controller.py` (subclasses; the public `AsStack` / `FraudAsStack` names are preserved) |
+| Error families split (section 11.3) | `src/as_app/errors.py` (`AsErrorCode` plus facade re-exports), `src/anti_fraud_as/errors.py` (`FraudErrorCode`) |
+| `TrunkMessage` deleted with the move (ADR-0009 decision 2) | `src/as_app/sip_adapter.py` — the class and its `__all__` entry removed; section 9.1's friction note updated in the design stage |
+| Clean-checkout guarantee restated (REQ-F-032) | `AGENT.md` section 10, `README.md`, `docs/README.md` (the repository tour names the second checkout) |
+| Error model's location (ADR-0009 decision 3) | `AGENT.md` section 4.3 — names the library mechanism and the three families (`AGENT.md` section 13) |
+| New design artefact `docs/architecture/adr/0009-*.md` | the **ADR index range** in `README.md` and `docs/README.md`, which both read *"ADR-0001 … ADR-0008"* today, becomes *"ADR-0001 … ADR-0009"*, with the one-line description of ADR-0009 alongside the others |
+| New gaps accepted | `docs/production-gaps.md` (no versioned consumption; the interface induced from two instances; no second transport / store / harness; no mock or console in the library; the `extract_called_number` naming debt; the library gate not in this repository's CI; the scratch probe) |
+| New acceptance items `ACC-P10-*` and evidence | `docs/acceptance/criteria.md`, `docs/acceptance/report.md` |
+| Item close (version and CHANGELOG) | `VERSION`, `CHANGELOG.md` — per `docs/phase2-plan.md` section 5.4, tagging remains the maintainer's step |
+
+### 11.7 The staged sequence
+
+ADR-0009 decision 7 orders the extraction by dependency, not by size; each step leaves
+`make lint` clean and all three layers green (REQ-F-033, D7, `AGENT.md` section 10). A step that
+would leave the repository broken is not a valid step, and no step is allowed to be "temporarily
+red". This is the executable order:
+
+| # | Step | Moves | Must stay green |
+| --- | --- | --- | --- |
+| 1 | Create the library repository and add the `path` dependency (section 11.5). **No code moves.** | nothing | `make lint`; the dependency resolves and is unused |
+| 2 | Move the leaf modules with the `as_app` facades. | `observability/`, the `errors` mechanism plus `SkeletonErrorCode`, `sip_adapter` (with `TrunkMessage` deleted) | all three layers; the facades keep every by-path reference resolving |
+| 3 | Move the version chain and the bootstrap plumbing. | `version`; `ShutdownController` / `install_signal_handlers` / `check_port_available`, generalised | all three layers |
+| 4 | Move the controller shell and rewire both controllers to `decide()`. | `BaseCallController` + `PolicyDecision` + `BaseCallMap`; `CallController` and `FraudCallController` become subclasses | all three layers **plus** `tools/chained_as_probe.py` — the largest step, and the only one that can change behaviour |
+| 5 | Move and generalise `internal_api` (a payload provider instead of a bound store). | the app factory, `InternalApiServer`, the payload builders | all three layers; both applications keep their routes and payload shapes |
+| 6 | Add the two seams, one implementation each (section 11.4). | new `Transport` / `UdpTransport`, `StateStore` / `InMemoryStateStore` | all three layers; no behaviour change |
+| 7 | Give the library its own suite, gate, independence assertion and documents (REQ-NF-021). | the library's `tests/`, gate and documents | this repository's three layers; the library is independently verifiable |
+
+The leaf modules have no dependency on the controller; the controller shell depends on `errors`,
+`sip_adapter` and `observability`; the stack depends on the controller and `internal_api`; the
+seams are last because they are new code and cannot be validated by the existing suite until it
+is green again.
 

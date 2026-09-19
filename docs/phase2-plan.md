@@ -813,7 +813,8 @@ Not blocking, but each must be handled rather than discovered mid-implementation
    front door of the repository.
 2. **Configuration multiplication** — see §6. Resolve in P8, not later.
 3. **`CallController` two-leg assumption** must be relaxed for the UAS-only reject path (P8).
-4. **Probe sippy's 608 support** before relying on it (P8 prerequisite).
+4. **A design-stage probe for P8: sippy's 608 support.** It validates P8's rejection
+   semantics only — not a prerequisite, and not a gate for anything else (§5.1).
 5. **Probe sippy's TLS support** before P11.
 6. **New gaps to register** as they are accepted: no `jCard`/`JWS` redress mechanism (D5);
    a real UAC that does not declare `sip.608` would require a media announcement (D5);

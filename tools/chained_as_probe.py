@@ -19,20 +19,26 @@ P9's design assumption (``docs/phase2-plan.md`` section 3, P9; REQ-F-025 / REQ-F
 that the chained topology ``SBC -> AS-1 (anti-fraud) -> AS-2 (number translation) -> core``
 can be wired by **configuration only** — pointing AS-1's allowed-relay next hop
 (``FRAUD_SBC_PEER_*``) at AS-2's SIP listen address — with no iFC emulation added to the
-mock and no code shared between the two AS instances. Two properties are observed here
+mock and no code shared between the two AS instances. Three properties are observed here
 rather than assumed (``AGENT.md`` section 6):
 
 1. an INVITE AS-1 **allows** is relayed into AS-2, translated there and answered by the
    core, driving a complete call through both B2BUA instances;
 2. an INVITE AS-1 **rejects** is answered ``608`` on the trunk and never reaches AS-2 or the
    core, because the reject path originates no second leg (REQ-F-021, REQ-F-027);
-3. the dialog ``Call-ID`` each hop sees, which is what the cross-AS correlation question of
-   ``docs/phase2-plan.md`` section 6 and REQ-NF-016 is about.
+3. the dialog ``Call-ID`` **every leg** carries, which is what the cross-AS correlation
+   question of ``docs/phase2-plan.md`` section 6 and REQ-NF-016 is about.
 
-Those two sources assume a B2BUA **regenerates** the ``Call-ID`` for its second leg, so that
-a chained call would appear as two independent per-instance traces. The probe measures what
-the stack actually does instead of assuming it (``AGENT.md`` section 6) and asserts it; the
-observed result is recorded in ADR-0008.
+**Each B2BUA gives its outbound leg its own ``Call-ID``** — the design intent of
+``docs/architecture/lld.md`` section 2.3, implemented by ``outbound_call_id()`` in
+``src/as_app/sip_adapter.py``. A chained call therefore carries **three** distinct
+``Call-ID`` values, one per leg: the S-CSCF leg's, the inter-AS leg's and the core leg's.
+The assertion below is that strict property (each transition is exactly
+``outbound_call_id`` of the previous leg), **not** "one ``Call-ID`` spans the chain": the
+earlier revision of this probe measured the latter and it was a **Phase 1 defect**, since
+fixed. Cross-AS correlation on ``Call-ID`` is consequently **impossible** and is what
+REQ-NF-016 registers as a POC gap; the demo makes the distinct values visible rather than
+hiding them, and this probe is the guard that keeps the regeneration real.
 
 This is a **design instrument**, not a test: it is not collected by pytest and does not run
 in CI. It runs the real stacks in one interpreter, as ``tools/demo_call.py`` and
@@ -70,6 +76,7 @@ from as_app.main import AsStack  # noqa: E402
 from as_app.observability.logging import configure_logging  # noqa: E402
 from as_app.observability.metrics import MetricsRegistry  # noqa: E402
 from as_app.observability.tracing import SipMessageRecorder, TraceRecorder  # noqa: E402
+from as_app.sip_adapter import outbound_call_id  # noqa: E402
 from s_sbc_mock.main import MockConfig, SMockApplication  # noqa: E402
 from s_sbc_mock.uac import CallOutcome, CallScenario  # noqa: E402
 
@@ -287,10 +294,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"{'final status':<{_LABEL_WIDTH}}: {final.status}")
         print(f"{'released':<{_LABEL_WIDTH}}: {final.released}")
-        hop_call_ids = {uac_call_id, as2_trunk_call_id, core_call_id}
-        call_id_preserved = len(hop_call_ids) == 1 and "-" not in hop_call_ids
-        print(f"{'distinct Call-IDs':<{_LABEL_WIDTH}}: {len(hop_call_ids)}")
-        print(f"{'Call-ID preserved':<{_LABEL_WIDTH}}: {call_id_preserved}")
+        hop_call_ids = [uac_call_id, as2_trunk_call_id, core_call_id]
+        per_leg_ok = as2_trunk_call_id == outbound_call_id(
+            uac_call_id
+        ) and core_call_id == outbound_call_id(as2_trunk_call_id)
+        print(f"{'distinct Call-IDs':<{_LABEL_WIDTH}}: {len(set(hop_call_ids))}")
+        print(f"{'Call-ID per leg':<{_LABEL_WIDTH}}: {per_leg_ok}")
         print()
 
         allowed_ok = (
@@ -335,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
 
         rejected_ok = rejected_final.status == 608 and as2_delta == 0 and core_delta == 0
         results.append(rejected_ok)
-        results.append(call_id_preserved)
+        results.append(per_leg_ok)
     finally:
         as1.stop()
         as2.stop()
@@ -345,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
     print("--- verdict --------------------------------------------------------")
     print(f"allowed call completed through two B2BUAs : {'OK' if results[0] else 'FAILED'}")
     print(f"608 reject short-circuited before AS-2     : {'OK' if results[1] else 'FAILED'}")
-    print(f"Call-ID preserved across both B2BUAs       : {'OK' if results[2] else 'FAILED'}")
+    print(f"Call-ID regenerated on every leg           : {'OK' if results[2] else 'FAILED'}")
     return 0 if all(results) else 1
 
 

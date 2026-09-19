@@ -1,4 +1,4 @@
-# ADR-0008: Chained AS topology — configuration-only chaining and Call-ID preservation across two B2BUAs
+# ADR-0008: Chained AS topology — configuration-only chaining and a distinct Call-ID per B2BUA leg
 
 - **Status:** Accepted
 - **Date:** 2026-09-19
@@ -9,19 +9,16 @@
   separation) · ADR-0007 (anti-fraud AS) · `docs/architecture/hld.md` section 9 ·
   `docs/architecture/lld.md` section 2.3 and section 10 · `tools/chained_as_probe.py`
 
-> **Pending rework — this ADR was written against a defective behaviour (maintainer ruling,
-> 2026-09-19).** Decisions **2**, **3** and **4** below describe the **current** behaviour of
-> the code as the probe measured it: the AS **reuses the inbound `Call-ID` on its outbound
-> leg**, so one `Call-ID` spans the whole chain. The maintainer has ruled that a **Phase 1
-> defect** — the code contradicts the design intent stated in
-> `docs/architecture/lld.md` section 2.3 (`Call-ID` belongs to the dialog and the second leg
-> has its own) — not accepted behaviour. **Decision 3 does not stand:** the premise it retires
-> is the *intended* behaviour, so `REQ-NF-016` / `REQ-F-028` and the plan's section 6 and
-> section 3 P9 keep their wording, and the rewording this ADR assigned to the implementation
-> commit is **withdrawn**. The fix lands on **`main`** and is merged back into `phase2`;
-> **P9 is paused** until then, and this ADR is to be **reworked when P9's design stage is
-> redone** (`docs/phase2-plan.md` section 3, P9). The probe's measurements are true
-> observations of the code as it stands and are kept.
+> **Reworked 2026-09-19 (P9 stage 2, second pass).** The first pass was written against a
+> defective behaviour: the AS reused the inbound `Call-ID` on its outbound leg, so the probe
+> measured **one** `Call-ID` across the whole chain (`distinct Call-IDs: 1`), and decisions 2,
+> 3 and 4 below were written to that observation. The maintainer ruled the reuse a **Phase 1
+> defect** — the code contradicted the design intent of `docs/architecture/lld.md` section 2.3
+> — had it fixed on **`main`** (`f1b4186`, merged back into `phase2` as `76a95da`) and
+> **paused P9** until that landed. P9 then resumed and this stage was redone on the fixed
+> behaviour (`docs/phase2-plan.md` section 3, P9). Decisions 2 and 4 and the measurements
+> below are rewritten; the withdrawn decision 3 is folded into decision 3 as it now stands.
+> The first pass's *observations* are kept where they are history, and marked as such.
 
 ## Context
 
@@ -44,14 +41,18 @@ Three questions had to be settled before any demo exists:
    `REQ-NF-016` assert that *"two B2BUAs in series produce two different Call-IDs"*, that a
    B2BUA regenerates the dialog `Call-ID` for its second leg, and that cross-AS correlation
    is therefore **unsolved**. That premise is load-bearing — it decides whether P9 registers
-   a gap or demonstrates a correlation — so it had to be measured rather than repeated.
+   a gap or demonstrates a correlation — so it had to be measured rather than repeated. It
+   also turned out to be a **defect report against the code**, not merely a design question:
+   the first probe measured the opposite of the premise, which is how the Phase 1 defect was
+   found.
 
 ## Decision
 
 ### 1. Chaining is configuration only, and the two hops are configured differently
 
-The chain is wired from the existing knobs and the routing catalogue. **No code is changed,
-no iFC emulation is added to the mock, and neither AS imports the other** (REQ-F-026).
+The chain is wired from the existing knobs and the routing catalogue. **No code is changed
+to make chaining work, no iFC emulation is added to the mock, and neither AS imports the
+other** (REQ-F-026).
 
 | Hop | Decided by | Value for the chain |
 | --- | --- | --- |
@@ -67,50 +68,76 @@ therefore rewrite the catalogue's next-hop ports (the committed
 `capture_call.rewrite_next_hop_ports` does exactly this) rather than only set environment
 variables.
 
-### 2. The dialog `Call-ID` is preserved across both B2BUAs
+### 2. Every B2BUA gives its outbound leg its own `Call-ID`
 
-Measured, not assumed: a chained call carries **one** `Call-ID` from the S-CSCF to the core,
-through both AS instances (`distinct Call-IDs: 1`). The mechanism is a stack behaviour plus a
-decision both controllers already make, and neither is the "regenerate per leg" the plan
-assumed:
+**A chained call carries three distinct `Call-ID` values, one per leg**, because each B2BUA
+regenerates the dialog identity of the leg it originates. With the S-CSCF leg's value
+written `X`:
+
+| Leg | `Call-ID` | Produced by |
+| --- | --- | --- |
+| S-CSCF → AS-1 trunk | `X` | the mock UAC |
+| AS-1 → AS-2 (inter-AS) | `X-b2b_1` | AS-1's outbound leg |
+| AS-2 → core | `X-b2b_1-b2b_1` | AS-2's outbound leg |
+
+The mechanism is a single source of truth plus a stack behaviour that has to be worked
+around:
 
 1. `UasStateIdle.recvEvent` takes the trunk `Call-ID` off the received request
    (`self.ua.cId = self.ua.uasResp.getHFBody('call-id')`) and puts it into the call-control
    event as element `[0]`: `CCEventTry((self.ua.cId, …))`.
-2. Both controllers **rebuild** that event and keep element `[0]`: `as_app` builds
-   `CCEventTry((original[0], original[1], translated, …))` and `anti_fraud_as` builds
-   `CCEventTry(event.getData())`.
-3. `UacStateIdle.recvEvent` **reuses** a `Call-ID` it is handed instead of generating one:
-   `if cId == None: self.ua.cId = SipCallId() else: self.ua.cId = cId.getCopy()`.
+2. `UacStateIdle.recvEvent` would **reuse** a `Call-ID` it is handed instead of generating
+   one (`if cId == None: self.ua.cId = SipCallId() else: self.ua.cId = cId.getCopy()`), and
+   only sippy's own `CCB2BUA` rewrites it for the second leg (`sippy/b2bua.py`, the `-b2b_N`
+   suffix by default). This project runs its **own controller over a bare `sippy.UA`**, so
+   nothing rewrites it unless the controller does.
+3. Both controllers therefore build the outbound `CCEventTry` with a **fresh** `SipCallId`:
+   `outbound_call_id()` in `src/as_app/sip_adapter.py` appends sippy's own suffix
+   (`B2BUA_CALL_ID_SUFFIX = "-b2b_1"`) to the trunk value, and the inbound `SipCallId` object
+   is never mutated. Route `1` is the AS's single outbound leg, and every failover hop
+   reuses the same value because the translated event is built once and stored in
+   `_pending_event`, so one call has exactly one outbound `Call-ID`.
 
-`Call-ID` is **absent** from `PASSTHROUGH_HEADERS`, but it does not cross as a copied header —
-it crosses inside the call-control event, which is why the pass-through set does not decide
-this question. The two facts are not in conflict; reading only the header table is what makes
-the plan's premise look true.
+`Call-ID` is **absent** from `PASSTHROUGH_HEADERS`, and that is now incidental: it does not
+cross as a copied header but inside the call-control event, where each controller rebuilds
+it. Reading only the header table is what made the defect invisible.
 
-### 3. The "two B2BUAs produce two Call-IDs" premise is wrong, and is retired
+**Both instances, not one.** The Phase 1 fix landed this for the number-translation
+instance (`src/as_app/call_controller.py`). `src/anti_fraud_as/call_controller.py` had its
+**own copy of the same defect** — it builds `CCEventTry(event.getData())`, keeping element
+`[0]` — and the file exists only on `phase2`, so the Phase 1 fix could not reach it
+(`docs/phase2-plan.md` section 3 P9, finding (A)). It is fixed in **P9's implementation
+stage**, which is also what turns the reworked probe green.
 
-The premise is stated in four places and is **factually wrong for this codebase**: the plan's
-section 6 ("Chained Call-IDs"), the plan's section 3 P9 ("Known issue"), `REQ-NF-016` and
-`REQ-F-028`. Correcting requirement and plan text is not this stage's job; the correction is
-assigned to the item's **implementation commit** (`docs/architecture/lld.md` section 10.5),
-which must reword those four places to the measured behaviour without changing the intent of
-`REQ-F-028` (per-instance observability remains true: each instance still writes its own
-Call-ID keyed trace and console feed).
+### 3. The "two B2BUAs produce two Call-IDs" premise stands, and the code is made to match it
 
-### 4. Cross-AS correlation is solved by construction, not registered as a gap
+The premise is stated in the plan's section 6 ("Chained Call-IDs"), the plan's section 3 P9
+("Known issue"), `REQ-NF-016` and `REQ-F-028`. The maintainer's ruling of 2026-09-19 is that
+it describes the **intended** behaviour and that the code, not the text, was wrong: the
+requirement wording is **not changed**, and the first pass's decision 3 — which retired the
+premise as "factually wrong" and assigned a rewording of those four places to P9's
+implementation commit — is **withdrawn**. The `lld.md` section 10.5 rows that carried that
+assignment are withdrawn with it.
 
-Because the `Call-ID` is preserved, a chained call is a **single correlated trace across both
-instances**: the Call-ID the S-CSCF used, the Call-ID AS-2 saw on its trunk leg and the
-Call-ID the core saw are the same string. P9 therefore demonstrates correlation rather than
-registering its absence. The demo makes that visible — it prints the `Call-ID` each hop saw —
-so a reviewer sees the property instead of a claim.
+`REQ-F-028` remains true for a second reason: each instance still writes its **own**
+`Call-ID` keyed trace and console feed, keyed by the `Call-ID` **it** saw on its trunk leg,
+so a chained call is observable per instance even though the values now differ.
 
-**The reliance is stated, not hidden.** This behaviour is a property of the pinned sippy
-version and of both controllers keeping event element `[0]`; it is **relied upon but not
-mandated** by anything in the design. A production deployment must not depend on it:
-`P-Charging-Vector` (the ICID, which ties both legs to one charging record) **is** in
-`PASSTHROUGH_HEADERS` and is the standard, end-to-end correlation key. That is recorded below.
+### 4. Cross-AS correlation is not solved, and is registered as a gap
+
+Because every leg regenerates the identity, **the `Call-ID` cannot be used to correlate
+across the two AS instances**: the value the S-CSCF used, the value AS-2 saw on its trunk
+leg and the value the core saw are three different strings. P9 therefore **registers the
+absence** rather than demonstrating a correlation, exactly as `REQ-NF-016` states.
+
+**The reliance is stated, not hidden.** The correlation key a production deployment uses is
+the standard end-to-end one: `P-Charging-Vector`'s **ICID**, which ties both legs to one
+charging record and **is** in `PASSTHROUGH_HEADERS`, so both instances already forward it.
+The POC cannot demonstrate that hop because the **mock never generates a
+`P-Charging-Vector`** — there is no end-to-end key on the wire at all — which is what the
+registered gap says. Adding one to the mock is not P9's work: `AGENT.md` section 12 forbids
+building what only production would need, and the mock's job is to behave like an S-SBC on
+the trunk, not to invent a charging identity.
 
 ### 5. A reject short-circuits the chain
 
@@ -139,9 +166,11 @@ obligation is stated in `docs/architecture/lld.md` section 10.5.
 
 Nothing here is designed for reuse by a third use case. The friction the chain exposes — that
 the two instances configure their next hop in two different ways, that the routing catalogue
-couples a dial plan to a peer inventory, and that the correlation key is a stack behaviour
-rather than a declared contract — is exactly the material P10 must turn into an interface
-(`docs/phase2-plan.md` D2, ADR-0007 decision 9).
+couples a dial plan to a peer inventory, and that **each instance has to remember to
+regenerate the dialog identity itself** — is exactly the material P10 must turn into an
+interface (`docs/phase2-plan.md` D2, ADR-0007 decision 9). The third item is new since the
+first pass: the defect was a *shared* mistake made twice, which is a stronger argument for
+extraction than any of the others.
 
 ## Verified facts (measured on this machine, 2026-09-19)
 
@@ -157,13 +186,30 @@ Command:
 uv run python tools/chained_as_probe.py
 ```
 
-Observed output (ports and Call-IDs are ephemeral and vary per run; the rest is verbatim,
-exit code `0`):
+**Observation on the first pass — the defective code (the Phase 1 defect).** Recorded as
+history; it is what the pause was called on. A **single** `Call-ID` spanned the chain, the
+first pass's assertion "Call-ID preserved" passed, and the premise of `REQ-NF-016` looked
+wrong:
+
+```text
+S-CSCF Call-ID: 4e45be8db92330434c319642120149de
+AS-2 trunk Call-ID: 4e45be8db92330434c319642120149de
+core Call-ID  : 4e45be8db92330434c319642120149de
+distinct Call-IDs: 1
+Call-ID preserved: True
+```
+
+**Observation on the reworked probe — after the Phase 1 fix, before P9's implementation
+stage.** The reworked probe asserts the *intended* per-leg property instead, and reports
+**three** distinct values as the target. It measured two, because AS-1 still carries its own
+copy of the defect (decision 2, finding (A)) — so the probe is **red until P9 stage 3 fixes
+the anti-fraud controller**, which is precisely what a design-stage guard is for. Ports and
+`Call-ID`s are ephemeral and vary per run; the rest is verbatim:
 
 ```text
 chained AS POC - two B2BUAs in series, wired by configuration only
 topology   : emulated S-CSCF --UDP--> AS-1 anti-fraud --UDP--> AS-2 number translation --UDP--> emulated core
-ports      : AS-1 127.0.0.1:45229, AS-2 127.0.0.1:46793, trunk 47944, core 47053
+ports      : AS-1 127.0.0.1:48527, AS-2 127.0.0.1:45239, trunk 47361, core 47327
 wiring     : AS-1 next hop = AS-2 listen address; AS-2 next hop = the rule set
 
 [1/2] allowed call relayed through both AS instances
@@ -171,15 +217,15 @@ caller        : +86216180001
 called        : +8613800138000
 AS-1 verdict  : allow
 AS-1 signal   : none
-S-CSCF Call-ID: 4e45be8db92330434c319642120149de
-AS-2 trunk Call-ID: 4e45be8db92330434c319642120149de
+S-CSCF Call-ID: 3f29687fb529ab15c96bb208cc8cc676
+AS-2 trunk Call-ID: 3f29687fb529ab15c96bb208cc8cc676
 AS-2 rule     : R-MOB-CM-40
-core Call-ID  : 4e45be8db92330434c319642120149de
+core Call-ID  : 3f29687fb529ab15c96bb208cc8cc676-b2b_1
 core called number: 013800138000
 final status  : 200
 released      : True
-distinct Call-IDs: 1
-Call-ID preserved: True
+distinct Call-IDs: 2
+Call-ID per leg: False
 
 [2/2] rejected call short-circuits at AS-1
 caller        : +8613400000001
@@ -191,15 +237,16 @@ core INVITEs seen: 0
 --- verdict --------------------------------------------------------
 allowed call completed through two B2BUAs : OK
 608 reject short-circuited before AS-2     : OK
-Call-ID preserved across both B2BUAs       : OK
+Call-ID regenerated on every leg           : FAILED
 ```
 
-**Conclusion.** All three design assumptions hold: an allowed call completes through both
-B2BUAs (`200`, released, the core saw the translated number `013800138000` under rule
-`R-MOB-CM-40`), a `608` reject never reaches AS-2 or the core, and **one `Call-ID` spans the
-whole chain**. The mechanism behind the third is quoted in Decision 2 from
-`sippy/UasStateIdle.py`, `sippy/UacStateIdle.py`, `src/as_app/call_controller.py` and
-`src/anti_fraud_as/call_controller.py`.
+**Conclusion.** Two of the three design assumptions hold on the fixed base: an allowed call
+completes through both B2BUAs (`200`, released, the core saw the translated number
+`013800138000` under rule `R-MOB-CM-40`), and a `608` reject never reaches AS-2 or the core.
+The third now reads correctly and **localises the remaining defect**: `core Call-ID` differs
+from `AS-2 trunk Call-ID` by exactly `-b2b_1`, proving AS-2 regenerates, while `AS-2 trunk
+Call-ID` still **equals** `S-CSCF Call-ID`, proving AS-1 does not. That is finding (A)
+measured, not argued.
 
 **What the probe does not prove.** It runs the two stacks in **one interpreter**, as
 `tools/demo_call.py` and `tools/demo_fraud_call.py` do, because that is how the repository's
@@ -214,21 +261,24 @@ instances' traces and hide the very thing being measured.
 
 - **P9 needs no code change to chain.** The wiring is `FRAUD_SBC_PEER_*` on one side and a
   catalogue entry on the other, so the demo is a run command plus documentation, not an
-  implementation of chaining.
-- **A chained call is one correlated trace, not two.** The correlation `REQ-NF-016` treated as
-  unsolved is present by construction, so the demo asserts it and the requirement's premise
-  is corrected in the implementation commit (Decision 3).
+  implementation of chaining. The **only** code P9's implementation stage changes is the
+  anti-fraud controller's outbound `Call-ID` (decision 2) — a defect fix, not chaining.
+- **A chained call is three per-instance traces, not one.** Each instance keys its trace on
+  the `Call-ID` it saw on its trunk leg, and those values differ, so there is no shared key.
+  The demo prints the distinct values and the gap is registered (decision 4).
 - **A reject is observable as an absence.** The chain's short-circuit property is asserted by
   what AS-2 and the core did *not* receive, which is stronger evidence than a status code.
 - **The chain exposes the two next-hop mechanisms.** That AS-1 relays to a configured peer
   while AS-2 routes by catalogue is the concrete friction P10 inherits, and it is why the demo
   has to rewrite catalogue ports.
+- **The dialog identity is the controller's responsibility.** Nothing in the stack does it for
+  a self-written controller, and the same omission was made twice — the strongest single
+  argument for extracting the relay shell into the platform library (P10).
 - **`make demo-chained` is a structural change.** It obliges `AGENT.md` section 10,
   `README.md` and `docs/README.md` to be updated in the implementation commit
   (`AGENT.md` section 13).
-- **The correlation key is a stack behaviour, not a contract.** Any future change to how a
-  controller rebuilds `CCEventTry`, or a sippy upgrade that changes `UacStateIdle`, can break
-  Call-ID preservation silently. The probe is the guard that turns that into a failure.
+- **The probe is the regression guard.** Any future controller that forgets to derive the
+  outbound `Call-ID`, or a sippy upgrade that changes `UacStateIdle`, turns the probe red.
 
 ## Gaps accepted
 
@@ -240,10 +290,11 @@ exists.
   deployment triggers each AS from the S-CSCF by iFC and applies Initial Filter Criteria to
   route one AS's output into the next. Production: model the S-CSCF trigger and the iFC that
   inserts a second AS in the chain.
-- **Call-ID preservation is relied upon but not mandated.** It is a property of the pinned
-  sippy version plus both controllers keeping event element `[0]` (Decision 2), and nothing
-  in the design declares it a contract. Production: correlate on the standard end-to-end key —
-  `P-Charging-Vector`'s ICID, which **is** in `PASSTHROUGH_HEADERS` — rather than on `Call-ID`.
+- **No end-to-end correlation key on the wire.** `Call-ID` cannot correlate across two
+  B2BUAs once each leg regenerates it (decision 4), and the standard alternative —
+  `P-Charging-Vector`'s ICID, which both instances already pass through — is never generated
+  by the mock, so the POC has **no** end-to-end key at all. Production: correlate on the ICID
+  and require the S-SBC to generate it.
 - **No shared state between the two instances.** AS-1's screening state and AS-2's rule set are
   independent and neither sees the other's decision; the chain has no shared call context.
   Production: a shared session/charging context if the chain has to make a joint decision.

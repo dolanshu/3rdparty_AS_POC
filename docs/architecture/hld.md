@@ -284,16 +284,6 @@ distinction has to be visible, every screened INVITE carries the declaration sta
 
 ## 9. The chained topology (P9)
 
-> **Pending rework — the `Call-ID` statements below describe the current, defective behaviour
-> (maintainer ruling, 2026-09-19).** The chain is wired by configuration only, which stands;
-> but the claim in section 9.3 that one `Call-ID` is preserved across the whole chain is an
-> observation of the code as it stands, and the maintainer has ruled that behaviour a
-> **Phase 1 defect** — the AS reuses the inbound `Call-ID` on its outbound leg, against the
-> design intent of `docs/architecture/lld.md` section 2.3. The fix lands on **`main`** and is
-> merged back into `phase2`; **P9 is paused** until then, and this section is to be
-> **reworked when P9's design stage is redone** (`docs/phase2-plan.md` section 3, P9). The
-> measurements are kept — they are true observations of the code as it stands.
-
 `docs/phase2-plan.md` D6 puts the two AS instances **in series** before the platform work:
 `SBC → AS-1 (anti-fraud) → AS-2 (number translation) → core`. This section adds the chained
 deployment view, the interface view and the key flows. It extends the views above rather
@@ -374,12 +364,22 @@ The chain reuses the existing interfaces of section 3 and section 8.3. What is n
 | Inter-AS next hop (translate) | AS-2 → core | SIP over UDP | AS-2 selects the next hop from its **routing catalogue** (`action.next_hops`), not from a peer knob (ADR-0008 decision 1) |
 | Reject | S-SBC → AS-1 → S-SBC | SIP over UDP | `608 Rejected`, UAS-only, no second leg, so the call never reaches AS-2 (ADR-0007, REQ-F-027) |
 
-**The dialog `Call-ID` is preserved across the whole chain.** AS-1's trunk leg, AS-2's trunk
-leg and the core leg all carry one `Call-ID`, because the sippy stack and both controllers
-forward the trunk `Call-ID` inside the call-control event rather than regenerating it
-(ADR-0008 decision 2, measured). A chained call is therefore a **single correlated trace**
-across both instances rather than two independent traces; the demo prints the `Call-ID` each
-hop saw to show this.
+**Every leg carries its own dialog `Call-ID`.** A chained call therefore shows **three**
+distinct values instead of one: the S-CSCF leg's, the inter-AS leg's (AS-1's outbound leg,
+derived by `outbound_call_id()` in `src/as_app/sip_adapter.py`) and the core leg's (AS-2's
+outbound leg, derived from the value AS-2 received). `Call-ID` is not a pass-through header
+— it crosses inside the call-control event, and **each controller derives it for the leg it
+originates** (`docs/architecture/lld.md` section 2.3, ADR-0008 decision 2). Two consequences
+follow, and both are stated rather than discovered:
+
+- **Cross-AS correlation is not solved**, and cannot be solved on `Call-ID`. Each instance
+  still writes its own `Call-ID` keyed trace and console feed — keyed by the value *it* saw
+  on its trunk leg — so a chained call is **three independent per-instance traces**, which is
+  what `REQ-NF-016` registers as a POC gap. The standard end-to-end key is
+  `P-Charging-Vector`'s ICID, which both instances already pass through but which the mock
+  never generates, so the POC has no end-to-end key on the wire at all (ADR-0008 decision 4).
+- **The demo makes the distinct values visible** by printing the `Call-ID` each hop saw,
+  rather than presenting a correlation that does not exist (`REQ-F-028`, ADR-0008 decision 4).
 
 ### 9.4 Key message flows
 
@@ -439,7 +439,8 @@ UAC (S-CSCF)              AS-1 anti-fraud            AS-2 number translation    
 The chain is **demonstration, not architecture**: it adds no module, no shared library and no
 interface between the two AS instances, and it is not the abstraction P10 has to build
 (ADR-0008 decision 7). The friction it exposes — that AS-1 relays to a configured peer while
-AS-2 routes by catalogue, and that the correlation key is a stack behaviour rather than a
-declared contract — is P10's input and is recorded at the item's close
-(`docs/phase2-plan.md` section 3 P9, section 5.4).
+AS-2 routes by catalogue, and that **each self-written controller has to derive its own
+outbound dialog identity** (a step that was omitted twice, in two copies of the same code) —
+is P10's input and is recorded at the item's close (`docs/phase2-plan.md` section 3 P9,
+section 5.4).
 

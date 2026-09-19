@@ -412,24 +412,42 @@ stills ship the defect, and the repository cancels what it armed itself, from it
 ### P8 — Anti-fraud AS
 
 - **Goal.** A second, independently runnable AS process implementing D4, D5 and D9.
-- **First steps.** *(Renamed from "Prerequisites": these are P8's own first tasks, not a
-  separate preliminary phase — the old wording invited exactly that misreading.)*
-  **1. Bring the branch up to `main`'s tip before anything else — superseded 2026-09-19.**
-  Under the branch model adopted that day, item branches are cut from `phase2` and do **not**
-  chase `main` (§4, *Branch model and documentation location*); `feat/anti-fraud-as` was
-  therefore fast-forwarded to **`phase2`'s tip** instead, and was deleted on 2026-09-19 —
-  **P8 is worked on `phase2`** (§4 table). The rest of this paragraph is the 2026-09-18 record
-  of why the branch's position mattered, kept as history. Done on 2026-09-18:
-  `feat/anti-fraud-as` was fast-forwarded from `d0d0501` to `ebe5a17`, the release that
-  reconciles `VERSION` and `CHANGELOG` (`0.5.1`). A branch left at `d0d0501` still carries
-  `VERSION` = `0.5.0` and no `[0.5.1]` CHANGELOG node, so the first commit made on it would
-  fight the release reconciliation instead of building on it — which is what happened on
-  2026-09-18 and was fixed the same day. **2. The new ADR.** A new ADR — **`0007`**, the next
-  free number since `0001`–`0006` exist (`docs/architecture/adr/0007-*.md`) — covering the
-  use-case choice, the `608` rationale and state ownership. **3. A sippy probe.** Confirm
-  that sippy emits an arbitrary 6xx through the existing `CCEventFail((status, phrase,
-  None))` path — 404 and 603 are already proven, 608 is not — and add
-  `Feature-Caps: *;+sip.608` to the mock UAC's INVITE.
+- **First steps — this item walks the §5.1 pipeline in order.** *(Renamed from
+  "Prerequisites": these are P8's own stages, not a separate preliminary phase — the old
+  wording invited exactly that misreading.)*
+  - **1. Requirements — first, and currently absent.** P8 has **no `REQ-*` row today**:
+    `REQ-F-001 … REQ-F-015` and `REQ-NF-001 … REQ-NF-010` in
+    `docs/requirements/functional-and-nonfunctional.md` all belong to the Phase 1 use case.
+    P8's own requirements — the verdict path, `608` rejection, cross-call state ownership,
+    the second AS process — are written as new `REQ-F-*` / `REQ-NF-*` rows **before** the
+    design. That they do not exist yet is the first thing to fix, not an assumption to make.
+  - **2. Design.** Deltas to `docs/architecture/hld.md` and `lld.md`, plus two design-stage
+    artefacts:
+    - **The ADR — `0007`**, the next free number since `0001`–`0006` exist
+      (`docs/architecture/adr/0007-*.md`), covering the use-case choice, the `608` rationale
+      and state ownership. This is a **design artefact, not a requirement**: it records why
+      the choice was made and what it accepts. The `REQ-*` rows above are what the item must
+      do.
+    - **A sippy probe.** Confirm that sippy emits an arbitrary 6xx through the existing
+      `CCEventFail((status, phrase, None))` path — 404 and 603 are already proven, 608 is not
+      — and add `Feature-Caps: *;+sip.608` to the mock UAC's INVITE. The probe belongs
+      **here, in P8's design stage**, because it validates **one design assumption of this
+      item only** — that the reject path can carry `608`. It is **not** a Phase-2-wide first
+      step, it is not an architectural gate for Phase 2, and nothing outside P8 depends on it
+      (§5.1).
+  - **3–5. Implementation, tests, acceptance** follow §5.1, each with its own review gate
+    (§5.2).
+
+  **Branch history (2026-09-18 → 2026-09-19), kept as record.** **Bring the branch up to
+  `main`'s tip before anything else — superseded 2026-09-19.** Under the branch model adopted
+  that day, item branches are cut from `phase2` and do **not** chase `main` (§4, *Branch model
+  and documentation location*); `feat/anti-fraud-as` was therefore fast-forwarded to
+  **`phase2`'s tip** instead, and was deleted on 2026-09-19 — **P8 is worked on `phase2`**
+  (§4 table). Done on 2026-09-18: `feat/anti-fraud-as` was fast-forwarded from `d0d0501` to
+  `ebe5a17`, the release that reconciles `VERSION` and `CHANGELOG` (`0.5.1`). A branch left at
+  `d0d0501` still carries `VERSION` = `0.5.0` and no `[0.5.1]` CHANGELOG node, so the first
+  commit made on it would fight the release reconciliation instead of building on it — which
+  is what happened on 2026-09-18 and was fixed the same day.
 - **Known collisions.** The reject path is **UAS behaviour, not B2BUA**: no second leg is
   originated. `CallController` currently assumes `uaA` and `uaO` always both exist (M1
   design), so this item **changes the skeleton itself**.
@@ -659,15 +677,86 @@ needed** (§4: per-item branches are on demand), following `AGENT.md` §15:
 1. Read `AGENT.md`.
 2. Read `docs/README.md`.
 3. Read **the section of this document for that item** (§3), plus the decisions it cites —
-   **on the `phase2` branch**, where this document is in the working tree (see below).
+   **on the `phase2` branch**, where this document is in the working tree (see §5.3).
 4. Read `docs/acceptance/criteria.md` for the acceptance items the conversation owns.
 
+### 5.1 The per-item pipeline — the Phase 1 chain, item by item
+
+Phase 1 walked a fixed chain — requirement (`REQ-*`) → design (HLD/LLD, ADR, interface
+specification and message samples) → implementation → acceptance → evidence (`AGENT.md` §13,
+§4.2, §11) — and §13 states that chain as a rule for any behaviour change. A Phase 2 item
+walks the **same chain**, one stage at a time, each stage producing a named artefact the next
+stage consumes. An item does not begin with its implementation; it begins with its
+requirements.
+
+| # | Stage | Output for this item |
+| --- | --- | --- |
+| 1 | **Requirements** | new `REQ-F-*` / `REQ-NF-*` rows in `docs/requirements/functional-and-nonfunctional.md` |
+| 2 | **Design** | deltas to `docs/architecture/hld.md` and `lld.md`, **the ADR** for the item (`0007` for P8), and **any probe** needed to validate a design assumption |
+| 3 | **Implementation** | the code |
+| 4 | **Tests** | the three layers (`AGENT.md` §11) |
+| 5 | **Acceptance** | `ACC-*` rows in `docs/acceptance/criteria.md` and evidence per `AGENT.md` §4.8 in `docs/acceptance/report.md` |
+
+Each stage is owned by the item's conversation and produces its artefact **before** the next
+stage begins. The list is not a checklist assembled at the end: the requirement exists before
+the design that answers it, the design before the code that follows it, and the tests before
+the acceptance claim that cites them.
+
+**The probe belongs to the design stage of the item that needs it.** A probe is a design
+instrument: it is written to settle **one** design assumption, and it is run and recorded
+inside the **design** stage of the item whose assumption it is. It is **not a Phase-2-wide
+first step** and **not an architectural gate for Phase 2**. P8's 608 probe — confirming that
+sippy can emit an arbitrary 6xx through `CCEventFail((status, phrase, None))` — is P8's own
+design evidence for P8's rejection semantics: it informs nothing in P9, P9.5, P10 or P11, and
+no other item waits on it (see the P8 entry in §3).
+
+**The ADR is design, not a requirement.** A requirement is a `REQ-*` row: what the system
+must do, and how it is verified. The ADR is a **design-stage artefact** that records why a
+choice was made and what it accepts. Phase 1 already separates the two and Phase 2 must
+match — P8's `0007` is the design answer to P8's requirements, not a requirement itself.
+
+The requirement → design → implementation chain is `AGENT.md` §13's existing rule; Phase 2 was
+simply not restating it. The earlier wording of this section — an opening ritual and a closing
+ritual with nothing between — read as if the chain did not apply here. This pipeline is that
+rule restated for Phase 2, not a new one.
+
+### 5.2 Review gates — one independent, read-only review per stage
+
+After **each** stage in §5.1, **another agent reviews that stage's output before the next
+stage starts.** The reviewer is a **separate agent from the one that produced the stage**, and
+it is a **read-only** reviewer: it inspects and reports, it does not edit. Read-only review
+also keeps the "one writing member per working tree" rule intact (`AGENT.md` §14.1) — the
+reviewer never competes with the writer for the working tree.
+
+Each review checks its stage against a fixed question:
+
+| Stage reviewed | The reviewer checks |
+| --- | --- |
+| Requirements | completeness, testability, consistency with decisions D1–D10 |
+| Design | the requirements are covered, the ADR's reasoning holds, the probe result actually supports the design |
+| Implementation | matches the design, stays in scope, no shortcuts taken silently |
+| Tests | the tests genuinely fail without the change, coverage matches the requirements |
+| Acceptance | the §4.8 evidence is real, reproducible and complete |
+
+**One review per stage, no loop.** A review that finds problems has them **fixed inside that
+stage and recorded there**; the stage is **not** re-reviewed unless the maintainer asks. The
+gate is a review, not a rework cycle.
+
+**Findings are reported to the maintainer, not silently absorbed.** The reviewer reports its
+findings to the maintainer. A finding that cannot be fixed without a decision — a scope
+question, or a protocol or security call (`AGENT.md` §14 rule 2) — is **escalated**, not
+resolved quietly inside the item's conversation.
+
+### 5.3 Branch and reading conventions
+
 **A Phase 2 conversation reads this plan on the `phase2` branch.** Step 3 above — and step 2
-of the closing list, which updates this document — read and edit `docs/phase2-plan.md` in the
-working tree of `phase2`, or of an item branch cut from it. No branch switch is involved; that
-is the point of the model (§4, *Branch model and documentation location*). P8 has **no branch
-of its own** — it is worked directly on `phase2`; `feat/anti-fraud-as` was deleted by the
-maintainer on 2026-09-19 (§4 table).
+of the closing list in §5.4, which updates this document — read and edit
+`docs/phase2-plan.md` in the working tree of `phase2`, or of an item branch cut from it. No
+branch switch is involved; that is the point of the model (§4, *Branch model and documentation
+location*). P8 has **no branch of its own** — it is worked directly on `phase2`;
+`feat/anti-fraud-as` was deleted by the maintainer on 2026-09-19 (§4 table).
+
+### 5.4 Closing the conversation
 
 Before the conversation ends:
 
@@ -678,6 +767,15 @@ Before the conversation ends:
 3. Update `CHANGELOG.md` and `VERSION`; commit; **do not tag** — tagging is the
    maintainer's step.
 4. Write down anything a fresh conversation would otherwise re-derive.
+
+**Known and deferred — version and CHANGELOG at item close.** Step 3 asks a Phase 2 item to
+bump `VERSION` and open a CHANGELOG node at its own close, which sits awkwardly with the
+release convention of one version node per milestone (`AGENT.md` §4.7) and with the per-item
+branch model of §4 — an item that has not been merged anywhere is not a release. The
+maintainer reviewed this on 2026-09-19 and **deferred** it: the tension is known, the wording
+is left as it is for now, and it is **not** to be "helpfully" corrected by a later agent. It is
+recorded here only so that a future conversation meets the ruling instead of re-deriving the
+question.
 
 Execution follows `AGENT.md` §14.2: the main agent plans and tracks status and delegates
 implementation to a team-mode member (`mode = "acceptEdits"`); it does not implement.

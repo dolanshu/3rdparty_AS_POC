@@ -263,26 +263,34 @@ def test_reconfigure_changes_the_thresholds_but_keeps_the_history(
     """A reload re-reads the parameters; the callers keep the calls they made.
 
     This is what makes an operator edit take effect without a restart: the recording stays,
-    the window it is measured against changes.
+    the window it is measured against changes. The reloaded parameters are **genuinely
+    different** from :data:`POLICY`, so the assertions below fail if ``reconfigure`` is
+    removed or made a no-op: the store would keep answering with the old window, cap and
+    default score.
     """
     for _ in range(4):
         store.observe(CALLER)
     assert store.observe(CALLER).calls_in_window == POLICY.max_calls + 1
+    assert store.observe("+8613400009999").effective_reputation == POLICY.default_score
 
-    store.reconfigure(
-        WindowPolicy(
-            window_seconds=POLICY.window_seconds,
-            max_calls=POLICY.max_calls,
-            half_life_seconds=POLICY.half_life_seconds,
-            default_score=POLICY.default_score,
-            reject_penalty=POLICY.reject_penalty,
-            max_tracked_callers=POLICY.max_tracked_callers,
-        )
+    reloaded = WindowPolicy(
+        window_seconds=POLICY.window_seconds * 2,
+        max_calls=1,
+        half_life_seconds=POLICY.half_life_seconds / 2,
+        default_score=50.0,
+        reject_penalty=5.0,
+        max_tracked_callers=7,
     )
+    store.reconfigure(reloaded)
 
-    assert store.policy.window_seconds == POLICY.window_seconds
-    # The history survived, so the caller is still one over the cap it already passed.
-    assert store.observe(CALLER).calls_in_window == POLICY.max_calls + 1
+    assert store.policy == reloaded
+    # The history survived: the calls the caller already made are re-evaluated against the
+    # new (smaller) cap, so it is still counted as one over it.
+    signals = store.observe(CALLER)
+    assert signals.calls_in_window == reloaded.max_calls + 1
+    assert signals.calls_in_window > reloaded.max_calls
+    # The new parameters are the ones now in force for the reputation too.
+    assert store.observe("+8613400009999").effective_reputation == reloaded.default_score
 
 
 def test_the_store_reads_only_the_injected_clock(

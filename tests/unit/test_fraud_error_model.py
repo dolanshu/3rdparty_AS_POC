@@ -36,7 +36,6 @@ from pathlib import Path
 import pytest
 
 from anti_fraud_as.internal_api import (
-    INTERNAL_API_ROUTES,
     health_payload,
     metrics_payload,
     screening_payload,
@@ -209,18 +208,34 @@ def test_health_reports_the_honest_readiness_key_and_the_compatibility_one() -> 
     assert degraded["screening_data_loaded"] is False
 
 
-def test_the_internal_api_covers_the_console_surface() -> None:
-    """The routes the console of the second instance needs are all declared."""
-    joined = " ".join(INTERNAL_API_ROUTES)
+def test_the_internal_api_covers_the_console_surface(screening_file: Path) -> None:
+    """The routes the console of the second instance needs are all registered.
 
-    for fragment in (
+    Asserted against the **application object** the server actually serves, not against the
+    hand-maintained ``INTERNAL_API_ROUTES`` table: a route the console calls but the app
+    never registered cannot pass here, however the table is edited.
+    """
+    from anti_fraud_as.internal_api import create_internal_api_app
+    from as_app.observability.tracing import TraceRecorder
+
+    app = create_internal_api_app(
+        version="0.0.0",
+        screening_data_store=ScreeningDataStore(screening_file),
+        metrics=MetricsRegistry(),
+        tracer=TraceRecorder(),
+        started_at=0.0,
+    )
+    registered = {getattr(route, "path", "") for route in app.routes}
+
+    for path in (
         "/healthz",
         "/api/v1/metrics",
         "/api/v1/screening",
         "/api/v1/traces",
+        "/api/v1/traces/{call_id}",
         "/ws/events",
     ):
-        assert fragment in joined, fragment
+        assert path in registered, f"{path} is not registered on the app: {sorted(registered)}"
 
 
 def test_the_screening_payload_is_read_only_json(screening_file: Path) -> None:
@@ -242,9 +257,17 @@ def test_the_screening_payload_is_read_only_json(screening_file: Path) -> None:
     assert json.loads(json.dumps(payload)) == payload
 
 
-def test_the_second_as_serves_the_repository_version() -> None:
-    """One version source for both AS processes (AGENT.md section 4.7)."""
+def test_the_second_as_serves_the_repository_version(repo_root: Path) -> None:
+    """One version source for both AS processes (AGENT.md section 4.7).
+
+    The assertion is against the repository ``VERSION`` file itself. Comparing the two
+    derived values to each other would still pass if both resolved to a placeholder.
+    """
     import anti_fraud_as
     import as_app
 
-    assert anti_fraud_as.__version__ == as_app.__version__
+    version = (repo_root / "VERSION").read_text(encoding="utf-8").strip()
+
+    assert version
+    assert anti_fraud_as.__version__ == version
+    assert as_app.__version__ == version

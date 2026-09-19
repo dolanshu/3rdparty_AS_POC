@@ -36,6 +36,7 @@ ACC-P8-003 (REQ-F-018) and ACC-P8-005 (REQ-F-024).
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -213,6 +214,18 @@ def test_a_block_listed_caller_is_answered_608_and_never_reaches_the_core(
     assert outcome.status == 608, f"caller saw {outcome.status} instead of 608"
     assert outcome.released is True
 
+    # The **full final response line** goes over the wire. ``SIP_PHRASES[608]`` is the only
+    # reason the caller reads "Rejected" rather than a fallback phrase (LLD section 9.5), so
+    # the phrase is asserted on the wire, not only against the constant table.
+    response_lines = [
+        message.text.split("\r\n", 1)[0]
+        for message in fraud_trunk_pair.as_messages.messages_for(call_id)
+        if message.direction == "out" and message.text.startswith("SIP/2.0 ")
+    ]
+    assert "SIP/2.0 608 Rejected" in response_lines, (
+        f"the wire did not carry 'SIP/2.0 608 Rejected': {response_lines}"
+    )
+
     assert not fraud_trunk_pair.mock.uas.received_invites, (
         "a rejected call must not originate an INVITE towards the core"
     )
@@ -231,6 +244,18 @@ def test_a_block_listed_caller_is_answered_608_and_never_reaches_the_core(
     assert counters.counters["screen.block_list"] == 1
     assert counters.errors_by_code["AS-FRAUD-001"] == 1
     assert counters.calls_by_disposition["rejected"] == 1
+
+    # Positive control: the "the core saw nothing" assertion above is only meaningful if the
+    # core-side observation channel works **in this same test**. An allowed call on the same
+    # pair is relayed, so the recorder must then show exactly its INVITE — and nothing of the
+    # rejected call. A dead recorder cannot make the absence above pass by accident.
+    allowed_call_id = place_screening_call(
+        fraud_trunk_pair, "screening-reject-control", ALLOWED_CALLER
+    )
+    received_call_ids = [invite.call_id for invite in fraud_trunk_pair.mock.uas.received_invites]
+    assert received_call_ids == [allowed_call_id], (
+        f"the core-side recorder is not observing the relayed call: {received_call_ids}"
+    )
 
 
 def test_a_caller_that_never_declared_sip_608_is_still_answered_608(fraud_trunk_pair) -> None:
@@ -269,7 +294,9 @@ def test_a_caller_that_never_declared_sip_608_is_still_answered_608(fraud_trunk_
     assert finals, f"the AS sent no final response, only {len(responses)} provisional datagram(s)"
     response_text = finals[0].decode(errors="replace")
     status_line = response_text.split("\r\n", 1)[0]
-    assert status_line.startswith("SIP/2.0 608"), status_line
+    # The full reason phrase is asserted, not only the code: ``SIP_PHRASES[608]`` is the only
+    # thing that puts "Rejected" on the wire (LLD section 9.5).
+    assert status_line == "SIP/2.0 608 Rejected", status_line
 
     # RFC 8688 sections 3.1 and 6: the rejection carries no Call-Info, and with no body it
     # carries no Content-Type either - the AS is signalling-only and plays no announcement
@@ -371,6 +398,54 @@ def test_an_allowed_call_is_relayed_with_no_added_header(fraud_trunk_pair) -> No
     assert attributes["identity_present"] is True
     counters = fraud_trunk_pair.as_stack.metrics.snapshot()
     assert counters.counters["verdict.allow"] == 1
+
+
+def test_an_invite_without_a_calling_identity_is_allowed(fraud_trunk_pair) -> None:
+    """No ``P-Asserted-Identity`` means no signal to screen, so the call is relayed.
+
+    The engine's fail-open branch is unit-tested; this drives it through the real wiring.
+    ``FraudCallController.apply_call_policy`` reads no calling party, sets
+    ``identity_present=false`` and ``screen_source=none``, and relays the INVITE instead of
+    rejecting it (ADR-0007 decision 7, REQ-F-018).
+    """
+    call_id = "no-identity-0001@example.invalid"
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+        client.bind(("127.0.0.1", 0))
+        local_port = int(client.getsockname()[1])
+        invite = (
+            "INVITE sip:+8613800138000@127.0.0.1;user=phone SIP/2.0\r\n"
+            f"Via: SIP/2.0/UDP 127.0.0.1:{local_port};branch=z9hG4bKnoidentity01;rport\r\n"
+            "Max-Forwards: 70\r\n"
+            "From: <sip:+8613500000456@127.0.0.1>;tag=no-identity\r\n"
+            "To: <sip:+8613800138000@127.0.0.1>\r\n"
+            f"Call-ID: {call_id}\r\n"
+            "CSeq: 1 INVITE\r\n"
+            f"Contact: <sip:127.0.0.1:{local_port}>\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n"
+        ).encode()
+        client.sendto(invite, ("127.0.0.1", fraud_trunk_pair.as_port))
+
+        # Drive until the AS has relayed the INVITE: the relay is the observable proof that
+        # the verdict was *allow*, and unlike a datagram drain it does not block the loop.
+        relayed = fraud_trunk_pair.run_until(
+            lambda: bool(invites_of(fraud_trunk_pair.as_messages, call_id, "out")),
+            timeout_seconds=5.0,
+        )
+
+    assert relayed, "the AS did not relay an INVITE that carried no calling identity"
+
+    attributes = verdict_attributes(fraud_trunk_pair.as_stack, call_id)
+    assert attributes["verdict"] == "allow"
+    assert attributes["identity_present"] is False
+    assert attributes["screen_source"] == "none"
+
+    methods = [event.method for event in fraud_trunk_pair.as_stack.tracer.trace_for(call_id).events]
+    assert "608" not in methods, "the fail-open path must not reject"
+
+    # The call was relayed: the fail-open path is an allow, not a silent drop.
+    assert fraud_trunk_pair.mock.uas.received_invites, "the allowed call was not relayed"
+    assert fraud_trunk_pair.mock.uas.received_invites[0].call_id == call_id
 
 
 # ---------------------------------------------------------------------------
@@ -515,6 +590,39 @@ def test_a_reloaded_file_activates_a_new_block_entry(
     assert verdict_attributes(fraud_trunk_pair.as_stack, call_id)["screen_source"] == "block_list"
 
 
+def test_a_reload_reapplies_the_window_and_reputation_parameters(
+    fraud_trunk_pair, screening_file: Path
+) -> None:
+    """The loop callback hands the reloaded parameters to the process-level store.
+
+    ``_poll_screening_reload`` re-reads the file **and** calls
+    ``CallerStateStore.reconfigure``, which is what makes a ``window``/``reputation`` edit take
+    effect without a restart. The numbers below differ from the shipped ones, so a callback
+    that reloaded the document but forgot the store would leave the old policy in force and
+    fail here — which is exactly the wiring the docstring promises.
+    """
+    store = fraud_trunk_pair.as_stack.caller_state
+    active = store.policy
+
+    edited = (
+        screening_file.read_text(encoding="utf-8")
+        .replace("max_calls: 5", "max_calls: 2")
+        .replace("reject_penalty: 40.0", "reject_penalty: 5.0")
+        .replace("default_score: 100.0", "default_score: 60.0")
+    )
+    screening_file.write_text(edited, encoding="utf-8")
+
+    fraud_trunk_pair.as_stack._poll_screening_reload()  # noqa: SLF001 - the loop callback
+
+    reloaded = store.policy
+    assert reloaded != active, "the reload did not change the policy in force"
+    assert reloaded == fraud_trunk_pair.as_stack.screening_data.current.policy
+    assert reloaded.max_calls == 2
+    assert reloaded.reject_penalty == 5.0
+    # The store enforces the new parameters: an unseen caller now starts at the new default.
+    assert store.observe("+8613500000123").effective_reputation == 60.0
+
+
 def test_a_broken_edit_keeps_the_previous_screening_data(
     fraud_trunk_pair, screening_file: Path
 ) -> None:
@@ -625,7 +733,10 @@ def test_the_process_serves_health_and_exits_zero_on_sigterm(
     outside the test process — and the port it reports is the one it actually holds.
     """
     sip_port = free_udp_port_for_tests()
-    api_port = free_udp_port_for_tests()
+    # The internal API is HTTP over TCP, so its port is reserved with a TCP probe. Reserving
+    # it by probing UDP guarantees nothing about TCP (see the gap registered by P8a,
+    # docs/phase2-plan.md section 7 item 7).
+    api_port = _free_tcp_port()
     environment = dict(os.environ)
     environment.update(
         {
@@ -667,6 +778,23 @@ def test_the_process_serves_health_and_exits_zero_on_sigterm(
             assert screening["name"] == "sample-office-screening"
             assert screening["block_list"]
 
+            # The verdict is observable off the wire (REQ-F-024): the same two surfaces the
+            # console reads must answer on the live process, not only through the payload
+            # builders.
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{api_port}/api/v1/metrics", timeout=5
+            ) as page:
+                metrics = json.loads(page.read().decode())
+            assert metrics["calls_total"] == 0
+            assert metrics["counters"] == {}
+            assert "errors_by_code" in metrics
+
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{api_port}/api/v1/traces", timeout=5
+            ) as page:
+                traces = json.loads(page.read().decode())
+            assert traces["calls"] == []
+
             process.send_signal(signal.SIGTERM)
             assert process.wait(timeout=15) == 0, "SIGTERM did not shut the process down cleanly"
         finally:
@@ -679,6 +807,76 @@ def test_the_process_serves_health_and_exits_zero_on_sigterm(
     assert "startup self-check passed" in log_text
     assert "shutdown complete" in log_text
     assert '"reason": "signal SIGTERM"' in log_text
+
+
+def test_the_running_process_reloads_the_screening_file_on_its_own_timer(
+    repo_root: Path, screening_file: Path, tmp_path: Path
+) -> None:
+    """The reload timer is armed by ``run()``, not only reachable by calling the callback.
+
+    Both in-process reload tests call ``_poll_screening_reload`` themselves, so a ``run()``
+    that never armed the loop-owned timer would leave them green. This observes a **real
+    process**: the file is edited while it runs and the change becomes visible through the
+    internal API without anyone calling the callback (the ADR-0004 pattern, REQ-F-016).
+    """
+    sip_port = free_udp_port_for_tests()
+    api_port = _free_tcp_port()
+    reloaded_caller = "+8613500000777"
+    original = screening_file.read_text(encoding="utf-8")
+    assert reloaded_caller not in original
+
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "FRAUD_SIP_LISTEN_ADDRESS": "127.0.0.1",
+            "FRAUD_SIP_LISTEN_PORT": str(sip_port),
+            "FRAUD_SBC_PEER_ADDRESS": "127.0.0.1",
+            "FRAUD_SBC_PEER_PORT": str(free_udp_port_for_tests()),
+            "FRAUD_ALLOWED_PEERS": "127.0.0.1",
+            "FRAUD_SCREENING_FILE": str(screening_file),
+            "FRAUD_INTERNAL_API_ADDRESS": "127.0.0.1",
+            "FRAUD_INTERNAL_API_PORT": str(api_port),
+            "LOG_LEVEL": "INFO",
+            "LOG_STRUCTURED": "true",
+            "LOG_PAYLOADS": "false",
+        }
+    )
+    log_path = tmp_path / "anti_fraud_as_reload.log"
+    with log_path.open("w", encoding="utf-8") as log_file:
+        process = subprocess.Popen(
+            [sys.executable, "-m", "anti_fraud_as.main"],
+            cwd=repo_root,
+            env=environment,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            assert _wait_for_health(api_port), "the anti-fraud health endpoint never came up"
+            assert not _block_list_contains(api_port, reloaded_caller), (
+                "the caller under test is already in the shipped block list"
+            )
+
+            screening_file.write_text(
+                original.replace(
+                    "block_list:\n",
+                    f'block_list:\n  - number: "{reloaded_caller}"\n'
+                    "    reason: added while running\n",
+                ),
+                encoding="utf-8",
+            )
+
+            assert _wait_for_block_entry(api_port, reloaded_caller), (
+                "the running process never picked up the edited screening file: the "
+                "loop-owned reload timer was not armed by run()"
+            )
+        finally:
+            if process.poll() is None:
+                process.send_signal(signal.SIGTERM)
+                try:
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -721,6 +919,20 @@ def free_udp_port_for_tests() -> int:
         A port number that was free when the function ran.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _free_tcp_port() -> int:
+    """Reserve a free TCP port on loopback.
+
+    The internal API is HTTP over TCP, so a UDP probe would guarantee nothing about the
+    port it is given. This is the same helper ``tests/integration/test_console.py`` uses.
+
+    Returns:
+        A port number that was free when the function ran.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
 
@@ -782,12 +994,19 @@ def _status_of_response(data: bytes) -> int:
 def _wait_for_health(api_port: int, timeout_seconds: float = 15.0) -> bool:
     """Poll a health endpoint until it answers.
 
+    A connection error means the process is still starting up, so the poll keeps waiting. A
+    malformed HTTP response means something else is already listening on the port: that is a
+    different failure and is raised rather than mistaken for "not up yet".
+
     Args:
         api_port: TCP port of the internal API.
         timeout_seconds: How long to keep polling.
 
     Returns:
         ``True`` when the endpoint answered, ``False`` on timeout.
+
+    Raises:
+        RuntimeError: When a non-HTTP listener occupies the port.
     """
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
@@ -795,7 +1014,61 @@ def _wait_for_health(api_port: int, timeout_seconds: float = 15.0) -> bool:
             with urllib.request.urlopen(f"http://127.0.0.1:{api_port}/healthz", timeout=1):
                 return True
         except OSError:
+            # Nothing is listening yet: the process is still coming up.
             time.sleep(0.1)
+        except http.client.HTTPException as exc:
+            raise RuntimeError(
+                f"something is listening on 127.0.0.1:{api_port} but it is not the "
+                f"anti-fraud internal API (malformed HTTP response: {exc!r})"
+            ) from exc
+    return False
+
+
+def _screening_document(api_port: int) -> dict[str, Any]:
+    """Fetch the screening document from a running internal API.
+
+    Args:
+        api_port: TCP port of the internal API.
+
+    Returns:
+        The decoded ``/api/v1/screening`` document.
+    """
+    with urllib.request.urlopen(f"http://127.0.0.1:{api_port}/api/v1/screening", timeout=5) as page:
+        return json.loads(page.read().decode())
+
+
+def _block_list_contains(api_port: int, value: str) -> bool:
+    """Tell whether a running process currently blocks a number.
+
+    Args:
+        api_port: TCP port of the internal API.
+        value: The number to look for.
+
+    Returns:
+        ``True`` when the active block list carries the value.
+    """
+    return any(entry["value"] == value for entry in _screening_document(api_port)["block_list"])
+
+
+def _wait_for_block_entry(api_port: int, value: str, timeout_seconds: float = 15.0) -> bool:
+    """Poll a running process until a number appears in its block list.
+
+    Args:
+        api_port: TCP port of the internal API.
+        value: The number to wait for.
+        timeout_seconds: How long to keep polling.
+
+    Returns:
+        ``True`` when the entry became visible, ``False`` on timeout.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            if _block_list_contains(api_port, value):
+                return True
+        except (OSError, http.client.HTTPException):
+            pass
+        time.sleep(0.2)
     return False
 
 

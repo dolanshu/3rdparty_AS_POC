@@ -317,13 +317,18 @@ class FraudAsStack:
                     screening_file=str(self.settings.fraud_screening_file),
                 )
         except AsError as error:
+            # The screening-data errors carry ``screening_file`` in their context, so the
+            # field is merged into one mapping instead of being supplied twice: the error
+            # handler runs inside the loop-owned reload timer, so it must not raise — the
+            # whole point of this fail-safe path is to contain a broken edit.
+            fields = {"screening_file": str(self.settings.fraud_screening_file)}
+            fields.update(error.as_log_fields())
             log_event(
                 _LOGGER,
                 logging.ERROR,
                 "screening data reload failed; previous data stays active",
                 direction=LogDirection.INTERNAL,
-                screening_file=str(self.settings.fraud_screening_file),
-                **error.as_log_fields(),
+                **fields,
             )
 
 

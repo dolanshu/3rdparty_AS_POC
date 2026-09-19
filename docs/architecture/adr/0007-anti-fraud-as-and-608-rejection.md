@@ -170,7 +170,7 @@ use-case-specific and which are duplicated on purpose.
 sippy behaviour is observed, never assumed (`AGENT.md` section 6). Two design assumptions
 were settled by running the stack; the output below is a real run, not an expectation.
 
-### 5.1 The `608` reject path really works over UDP
+### The `608` reject path really works over UDP
 
 `404` and `603` were already proven by the Phase 1 error branches; `608` was not. The probe
 is committed as **`tools/anti_fraud_probe.py`** and is a design instrument, in the
@@ -232,7 +232,7 @@ The design assumption behind the reject path holds, and the implementation can r
 The probe exits non-zero when the observed status line does not carry the requested code, so
 it is a guard rather than a printout.
 
-### 5.2 `Feature-Caps` leaves the mock as `Feature-caps`
+### `Feature-Caps` leaves the mock as `Feature-caps`
 
 `Feature-Caps` is not a header sippy has a dedicated class for, so it is rendered by
 `SipGenericHF`, whose `getCanName()` returns `name.capitalize()` — it capitalises **only the
@@ -304,7 +304,8 @@ exists.
 - **No per-caller eviction policy.** The in-memory state is bounded by a configured maximum
   tracked callers; a production node needs a TTL and an eviction strategy.
 - **Header-name casing.** `Feature-caps` leaves the mock with the first letter only
-  capitalised (Verified facts 5.2). Cosmetic and RFC-conformant, but a byte-for-byte
+  capitalised (*Verified facts*, `Feature-Caps` leaves the mock as `Feature-caps`).
+  Cosmetic and RFC-conformant, but a byte-for-byte
   conformance test against a real S-SBC would see it.
 - **A missing calling identity fails open.** An INVITE without any calling-party identity
   cannot be screened; the POC allows it and records that it could not screen. Production

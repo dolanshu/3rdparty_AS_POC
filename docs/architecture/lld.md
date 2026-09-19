@@ -471,7 +471,7 @@ SIP_PHRASES: Final[dict[int, str]] = { ..., 608: "Rejected" }
 so without this entry the reject would go out with the fallback phrase `Server Internal
 Error`. With it, the reject emits `CCEventFail((608, "Rejected", None))` on the answering
 leg, which sippy renders as `SIP/2.0 608 Rejected` — verified on the wire
-(`docs/architecture/adr/0007-anti-fraud-as-and-608-rejection.md`, *Verified facts* 5.1).
+(`docs/architecture/adr/0007-anti-fraud-as-and-608-rejection.md`, *Verified facts*).
 
 The `AS-FRAUD-001…003` rows map to `608`, so `machine reason` and `wire status` never
 disagree; `AS-FRAUD-004/005` are configuration failures and map to `500` like the

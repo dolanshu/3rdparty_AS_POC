@@ -9,6 +9,7 @@ runtime components: nothing in `src/` depends on them.
 | `tools/anti_fraud_probe.py` | Proves that sippy emits an arbitrary 6xx through `CCEventFail((status, phrase, None))` over real UDP — specifically `608 Rejected` (RFC 8688), which the number-translation AS never emitted. It asserts the whole status line (code **and** reason phrase) and exits non-zero on a mismatch. This is the design evidence recorded in ADR-0007. |
 | `tools/chained_as_probe.py` | Runs **two AS instances in series** — the anti-fraud AS relaying an allowed INVITE into the number-translation AS — on dynamically allocated ports and reports what the chain really does: an allowed call completes through both B2BUAs, a `608` reject short-circuits before AS-2, and the dialog `Call-ID` each hop sees. This is the design evidence recorded in ADR-0008. It is a design instrument, not a test: pytest does not collect it and it does not run in CI. |
 | `tools/demo_fraud_call.py` | Runs the anti-fraud AS on its own ports and places two real calls through it — one the screening data allows (relayed to the core, `200 OK`) and one from the block list (answered `608 Rejected` by the AS, no second leg). This is what `make demo-fraud` runs; it writes nothing. |
+| `tools/demo_chained_call.py` | Runs **both AS instances in series** (`SBC -> AS-1 anti-fraud -> AS-2 number translation -> core`) on dynamically allocated ports and narrates what every hop saw: an allowed call through both B2BUAs, a `608` reject short-circuited before AS-2, the three distinct per-leg dialog `Call-ID`s and the preserved `P-Charging-Vector` ICID. It **asserts** those properties and **exits non-zero** on any mismatch, so it is a guard, not a printout. This is what `make demo-chained` runs; it writes nothing. |
 | `tools/show_rules.py` | Prints the active rule set and the decision for sample numbers; this is what `make rules` runs. |
 | `tools/demo_call.py` | Places one real call and narrates it — routing decision, translation, every message on the wire, outcome. This is what `make demo` runs; it writes nothing. |
 | `tools/capture.sh` | Captures UDP traffic on the trunk ports into `captures/` for acceptance evidence (`AGENT.md` section 4.8). |
@@ -22,6 +23,7 @@ uv run python tools/anti_fraud_probe.py          # the 608 reject path, over rea
 uv run python tools/chained_as_probe.py          # two B2BUAs in series, over real UDP
 uv run python tools/demo_call.py --called +8613800138000
 uv run python tools/demo_fraud_call.py           # allow + 608 reject, narrated
+uv run python tools/demo_chained_call.py         # both AS instances in series, narrated
 uv run python tools/show_rules.py --evaluate +8613800138000
 uv run python tools/capture_call.py
 ./tools/capture.sh --port 5060

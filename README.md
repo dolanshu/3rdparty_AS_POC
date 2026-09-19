@@ -51,6 +51,7 @@ make lint               # ruff format --check + ruff check + mypy
 make test               # unit + integration + e2e
 make demo               # places a real call and narrates the translation (see below)
 make demo-fraud         # screens two real calls: one allowed, one answered 608 Rejected
+make demo-chained       # chains both AS instances: SBC -> anti-fraud -> translation -> core
 ```
 
 Fallback without `uv` (maintainer-approved): `python3 -m venv .venv`, activate it, then
@@ -158,6 +159,32 @@ The rejected call is answered by the AS itself and never reaches the core networ
 reject path is UAS behaviour and originates no second leg. Nothing is written to the
 repository; the standalone process is `make fraud`.
 
+**`make demo-chained` runs both AS instances in series.** It wires the anti-fraud AS's
+allowed-relay next hop to the number-translation AS's listen address and the number-translation
+AS's next hop to the emulated core, then places an allowed call through the whole chain and a
+blocked one that AS-1 answers `608`:
+
+```text
+[1/2] allowed call relayed through both AS instances
+AS-1 verdict      : allow
+AS-2 rule         : R-MOB-CM-40
+core called number: 013800138000
+final status      : 200
+S-CSCF Call-ID    : 26ff07318cf3f35251bed09f7106c224
+AS-2 trunk Call-ID: 26ff07318cf3f35251bed09f7106c224-b2b_1
+core Call-ID      : 26ff07318cf3f35251bed09f7106c224-b2b_1-b2b_1
+distinct Call-IDs : 3
+ICID preserved    : True
+[2/2] rejected call short-circuits at AS-1
+final status      : 608 (608 Rejected, no second leg)
+AS-2 calls seen   : 0 (the absence is the assertion)
+```
+
+Every leg derives its own dialog `Call-ID`, so the three values differ and cross-AS
+correlation on `Call-ID` is impossible — the `P-Charging-Vector` ICID is on the wire and is
+preserved, but no observability surface is keyed on it (a registered gap). The demo is a
+guard: it exits non-zero if any of those properties fails. It writes nothing.
+
 The console renders **either** AS instance. Each process reports a stable instance identity
 on `/healthz` (`number-translation`, `anti-fraud`), which the page shows in its title, in the
 status bar and as the label of the AS node in the topology view — so it is never ambiguous
@@ -254,7 +281,7 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 | `docs/requirements/functional-and-nonfunctional.md` | `REQ-F-*` / `REQ-NF-*` capability list |
 | `docs/architecture/hld.md` | context, deployment and interface views, message flows |
 | `docs/architecture/lld.md` | modules, data structures, state machines, error codes, log fields |
-| `docs/architecture/adr/` | ADR-0001 … ADR-0007 (0007 covers the anti-fraud AS, `608 Rejected` and cross-call state) |
+| `docs/architecture/adr/` | ADR-0001 … ADR-0008 (0007 covers the anti-fraud AS, `608 Rejected` and cross-call state; 0008 covers the chained topology and the per-leg `Call-ID`) |
 | `docs/specs/index.md`, `docs/specs/message-samples/` | normative references and real message samples; the generated samples are gitignored, only the folder `README.md` is tracked |
 | `docs/operations/deployment.md` | topology, port matrix, health checks |
 | `docs/operations/runbook.md` | start, stop, reload rules and screening data, inspect state |

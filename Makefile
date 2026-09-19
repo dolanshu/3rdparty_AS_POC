@@ -12,7 +12,7 @@ export PYTHONPATH := $(PYTHONPATH_LOCAL)
 
 .DEFAULT_GOAL := help
 .PHONY: help sync dev as mock console fraud lint format type test unit integration e2e demo \
-        demo-fraud probe probe-608 rules capture docker-up docker-down clean
+        demo-fraud demo-chained probe probe-608 rules capture docker-up docker-down clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -63,6 +63,9 @@ demo: sync ## Place one real trunk call and narrate the translation on the wire
 
 demo-fraud: sync ## Screening demo: one allowed call and one call rejected with 608
 	$(RUN) python tools/demo_fraud_call.py --screening-file config/caller_screening.yaml
+
+demo-chained: sync ## Chained topology demo: two B2BUAs in series, one allowed, one 608
+	$(RUN) python tools/demo_chained_call.py --rules-file config/routing_rules.yaml --screening-file config/caller_screening.yaml
 
 rules: sync ## Show the active rule set and the decision for the sample numbers
 	$(RUN) python tools/show_rules.py --rules-file config/routing_rules.yaml

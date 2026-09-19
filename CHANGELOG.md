@@ -8,6 +8,17 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+### Added
+
+- `make demo-chained`, backed by `tools/demo_chained_call.py`: it runs **both AS instances in
+  series** (`SBC -> AS-1 anti-fraud -> AS-2 number translation -> core`) on dynamically
+  allocated ports and narrates what every hop saw — an allowed call through both B2BUAs, a
+  `608` reject short-circuited before AS-2, the **three distinct** per-leg dialog `Call-ID`s
+  and the preserved `P-Charging-Vector` ICID. It is a **guard**, not a printout: it asserts
+  those properties (including the short-circuit as an absence) and exits non-zero on any
+  mismatch, and it writes nothing. `AGENT.md` section 10, `README.md`, `docs/README.md` and
+  `tools/README.md` carry the new command and tool (`docs/architecture/lld.md` section 10.5).
+
 ### Fixed
 
 - The outbound leg now carries its own Call-ID instead of reusing the trunk one verbatim.

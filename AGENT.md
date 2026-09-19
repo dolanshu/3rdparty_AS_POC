@@ -349,6 +349,7 @@ make fraud               # run the anti-fraud AS locally, on its own ports (P8)
 docker compose up        # as + anti-fraud-as + both mocks + console
 make demo                # one call through the number-translation AS, narrated
 make demo-fraud          # two calls through the anti-fraud AS: one allowed, one 608
+make demo-chained        # two B2BUAs in series (SBC -> anti-fraud -> number translation -> core)
 make lint                # ruff format --check + ruff check + mypy
 make test                # unit + integration + e2e
 ```

@@ -50,6 +50,7 @@ from sippy.CCEvents import (
     CCEventUpdate,
 )
 from sippy.SipAddress import SipAddress
+from sippy.SipCallId import SipCallId
 from sippy.SipConf import SipConf
 from sippy.SipContact import SipContact
 from sippy.SipHeader import SipHeader
@@ -67,7 +68,12 @@ from as_app.observability.metrics import (
 from as_app.observability.tracing import TraceRecorder, get_trace_recorder
 from as_app.routing.engine import Disposition, RoutingDecision, decide
 from as_app.routing.rules import NextHop, RuleSetStore
-from as_app.sip_adapter import PASSTHROUGH_HEADERS, extract_called_number, is_allowed_peer
+from as_app.sip_adapter import (
+    PASSTHROUGH_HEADERS,
+    extract_called_number,
+    is_allowed_peer,
+    outbound_call_id,
+)
 
 __all__ = ["CallController", "TrunkCallMap"]
 
@@ -641,8 +647,9 @@ class CallController:
           of the rejection (``404`` / ``603`` / ``480`` / ``500``).
 
         SDP and the pass-through headers still pass through verbatim (M1 rule,
-        unchanged); only the called number and the Request-URI host (the next hop) are
-        rewritten.
+        unchanged); the called number and the Request-URI host (the next hop) are
+        rewritten, and the outbound leg is given its own Call-ID derived from the trunk
+        one (``-b2b_1``, following sippy's ``CCB2BUA``).
 
         Args:
             event: The ``CCEventTry`` raised by the answering leg.
@@ -662,9 +669,18 @@ class CallController:
         if decision.disposition is not Disposition.ROUTE:
             raise self.reject_error(decision, self.call_id)
         translated = decision.translated_number or called_number
+        # The second leg gets its own Call-ID: sippy regenerates ``From``, ``To`` and
+        # ``CSeq`` for the outbound dialog, but copies a non-``None`` Call-ID verbatim
+        # (``sippy/UacStateIdle.py``) and this AS runs a bare ``sippy.UA`` rather than
+        # ``CCB2BUA`` (which would rewrite it itself, ``sippy/b2bua.py``). Derive a fresh
+        # ``SipCallId`` from the trunk one with sippy's own ``-b2b_1`` suffix style; the
+        # inbound object is never mutated because it is the trunk leg's dialog identity
+        # (``docs/architecture/lld.md`` section 2.3). Every failover hop reuses this same
+        # event through ``_pending_event``, so one call has one outbound Call-ID.
+        outbound_call_id_value = SipCallId(outbound_call_id(str(original[0])))
         rebuilt = CCEventTry(
             (
-                original[0],
+                outbound_call_id_value,
                 original[1],
                 translated,
                 original[3],

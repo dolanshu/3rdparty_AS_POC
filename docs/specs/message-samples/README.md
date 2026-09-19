@@ -36,7 +36,7 @@ number translation.
 
 ## Scenario: M2 translated call (`office-to-mobile`)
 
-Captured on **2026-09-16** with
+Captured on **2026-09-19** with
 
 ```text
 uv run python tools/capture_call.py
@@ -57,14 +57,20 @@ INVITE is originated.
 | Rule set | `config/routing_rules.yaml`, `sample-office-routing` (17 rules, 6 next hops) |
 | Matched rule | `R-MOB-CM-40` (China Mobile, E.164 in, national out) |
 | Ports | allocated per capture (dynamic, never 5060) |
-| Call-ID | generated per capture by the SIP stack |
+| Call-ID (trunk) | generated per capture by the mock's SIP stack |
+| Call-ID (core) | the trunk Call-ID plus the AS suffix `-b2b_1` |
 
-Ports differ on every capture because they are allocated dynamically; the Call-ID differs
-too, because the stack generates it. What must not differ across the two legs is the
-pass-through header set and the SDP body: the headers of `01-in-invite-trunk.txt` reappear
-unchanged in `03-out-invite-core.txt`. What **does** change in M2 is the called number in
-the Request-URI, `To` and `Contact`: `+8613800138000` on the trunk becomes `013800138000`
-on the core leg.
+Ports differ on every capture because they are allocated dynamically, and the trunk
+Call-ID differs too, because the mock's stack generates it. The two legs do **not** share
+a Call-ID: the AS gives the outbound leg its own, derived from the trunk one by appending
+its B2BUA suffix `-b2b_1` (the style sippy's own `CCB2BUA` uses), so the core-leg Call-ID
+is `<trunk Call-ID>-b2b_1` — for example `03-out-invite-core.txt` carries the Call-ID of
+`01-in-invite-trunk.txt` with that suffix, and the `From` tag and `CSeq` differ as well
+because they are regenerated for the outbound dialog. What must not differ across the two
+legs is the pass-through header set and the SDP body: the headers of
+`01-in-invite-trunk.txt` reappear unchanged in `03-out-invite-core.txt`. What **does**
+change in M2 is the called number in the Request-URI, `To` and `Contact`:
+`+8613800138000` on the trunk becomes `013800138000` on the core leg.
 
 | File | Message |
 | --- | --- |

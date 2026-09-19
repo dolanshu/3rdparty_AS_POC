@@ -637,8 +637,10 @@ the M0–M4 milestones. Nothing here changes the M0–M4 scope that is already d
   (`disposition: completed`) — all with that Call-ID. On the wire the core leg carried
   `INVITE sip:013800138000@172.28.0.3:15061` with `Via: SIP/2.0/UDP 172.28.0.2:5060;rport`
   (never `0.0.0.0`), and the mock log shows the full
-  `INVITE → 100 Trying → 180 Ringing → 200 OK → ACK → BYE → 200 OK` exchange on both legs with
-  the same Call-ID. The console answered `GET http://127.0.0.1:8081/healthz` with
+  `INVITE → 100 Trying → 180 Ringing → 200 OK → ACK → BYE → 200 OK` exchange on both legs.
+  *(At the P1 run the core leg carried the same Call-ID; since the 2026-09-19 fix the
+  outbound leg carries its own, `<trunk>-b2b_1` — see the post-fix re-test in
+  `docs/acceptance/report.md`.)* The console answered `GET http://127.0.0.1:8081/healthz` with
   `{"status":"ok","component":"console"}` and served its page (HTTP 200, 16754 bytes); the AS
   internal API answered `GET :8080/healthz` (`{"status":"ok","version":"0.5.0",...}`),
   `GET :8080/api/v1/metrics` (`calls_total: 1`, `calls_by_disposition: {"completed": 1}`,

@@ -53,6 +53,7 @@ from capture_call import (  # noqa: E402
     run_call,
 )
 
+from as_app.sip_adapter import outbound_call_id  # noqa: E402
 from s_sbc_mock.uac import CallScenario  # noqa: E402
 
 #: Width of the left column of the transcript, so every value lines up.
@@ -141,7 +142,8 @@ def narrate(run: CallRun, *, rules_file: Path, as_port: int, scenario: CallScena
     Returns:
         ``0`` when the call was answered and released normally, ``1`` otherwise.
     """
-    messages = run.recorder.messages_for(run.call_id)
+    # Both legs of the call: the trunk Call-ID and the derived one the AS originates with.
+    messages = run.recorder.messages_for_any((run.call_id, outbound_call_id(run.call_id)))
     decision_summary = decision_event_summary(run)
     disposition = decision_summary.split(":", 1)[0].strip() if decision_summary else None
     events = run.trace.trace_for(run.call_id).events

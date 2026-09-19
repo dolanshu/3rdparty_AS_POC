@@ -29,6 +29,7 @@ from __future__ import annotations
 import pytest
 
 from as_app.observability.tracing import CallTrace
+from as_app.sip_adapter import outbound_call_id
 from s_sbc_mock.uac import CallScenario
 
 pytestmark = pytest.mark.e2e
@@ -82,7 +83,9 @@ def test_complete_call_invite_to_bye(trunk_pair, capsys: pytest.CaptureFixture[s
     invites = list(trunk_pair.mock.uas.received_invites)
     assert invites, "no INVITE reached the core side of the mock"
     received = invites[0]
-    assert received.call_id == call_id
+    # The core side sees the AS's own outbound Call-ID, derived from the trunk one with
+    # sippy's `-b2b_1` suffix (the second leg has its own dialog identity).
+    assert received.call_id == outbound_call_id(call_id)
     assert received.called_number == "013800138000", (
         f"expected translated number 013800138000, got {received.called_number}"
     )

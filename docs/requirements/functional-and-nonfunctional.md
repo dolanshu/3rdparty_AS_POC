@@ -41,9 +41,10 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-F-027 | A **reject** at AS-1 (`608`, REQ-F-019) short-circuits the chain: AS-2 and the core never receive the call, because the reject path originates no second leg (REQ-F-021). | done | P9 | ACC-P9-002 |
 | REQ-F-028 | The chained call is observable per instance: each AS writes its own Call-ID keyed trace and console feed, and the demo makes the two Call-IDs the two B2BUAs in series produce visible rather than hiding them. | done | P9 | ACC-P9-003 |
 | REQ-F-029 | The skeleton shared by the two AS instances is **extracted into a library in a new repository** (checked out beside this one at `../as_platform`); both instances — `src/as_app/` (number translation) and `src/anti_fraud_as/` (anti-fraud) — become **users** of that library, and this repository becomes the library's **reference implementation** (D8). This is a structural refactor performed under an explicit plan: the `AGENT.md` section 14 rule 3 ("no unconfirmed refactors") waiver for P10 is recorded as approved in `docs/phase2-plan.md` section 8 item 2, and the plan is still written and reviewed **before any code moves**. | planned | P10 | ACC-P10-001 |
-| REQ-F-030 | The library is **independent of both use cases**: it imports neither `as_app` nor `anti_fraud_as`, so it carries the skeleton, not either use case. The one-way invariant that already holds is preserved and stays assertable — `src/as_app/**` does not import `anti_fraud_as` (`REQ-F-026`) — verified by `tests/unit/test_repository_baseline.py::test_as_app_does_not_import_the_anti_fraud_as`. | planned | P10 | ACC-P10-002 |
+| REQ-F-030 | The library is **independent of both use cases**: it imports neither `as_app` nor `anti_fraud_as`, so it carries the skeleton, not either use case. That independence is asserted by the library's own suite (`REQ-NF-021`). The one-way invariant that already holds is preserved and stays assertable — `src/as_app/**` does not import `anti_fraud_as` (`REQ-F-026`) — verified by `tests/unit/test_repository_baseline.py::test_as_app_does_not_import_the_anti_fraud_as`. | planned | P10 | ACC-P10-002 |
 | REQ-F-031 | The two AS instances remain **independent processes** and their externally observable behaviour is **unchanged** by the extraction: the same SIP signalling on the trunk, the same `AS-*` error codes and the same per-instance Call-ID keyed console feed. The extraction is a pure refactor with no wire-visible change, so the existing unit, integration and e2e layers stay green (the anti-regression requirement). | planned | P10 | ACC-P10-003 |
 | REQ-F-032 | This repository consumes the library through a **`path` dependency in `pyproject.toml`** (the library repository checked out beside it), so the `AGENT.md` section 10 guarantee *"clone → `uv sync` → `make demo`"* becomes *"clone **both** repositories side by side"*. This is a known and accepted cost of the extraction, recorded as an explicit exception rather than silently weakening the guarantee. | planned | P10 | ACC-P10-004 |
+| REQ-F-033 | The extraction is **staged, not all-or-nothing**: the skeleton moves into the library in a sequence of steps that each leave this repository building, linting and passing its three test layers, so `main` stays demonstrable at every step (D7, `AGENT.md` §10). A step that would leave the repository broken is not a valid step. | planned | P10 | ACC-P10-007 |
 
 ## 2. Non-functional requirements
 
@@ -69,6 +70,7 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-NF-018 | The friction the chained demo surfaces — what in the shared skeleton turned out to be number-translation specific — is **recorded**, as the primary input to P10 (plan section 3 P9 deliberate output). | done | P9 | ACC-P9-005 |
 | REQ-NF-019 | The new repository is a **library, not a running service**, so it follows the **library documentation standard** of D8 — an **API reference**, an **integration guide** and a **compatibility matrix** — and does **not** copy this repository's application document set (the ~24 documents of `docs/`, including the operations set `deployment` / `runbook` / `troubleshooting`, which does not apply to a library). It is **not** a uv workspace monorepo (D8). | planned | P10 | ACC-P10-005 |
 | REQ-NF-020 | The two pluggable dimensions P11 verifies (**transport**: UDP/TLS; **state store**: in-memory/Redis) and P11's **capacity harness** (D10) are **enabled by, but not built in, P10**: the extraction leaves those boundaries pluggable and adds no second transport, no external store and no load harness. The in-memory cross-call state (`REQ-NF-012`) remains the only implementation until P11 (D9). | planned | P10 | ACC-P10-006 |
+| REQ-NF-021 | The new repository carries **its own test suite and its own gate** (`ruff` format and lint, `mypy`, `pytest`), so a change to the library is verifiable **where the library lives** rather than only through this repository's suite. Its suite covers the pure helpers and the sippy adapter boundary, plus the library-level independence assertion of `REQ-F-030`. The three layers of `AGENT.md` §11 are the **application's** layers (AS and mock S-SBC on UDP, a full call) and do not transfer to a library, which is why this row states a library-shaped suite instead of restating them (D8: the new repository follows the library standard, not the application standard). | planned | P10 | ACC-P10-008 |
 
 ## 3. Traceability notes
 
@@ -144,8 +146,9 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
   **Behaviour unchanged (`REQ-F-031`) is the most important row.** The whole point of the
   extraction is that nothing observable moves: both AS instances stay independent processes,
   the SIP signalling, the `AS-*` error codes and the per-instance console feed are identical,
-  and the existing three-layer suite (246 tests at the time of writing) stays green. If that
-  suite has to change to accommodate the extraction, the extraction is wrong, not the tests.
+  and the existing three-layer suite (the layer counts are on record in
+  `docs/acceptance/report.md`) stays green. If that suite has to change to accommodate the
+  extraction, the extraction is wrong, not the tests.
   **The one-way independence (`REQ-F-030`) has a direction.** `src/anti_fraud_as/**` imports
   `as_app` in several places by design (ADR-0007 decision 9) — the reuse of the
   use-case-agnostic skeleton — so the invariant that is assertable, and the one the library
@@ -164,7 +167,15 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
   pluggable transport, pluggable state store and capacity harness without **building** any of
   them. The HLD/LLD deltas, the ADR and any probe are the next pipeline stage (plan section
   5.1) and are not written here; the `ACC-P10-*` items are created in the acceptance stage, as
-  `ACC-P8-*` and `ACC-P9-*` were.
+  `ACC-P8-*` and `ACC-P9-*` were. **Requirements-stage review gate (plan section 5.2).** Two
+  of the rows above came out of that gate's read-only review of this stage and were fixed
+  inside the stage: `REQ-F-033` (the extraction is staged, so this repository stays
+  demonstrable at every step — D7, `AGENT.md` §10) and `REQ-NF-021` (the new repository carries
+  its own test suite and its own gate, so a change to the library is verifiable where the
+  library lives). The same gate found that `REQ-F-030`'s library-level independence claim
+  carried no named verification, so that row was amended to cite the library's own suite. These
+  were findings of the section 5.2 review gate, fixed inside the stage; the gate's verdict is
+  recorded in `docs/phase2-plan.md`, not here.
 - Milestones M0–M3 are delivered, so no requirement above is left `planned` or `partial`
   for want of a milestone. The `docker compose` stack (both AS instances, two mocks and the
   console) is validated with `docker compose config`; its SIP path still carries the

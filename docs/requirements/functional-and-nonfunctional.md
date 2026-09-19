@@ -27,9 +27,9 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-F-013 | All configuration comes from the environment; switching from the mock to a real S-SBC is a configuration change only. | done | M0 | ACC-M0-005 |
 | REQ-F-014 | Startup self-check (configuration schema, rules parse and validation, port availability, peer sanity) and fail-fast on invalid configuration. | done | M0 | ACC-M0-005 |
 | REQ-F-015 | An internal error model maps `AS-*` codes to SIP status codes and log messages. | done | M0 | ACC-M0-007 |
-| REQ-F-016 | The anti-fraud AS runs as a **second, independently runnable process** reusing the shared skeleton, with its own SIP listen ports, its own declarative data file under `config/` and its own console feed (D6). | planned | P8 | ACC-P8-001 |
+| REQ-F-016 | The anti-fraud AS runs as a **second, independently runnable process** reusing the shared skeleton, with its own SIP listen ports, its own declarative data file under `config/` and its own console feed; it owns its lifecycle — a startup self-check and a stop path that cancels every timer it armed (D6, P8a lesson). | planned | P8 | ACC-P8-001 |
 | REQ-F-017 | On INVITE the AS inspects the **calling** party and produces a **verdict** — allow (the INVITE is relayed unchanged) or reject. The Request-URI is never rewritten (D4). | planned | P8 | ACC-P8-002 |
-| REQ-F-018 | The verdict is computed from caller reputation, a per-caller **call-rate window** and block/allow lists, read from a declared data file under `config/` that is validated on load (D4). | planned | P8 | ACC-P8-003 |
+| REQ-F-018 | The verdict is computed from caller reputation (a score that **decays over time**), a per-caller **call-rate window** and block/allow lists, read from a declared data file under `config/` that is validated on load (D4). | planned | P8 | ACC-P8-003 |
 | REQ-F-019 | A rejected call is answered on the trunk with `608` "Rejected" (RFC 8688) and **no `Call-Info`** header; on the allow path the relayed INVITE carries **no added header** (D5). | planned | P8 | ACC-P8-002, ACC-P8-003 |
 | REQ-F-020 | The mock S-SBC's UAC side declares `Feature-Caps: *;+sip.608` in its INVITE, and the AS plays no media announcement: the reject path stays signalling-only (D5, ADR-0006). | planned | P8 | ACC-P8-003 |
 | REQ-F-021 | The allow path still drives a full B2BUA relay (`INVITE → 100 → 180 → 200 OK → ACK → BYE`); the reject path is **UAS-only** and originates no second leg (P8 "Known collisions"). | planned | P8 | ACC-P8-001, ACC-P8-002 |
@@ -89,7 +89,15 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
   SIP status codes and log messages per `AGENT.md` section 4.3, as the existing
   `AS-CFG-* / AS-RULE-* / AS-ROUTE-* / AS-PEER-*` families do. The `608` reject path is
   validated by an sippy probe (`REQ-NF-015`); ADR-0007 and the HLD/LLD deltas are the next
-  pipeline stage (`docs/phase2-plan.md` section 5.1) and are not written here.
+  pipeline stage (`docs/phase2-plan.md` section 5.1) and are not written here. **Reject path
+  vs "B2BUA only" (`REQ-F-021`).** The reject path terminates the incoming INVITE and
+  answers it from the UAS side, originating no second leg; this is the behaviour
+  `docs/phase2-plan.md` section 3 P8 ("Known collisions") already sanctions as *"UAS
+  behaviour, not B2BUA"*, so `REQ-F-021` is a documented, approved deviation limited to the
+  reject path, while `REQ-F-002`'s "B2BUA only" statement continues to describe the
+  relay/allow path. This requirements-stage review gate raised these three points —
+  reputation decay, the second process's stop path and this reject-path reconciliation —
+  and they were folded into `REQ-F-016`, `REQ-F-018` and this note here.
 - Milestones M0–M3 are delivered, so no requirement above is left `planned` or `partial`
   for want of a milestone. The three-service `docker compose` stack is validated with
   `docker compose config`; its SIP path still carries the `ALLOWED_PEERS` issue tracked in

@@ -255,18 +255,6 @@ class SipMessageRecorder:
         with self._lock:
             self.messages.append(message)
 
-    def messages_for(self, call_id: str) -> list[RecordedSipMessage]:
-        """Return the messages of one call, in the order they were captured.
-
-        Args:
-            call_id: SIP Call-ID of the call.
-
-        Returns:
-            The messages carrying that Call-ID.
-        """
-        with self._lock:
-            return [message for message in self.messages if message.call_id == call_id]
-
     def messages_for_any(self, call_ids: Iterable[str]) -> list[RecordedSipMessage]:
         """Return the messages carrying any of the given Call-IDs, in capture order.
 

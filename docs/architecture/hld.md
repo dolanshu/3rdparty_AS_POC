@@ -128,6 +128,7 @@ sequenceDiagram
 | 0005 | Mock the S-SBC on the same stack as the AS |
 | 0006 | Signalling only, no media |
 | 0007 | Anti-fraud AS: use case, `608 Rejected` semantics and cross-call state ownership |
+| 0008 | Chained AS topology: configuration-only chaining and `Call-ID` preservation across two B2BUAs |
 
 ## 8. The second AS instance — anti-fraud (P8)
 
@@ -164,7 +165,8 @@ graph LR
 The two AS instances are **independent**: neither imports the other, each has its own
 configuration, data file, ports and lifecycle. The chained topology
 (`SBC → anti-fraud AS → number-translation AS → core`) is P9's, not P8's; D6 builds it
-before the platform work precisely to expose the friction between the two instances.
+before the platform work precisely to expose the friction between the two instances
+(section 9).
 
 ### 8.2 Deployment view
 
@@ -279,4 +281,155 @@ element that inserts `sip.608` (ADR-0007 decision 5). The presence or absence of
 and an absent declaration only means the announcement obligation is unmet. Because that
 distinction has to be visible, every screened INVITE carries the declaration state
 (`sip_608_declared`) in the trace and the structured log.
+
+## 9. The chained topology (P9)
+
+`docs/phase2-plan.md` D6 puts the two AS instances **in series** before the platform work:
+`SBC → AS-1 (anti-fraud) → AS-2 (number translation) → core`. This section adds the chained
+deployment view, the interface view and the key flows. It extends the views above rather
+than replacing them: the two instances, their consoles and their independent demos are
+unchanged (section 8), and the chain is wired **by configuration only** — no code change, no
+iFC emulation in the mock, and neither AS imports the other (ADR-0008 decision 1).
+
+### 9.1 System context
+
+The S-CSCF trigger reaches AS-1, whose **allowed** INVITE is relayed to AS-2 instead of back
+to the core; AS-2 translates the number and originates the call towards the core. A `608`
+reject at AS-1 ends the call there.
+
+```mermaid
+graph LR
+    subgraph operator["operator IMS core (mocked)"]
+        SSBC["Service-SBC / S-CSCF trigger<br/>mock UAC"]
+        CORE["core network<br/>mock UAS"]
+    end
+    subgraph ours["this repository"]
+        FRAUD["AS-1 anti-fraud (B2BUA / UAS)<br/>screening verdict"]
+        AS["AS-2 number translation (B2BUA)<br/>translate + route"]
+        CONSOLE["console<br/>separate process"]
+    end
+    SSBC == "SIP trunk<br/>UDP" ==> FRAUD
+    FRAUD == "allowed INVITE<br/>UDP" ==> AS
+    AS == "translated INVITE<br/>UDP" ==> CORE
+    FRAUD -. "608 reject ends the call here" .-> SSBC
+    FRAUD -. "internal API" .-> CONSOLE
+    AS -. "internal API" .-> CONSOLE
+```
+
+The chain adds **no** new node type and no new process kind: it is the two existing B2BUAs
+connected trunk-to-trunk, with the mock playing the S-CSCF on one side and the core on the
+other.
+
+### 9.2 Deployment view
+
+In production the chain is the **three processes** of sections 2 and 8.2 wired in series — the
+anti-fraud AS, the number-translation AS and the mock that plays either end — plus the
+console. Each AS's next hop is pointed at the next instance, and **no new port is needed**:
+`5060` and `5062` already differ precisely so both instances run on one host
+(`docs/phase2-plan.md` section 6, "Port collision"). The demo runs the same chain on
+dynamically allocated ports (ADR-0008 decision 6).
+
+```mermaid
+graph TB
+    subgraph host["one host"]
+        MOCK["s-sbc-mock<br/>UDP 15060 (UAC)<br/>UDP 15061 (UAS)"]
+        FRAUD["anti-fraud-as (AS-1)<br/>UDP 5062 (trunk)<br/>TCP 8082 (internal API)"]
+        AS["as (AS-2)<br/>UDP 5060 (trunk)<br/>TCP 8080 (internal API)"]
+        CONSOLE["console<br/>TCP 8081"]
+    end
+    MOCK == "INVITE" ==> FRAUD
+    FRAUD == "allowed INVITE" ==> AS
+    AS == "translated INVITE" ==> MOCK
+    CONSOLE -- "HTTP / WS" --> FRAUD
+    CONSOLE -- "HTTP / WS" --> AS
+```
+
+| Service | Process | Ports | Role in the chain |
+| --- | --- | --- | --- |
+| `anti-fraud-as` (AS-1) | `python -m anti_fraud_as.main` | `5062/udp`, `8082/tcp` | Screens the caller; relays an **allowed** INVITE to AS-2, or answers `608 Rejected` itself |
+| `as` (AS-2) | `python -m as_app.main` | `5060/udp`, `8080/tcp` | Receives the relayed INVITE, translates the number and routes to the core |
+| `s-sbc-mock` | `python -m s_sbc_mock.main` | `15060/udp` UAC, `15061/udp` UAS | S-CSCF trigger on one side and the core on the other |
+
+The wiring is configuration only: the mock's target and `FRAUD_SBC_PEER_*` point AS-1 at
+AS-2, and AS-2's routing catalogue selects the core (ADR-0008 decision 1).
+
+### 9.3 Interface view
+
+The chain reuses the existing interfaces of section 3 and section 8.3. What is new is the
+**trunk-to-trunk** interface between AS-1 and AS-2, and the two next-hop mechanisms behind it:
+
+| Interface | Direction | Protocol | Notes |
+| --- | --- | --- | --- |
+| SIP trunk (allow) | S-SBC → AS-1 → AS-2 | SIP over UDP | AS-1 relays the **allowed** INVITE to its single configured next hop (`FRAUD_SBC_PEER_*` → `nh_addr`); no header added (ADR-0007) |
+| Inter-AS next hop (translate) | AS-2 → core | SIP over UDP | AS-2 selects the next hop from its **routing catalogue** (`action.next_hops`), not from a peer knob (ADR-0008 decision 1) |
+| Reject | S-SBC → AS-1 → S-SBC | SIP over UDP | `608 Rejected`, UAS-only, no second leg, so the call never reaches AS-2 (ADR-0007, REQ-F-027) |
+
+**The dialog `Call-ID` is preserved across the whole chain.** AS-1's trunk leg, AS-2's trunk
+leg and the core leg all carry one `Call-ID`, because the sippy stack and both controllers
+forward the trunk `Call-ID` inside the call-control event rather than regenerating it
+(ADR-0008 decision 2, measured). A chained call is therefore a **single correlated trace**
+across both instances rather than two independent traces; the demo prints the `Call-ID` each
+hop saw to show this.
+
+### 9.4 Key message flows
+
+**Allow path — through both B2BUAs.** AS-1 screens the caller, relays the unchanged INVITE to
+AS-2; AS-2 translates and routes to the core.
+
+```mermaid
+sequenceDiagram
+    participant UAC as mock UAC (S-CSCF)
+    participant FRAUD as AS-1 anti-fraud
+    participant AS as AS-2 number translation
+    participant UAS as mock UAS (core)
+    UAC->>FRAUD: INVITE (P-Asserted-Identity = caller)
+    FRAUD->>FRAUD: screen(caller) -> allow
+    FRAUD->>AS: INVITE (relayed, no header added)
+    AS->>AS: translate +8613800138000 -> 013800138000 (R-MOB-CM-40)
+    AS->>UAS: INVITE sip:013800138000@core
+    UAS-->>AS: 100 Trying
+    AS-->>FRAUD: 100 Trying
+    FRAUD-->>UAC: 100 Trying
+    UAS-->>AS: 180 Ringing
+    AS-->>FRAUD: 180 Ringing
+    FRAUD-->>UAC: 180 Ringing
+    UAS-->>AS: 200 OK
+    AS-->>FRAUD: 200 OK
+    FRAUD-->>UAC: 200 OK
+    UAC->>FRAUD: ACK
+    FRAUD->>AS: ACK
+    AS->>UAS: ACK
+    UAC->>FRAUD: BYE
+    FRAUD->>AS: BYE
+    AS->>UAS: BYE
+    UAS-->>AS: 200 OK
+    AS-->>FRAUD: 200 OK
+    FRAUD-->>UAC: 200 OK
+```
+
+**Reject path — short-circuits the chain.** AS-1 answers `608 Rejected` on the trunk and
+originates no second leg, so **AS-2 and the core never receive the call**. The demo asserts
+this as an absence — zero calls seen by AS-2, zero INVITEs at the core — not merely as the
+status code (ADR-0008 decision 5).
+
+```text
+UAC (S-CSCF)              AS-1 anti-fraud            AS-2 number translation        core
+    |                          |                              |                        |
+    |--- INVITE -------------->|                              |                        |
+    |                          | screen(caller) -> reject     |                        |
+    |<-- 100 Trying -----------|                              |                        |
+    |<-- 608 Rejected ---------|                              |                        |
+    |--- ACK ----------------->|                              |                        |
+    |                          |                              |                        |
+    |              (no INVITE reaches AS-2 or the core; the chain ends here)           |
+```
+
+### 9.5 What the chain does not change
+
+The chain is **demonstration, not architecture**: it adds no module, no shared library and no
+interface between the two AS instances, and it is not the abstraction P10 has to build
+(ADR-0008 decision 7). The friction it exposes — that AS-1 relays to a configured peer while
+AS-2 routes by catalogue, and that the correlation key is a stack behaviour rather than a
+declared contract — is P10's input and is recorded at the item's close
+(`docs/phase2-plan.md` section 3 P9, section 5.4).
 

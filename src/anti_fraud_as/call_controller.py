@@ -36,6 +36,7 @@ duplication is friction for P10.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -87,6 +88,9 @@ LEG_NEXT_HOP = "next_hop"
 
 #: The RFC 8688 section 3.3 capability token a 608-aware UAC declares in ``Feature-Caps``.
 SIP_608_TOKEN = "sip.608"
+
+#: Separator between feature tags in a ``Feature-Caps`` value (RFC 6809).
+_FEATURE_CAPS_SEPARATOR = re.compile(r"[;,]\s*")
 
 #: How long the relayed INVITE is given to see any response before the originating leg is
 #: torn down. Tuned for the loopback POC, mirroring the number-translation AS.
@@ -228,15 +232,21 @@ def declares_sip_608(request: Any) -> bool:
     response either way — it only says whether the section 3.4 announcement obligation was
     met. It is therefore recorded, never branched on (ADR-0007 decision 5).
 
+    The match is on the **whole feature tag**, not on a substring: a ``Feature-Caps`` value
+    is a list of comma or semicolon separated tags, each optionally prefixed with ``+``, so
+    ``sip.6080`` or ``x-sip.608`` must not be read as ``sip.608``.
+
     Args:
         request: The trunk INVITE.
 
     Returns:
-        ``True`` when a ``Feature-Caps`` header carries the ``sip.608`` token.
+        ``True`` when a ``Feature-Caps`` header carries the ``sip.608`` feature tag.
     """
-    if request.countHFs("feature-caps") == 0:
-        return False
-    return any(SIP_608_TOKEN in str(body) for body in request.getHFBodys("feature-caps"))
+    for body in request.getHFBodys("feature-caps"):
+        for part in _FEATURE_CAPS_SEPARATOR.split(str(body)):
+            if part.strip().lstrip("+").lower() == SIP_608_TOKEN:
+                return True
+    return False
 
 
 def _error_code_for(code: str | None) -> AsErrorCode:
@@ -538,6 +548,12 @@ class FraudCallController:
             call_id=self.call_id,
             context={"screen_source": decision.source.value},
         )
+        if not sip_608_declared:
+            # RFC 8688 section 3.4: the call is answered 608 either way, but the
+            # announcement obligation was not met. Counted **only** for screening-driven
+            # rejects — a configuration failure is not a section 3.4 case and must not
+            # inflate this counter.
+            self.metrics.record_counter("reject.sip_608_undeclared")
         self._answer_trunk(
             error,
             screen_source=decision.source,
@@ -551,7 +567,7 @@ class FraudCallController:
         *,
         screen_source: ScreeningSource,
         list_entry: str | None,
-        sip_608_declared: bool,
+        sip_608_declared: bool | None,
     ) -> None:
         """Emit a final answer on the trunk leg — the decision-free reject.
 
@@ -559,21 +575,24 @@ class FraudCallController:
             error: The error carrying the SIP status, the phrase and the internal code.
             screen_source: Signal that decided, for the trace.
             list_entry: Matched list entry identifier, when there is one.
-            sip_608_declared: Whether the INVITE declared ``sip.608``.
+            sip_608_declared: Whether the INVITE declared ``sip.608``; ``None`` when the AS
+                did not get as far as screening (a configuration failure), in which case the
+                field is omitted rather than reported as ``false``.
         """
         self._cancel_no_answer_timer()
         self.metrics.record_error(error.code.code)
         self.metrics.record_call_disposition(CallDisposition.REJECTED)
-        if not sip_608_declared:
-            self.metrics.record_counter("reject.sip_608_undeclared")
         attributes: dict[str, Any] = {
             "leg": LEG_TRUNK,
             "error_code": error.code.code,
             "screen_source": screen_source.value,
-            "sip_608_declared": sip_608_declared,
         }
         if list_entry:
             attributes["list_entry"] = list_entry
+        declared_fields: dict[str, Any] = {}
+        if sip_608_declared is not None:
+            attributes["sip_608_declared"] = sip_608_declared
+            declared_fields["sip_608_declared"] = sip_608_declared
         self.tracer.record(
             self.call_id,
             LogDirection.OUTBOUND,
@@ -592,7 +611,7 @@ class FraudCallController:
             method=str(error.sip_status),
             # ``error.as_log_fields()`` already carries ``screen_source`` through the error
             # context, so it is not repeated here (a duplicate keyword argument raises).
-            sip_608_declared=sip_608_declared,
+            **declared_fields,
             **error.as_log_fields(),
         )
         if self.uaA is not None:
@@ -601,11 +620,14 @@ class FraudCallController:
     # --- the allow path -----------------------------------------------------
 
     def _originate_allowed(self, event: Any) -> None:
-        """Relay the INVITE unchanged towards the single configured next hop.
+        """Relay the allowed INVITE towards the single configured next hop.
 
-        The Request-URI and the headers are passed through verbatim and **no header is
-        added** (ADR-0007 decision 6); only the pass-through headers of the trunk INVITE are
-        copied, exactly as the number-translation AS does.
+        What crosses the AS unchanged is exactly the **pass-through header set**
+        (:data:`as_app.sip_adapter.PASSTHROUGH_HEADERS`) plus the SDP body; the Request-URI
+        and the called number are not rewritten, everything else is regenerated by the stack
+        or owned by the AS, and **no header is added** (ADR-0007 decision 6).
+        ``Feature-Caps`` is **not** in that set, so the UAC's ``sip.608`` declaration does
+        not reach the next hop — a registered gap, not a hidden one.
 
         Args:
             event: The ``CCEventTry`` raised by the answering leg.
@@ -622,7 +644,7 @@ class FraudCallController:
                 error,
                 screen_source=ScreeningSource.NONE,
                 list_entry=None,
-                sip_608_declared=False,
+                sip_608_declared=None,
             )
             return
         outbound_event = CCEventTry(event.getData())

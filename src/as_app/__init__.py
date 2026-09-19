@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from as_platform.version import distribution_version, read_version, version_file_version
+from as_platform.version import read_version, version_file_version
 
 __all__ = ["__version__"]
 
@@ -45,25 +45,6 @@ _UNKNOWN_VERSION = "0.0.0+unknown"
 #: of a source checkout, and it is guarded to agree with ``pyproject.toml`` by ``AGENT.md``
 #: section 4.7 and the test suite.
 _VERSION_FILE = Path(__file__).resolve().parents[2] / "VERSION"
-
-
-def _distribution_version() -> str:
-    """Return the version recorded in the installed distribution metadata.
-
-    An installed wheel does not ship the repository ``VERSION`` file, so the metadata the
-    build backend wrote into the wheel is the only version source it carries. Reading it
-    first (P5) is what keeps an installed wheel from reporting ``_UNKNOWN_VERSION``.
-
-    Returns:
-        The version string of the installed ``_DISTRIBUTION_NAME`` distribution.
-
-    Raises:
-        importlib.metadata.PackageNotFoundError: The distribution is not installed — the
-            case for a source checkout that was never installed.
-        Exception: Any error a metadata backend raises while reading a present but
-            unreadable distribution is propagated as well and handled by the caller.
-    """
-    return distribution_version(_DISTRIBUTION_NAME)
 
 
 def _version_file_version() -> str:

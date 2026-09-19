@@ -880,6 +880,49 @@ the chained section in `docs/demo-script.md` / `docs/demo-steps.md`, and `VERSIO
   blocks the event loop) become inputs to P10 and are registered as gaps.
 - **Explicitly not:** any published calls-per-second or latency figure (D10).
 
+**What was learned (2026-09-19).** `tools/capacity_probe.py` places concurrent calls at an
+escalating offered load against the real chained topology in one interpreter and observes
+what degrades first. It publishes **no** calls-per-second and no latency figure (D10); every
+value it prints is a boundary statement.
+
+1. **No completion ceiling was found inside the configured range, but the event loop is the
+   serialisation point.** Every call completed at every offered level up to **64** concurrent
+   calls, so the boundary is above the range and has to be escalated to. The observable
+   constraint is the **loop gap**: the largest gap between two polls of the single
+   process-wide `ED2` loop grew from `0.03s` at offered level 1 to `0.12s` at 64 — one
+   blocking, single-threaded dispatcher serves both AS instances and the mock, so a busy loop
+   delays every call's timers and responses alike. The harness runs all three stacks in one
+   interpreter; in production each instance owns its own process and loop, so the number of
+   instances is not what this measures.
+2. **The 3-second no-answer timeout is a wall-clock boundary, not a resource limit**, and it
+   is what turns a slow call into a failed one under load. The chain accepts the whole burst
+   and degrades **per call**: it never refuses load and never answers `503`/overload, because
+   there is no admission control.
+3. **The failover hop's no-answer timer does not fire, so `timerB` — not the application —
+   ends the call.** This is the sharpest finding, and it is stronger than the P8a lesson.
+   Towards an unreachable hop the controller logs `next hop did not answer in time` **once
+   per call** and `trying failover hop` once, then nothing: the second hop's own 3-second
+   timer never fires, the application never gives up, and the trunk is **not** released inside
+   a window several times the nominal timeout (measured `0 of 4` after 9s and `0 of 4` after
+   25s). The calls are ended by sippy's `timerB` = 32s reaping the client transaction.
+   Registered as a gap below; the repair belongs to the failover path in
+   `src/as_app/call_controller.py` (P10's material), not to a read-only probe.
+4. **The armed transaction population scales with burst × hops and outlives the call's
+   decision.** The shipped mobile rule lists a primary and a failover hop, so each call leaves
+   one armed client transaction **per hop tried** — measured `8 of 8` armed for `timerB =
+   32.0s` for a 4-call burst — and INVITEs keep being retransmitted (`timerA` doubles its
+   interval, only `timerB` stops it): `36` transmissions for that burst. A burst therefore
+   leaves up to `N*H` transactions and their timers in the process for ~32s whatever the
+   application decided. Once `timerB` has fired the transactions are still present in
+   `SipTransactionManager.tclient` (measured `8` entries, `0` with `timerB` armed), so the
+   reap does not clean the table.
+
+- **Status: done (2026-09-19), worked on `phase2`; not merged into `main`, not tagged.**
+  The probe is `tools/capacity_probe.py`, run explicitly and **not** in the gate (no Makefile
+  target, not collected by pytest); the constraints above are registered in
+  `docs/production-gaps.md`. No calls-per-second and no latency figure is published (D10),
+  and no file under `src/` was changed — P9.5 is read-only by definition.
+
 ### P10 — Platform extraction (new repository)
 
 - **Goal.** Extract the skeleton shared by both AS instances into a library; both become its

@@ -12,6 +12,7 @@ runtime components: nothing in `src/` depends on them.
 | `tools/demo_chained_call.py` | Runs **both AS instances in series** (`SBC -> AS-1 anti-fraud -> AS-2 number translation -> core`) on dynamically allocated ports and narrates what every hop saw: an allowed call through both B2BUAs, a `608` reject short-circuited before AS-2, the three distinct per-leg dialog `Call-ID`s and the preserved `P-Charging-Vector` ICID. It **asserts** those properties and **exits non-zero** on any mismatch, so it is a guard, not a printout. This is what `make demo-chained` runs; it writes nothing. |
 | `tools/show_rules.py` | Prints the active rule set and the decision for sample numbers; this is what `make rules` runs. |
 | `tools/demo_call.py` | Places one real call and narrates it — routing decision, translation, every message on the wire, outcome. This is what `make demo` runs; it writes nothing. |
+| `tools/capacity_probe.py` | The **P9.5 read-only capacity probe**: places concurrent calls at an escalating offered load (`--levels 1,2,4,8,16,32,64`) against the real chained topology and observes what degrades first, then drives a burst towards an unreachable hop and counts the `timerB` armed transaction population. It publishes **no** calls-per-second and no latency figure (`docs/phase2-plan.md` §8 item 1, D10); every value it prints is a boundary statement. It is a guard on the probe's own integrity (positive control plus an armed-`timerB` observation) and exits non-zero only when that integrity fails — a degradation finding never changes the exit code. Run explicitly; it is **not** in `make test` and pytest does not collect it. |
 | `tools/capture.sh` | Captures UDP traffic on the trunk ports into `captures/` for acceptance evidence (`AGENT.md` section 4.8). |
 | `tools/capture_call.py` | Runs the AS and the mock S-SBC on loopback UDP with dynamic ports, places one call and writes every message of it to `docs/specs/message-samples/`. This is how message samples stay captured rather than hand-written. A capture clears the folder's previously generated samples (everything except its `README.md`) before writing, so the directory always holds exactly the most recent call. It also exports `run_call`, which `tools/demo_call.py` reuses so both can never disagree about what the stack does. |
 
@@ -25,6 +26,7 @@ uv run python tools/demo_call.py --called +8613800138000
 uv run python tools/demo_fraud_call.py           # allow + 608 reject, narrated
 uv run python tools/demo_chained_call.py         # both AS instances in series, narrated
 uv run python tools/show_rules.py --evaluate +8613800138000
+uv run python tools/capacity_probe.py                  # P9.5, observation only (not in make test)
 uv run python tools/capture_call.py
 ./tools/capture.sh --port 5060
 ```

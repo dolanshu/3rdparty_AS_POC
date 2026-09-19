@@ -47,6 +47,7 @@ from sippy.Time.Timeout import Timeout  # noqa: E402
 
 from anti_fraud_as.bootstrap import FraudAsSettings  # noqa: E402
 from anti_fraud_as.main import FraudAsStack  # noqa: E402
+from as_app.observability.logging import configure_logging  # noqa: E402
 from as_app.observability.tracing import SipMessageRecorder  # noqa: E402
 from s_sbc_mock.main import MockConfig, SMockApplication  # noqa: E402
 from s_sbc_mock.uac import CallOutcome, CallScenario  # noqa: E402
@@ -193,6 +194,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allowed-caller", default=ALLOWED_CALLER)
     parser.add_argument("--blocked-caller", default=BLOCKED_CALLER)
     args = parser.parse_args(argv)
+
+    # The demo prints its own transcript; the AS's structured event log is for the operator,
+    # not for the transcript. With no handler installed, the reject path's WARNING record
+    # reached ``logging.lastResort`` and leaked a bare ``call rejected by screening`` line into
+    # the demo output. Configuring the root logger at ERROR keeps routine events off the
+    # transcript while a genuine failure still prints.
+    configure_logging("ERROR", structured=False)
 
     as_port = args.as_port or free_udp_port()
     core_port = args.core_port or free_udp_port()

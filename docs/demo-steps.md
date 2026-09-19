@@ -215,11 +215,6 @@ Expect: `expected SIP 200, observed 200; core INVITE delta 1` for the allowed ca
 The blocked caller is the first entry of `config/caller_screening.yaml`; swap it with
 `--blocked-caller` to screen a different number.
 
-Note: the demo tool does not install an application log handler, so the reject path's
-`WARNING` record can appear as a bare `call rejected by screening` line on stderr, interleaved
-with the transcript. It is cosmetic and changes no verdict (recorded in the P8 section of
-`docs/acceptance/report.md`).
-
 ### Part 2 — The console (long-running; independent of Part 1)
 
 The console reads a long-running AS over its internal API. The one-shot calls in Part 1

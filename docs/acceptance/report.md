@@ -2244,7 +2244,25 @@ What **does** exist, and is reproducible from the committed tree:
 
   ```text
   $ uv run python tools/capture_call.py --output-dir captures/probe
+  as port    : 127.0.0.1:48598
+  core port  : 127.0.0.1:46862  (AS next hop)
+  trunk port : 127.0.0.1:47381  (emulated S-CSCF)
   captured   : 14 messages
+    captures/probe/01-in-invite-trunk.txt
+    captures/probe/02-out-100-trunk.txt
+    captures/probe/03-out-invite-core.txt
+    captures/probe/04-in-100-core.txt
+    captures/probe/05-in-180-core.txt
+    captures/probe/06-out-180-trunk.txt
+    captures/probe/07-in-200-core.txt
+    captures/probe/08-out-ack-core.txt
+    captures/probe/09-out-200-trunk.txt
+    captures/probe/10-in-ack-trunk.txt
+    captures/probe/11-in-bye-core.txt
+    captures/probe/12-out-200-core.txt
+    captures/probe/13-out-bye-trunk.txt
+    captures/probe/14-in-200-trunk.txt
+  (exit 0)
   $ grep -rin 'feature-caps' captures/probe/
   captures/probe/01-in-invite-trunk.txt:18:Feature-caps: *;+sip.608
   ```
@@ -2274,16 +2292,18 @@ item below, not worked around.
 
 | Item | Kind 1 (command + output) | Kind 2 (Call-ID log) | Kind 3 (CI) | Kind 4 (capture) |
 | --- | --- | --- | --- | --- |
-| ACC-P8-001 | yes (§1) | yes (§2, both Call-IDs) | **not producible** (§3: no CI for `phase2`) | **not applicable** — process/lifecycle, no distinct wire artefact |
-| ACC-P8-002 | yes (§1) | yes (§2, reject excerpt) | **not producible** (§3) | **partial** (§4: recorded wire bytes asserted in-test; no committed sample) |
-| ACC-P8-003 | yes (§1) | yes (§2) | **not producible** (§3) | **partial** (§4) |
-| ACC-P8-004 | yes (§1) | yes (§2, allow/reject verdict lines) | **not producible** (§3) | **not applicable** — pure/state behaviour, no wire artefact |
-| ACC-P8-005 | yes (§1) | yes (§2) | **not producible** (§3) | **partial** (§4) |
-| ACC-P8-006 | yes (§1) | yes (§2) | **not producible** (§3) | yes (§4/§1: the probe emits the real INVITE and the `SIP/2.0 608 Rejected` response) |
+| ACC-P8-001 | yes — §1 | **n/a** — a process lifecycle has no Call-ID keyed log; its log lines carry `call_id: "-"`, and §1 holds the process output | **not producible** — §3 | **n/a** — no distinct wire artefact |
+| ACC-P8-002 | yes — §1 | yes — **§2**: allow `b1d66c2e…` (the relay) and reject `688fdcca…` (`SIP/2.0 608 Rejected`, no second leg) | **not producible** — §3 | **partial** — §4: the test asserts the recorded wire bytes; no committed sample |
+| ACC-P8-003 | yes — §1 | yes — **§2**: the `screening verdict taken` line of both Call-IDs (`screen_source`, `reputation`, `calls_in_window`, `sip_608_declared`) | **not producible** — §3 | **n/a** — no separate wire artefact; §4 records the missing capture |
+| ACC-P8-004 | yes — §1 | yes — **§2**: the `reputation` / `calls_in_window` fields of the two verdict lines (the state the store computed) | **not producible** — §3 | **n/a** — pure/state behaviour |
+| ACC-P8-005 | yes — §1 | yes — **§2**: the reject line's `error_code: AS-FRAUD-001`, `sip_status: 608`, `screen_source` and `list_entry` | **not producible** — §3 | **n/a** — no separate wire artefact; §4 records the missing capture |
+| ACC-P8-006 | yes — §1 (the probe's output) | yes — **§1**, not §2: the probe prints its own Call-ID `608probe-23172@example.invalid` in the INVITE and in the `608` response | **not producible** — §3 | yes — §1 and §4: the probe emits the real INVITE and `SIP/2.0 608 Rejected`; §4 records the missing full capture |
 
-Kind 3 is the one kind P8 cannot supply (no CI can run for `phase2`); it is recorded honestly
-above, and the maintainer's post-merge `main` run replaces it then. This carries forward the same
-caveat the P3 section states.
+**§2 holds only the two real-run structured-log excerpts** (the allow and the reject call), so
+every kind-2 reference above points either at §2 or — for ACC-P8-006 — explicitly at §1, where
+the probe's own Call-ID keyed output lives. Kind 3 is the one kind P8 cannot supply (no CI can
+run for `phase2`); it is recorded honestly above, and the maintainer's post-merge `main` run
+replaces it then. This carries forward the same caveat the P3 section states.
 
 ### Accepted limitations and open items
 
@@ -2304,17 +2324,20 @@ Consistent with the stage-4 position, and not hidden:
   `_error_code_for` falls back to `FRAUD_NO_VERDICT` and `_originate_allowed` answers `AS-CFG-001`
   when no next hop is configured; neither path is exercised (the stack always configures a next
   hop). Accepted, not hidden.
-- **`tools/capture_call.py` exits non-zero when `--output-dir` is a relative path.**
-  Observed while reproducing ADR-0007's command: the 14 samples are written, then the final
-  `path.relative_to(REPO_ROOT)` raises
+- **`tools/capture_call.py` with a relative `--output-dir`: fixed.** While reproducing
+  ADR-0007's documented command, the final `path.relative_to(REPO_ROOT)` raised
   `ValueError: 'captures/probe/01-in-invite-trunk.txt' is not in the subpath of '<repo>'` and the
-  tool exits `1`. This is the same class of bug fixed in `tools/demo_call.py` at M4
-  (`CHANGELOG.md` 0.5.0 *Fixed*) but never fixed here. `make capture` (absolute default output
-  dir) is unaffected. **Found, reported, not fixed** — outside P8's scope (`AGENT.md` §14 rule 4).
-- **`make demo-fraud` leaks one unformatted log line to stderr.** The tool does not call
-  `configure_logging`, so the reject path's `WARNING` record reaches `logging.lastResort` and
-  prints a bare `call rejected by screening` line; it appears interleaved with the transcript
-  depending on buffering. Cosmetic; **found, reported, not changed** (the demo tool's logging
-  setup, not application behaviour).
+  tool exited `1` after writing the 14 samples — the same class of bug fixed in
+  `tools/demo_call.py` at M4 (`CHANGELOG.md` 0.5.0 *Fixed*). `tools/capture_call.py` now resolves
+  the path first (`display_path()`), so both an absolute and a relative `--output-dir` print the
+  sample list and exit `0`; a path outside the repository prints resolved. The ADR-0007 command
+  was re-run for real after the fix and its output is quoted in §4. `make capture` (absolute
+  default) was already unaffected and is unchanged.
+- **`make demo-fraud`: fixed.** `tools/demo_fraud_call.py` did not configure logging, so the
+  reject path's `WARNING` record reached `logging.lastResort` and printed a bare
+  `call rejected by screening` line into the demo output. The tool now calls
+  `configure_logging("ERROR", structured=False)` before it starts the stack, so routine
+  INFO/WARNING events stay off the transcript while a genuine failure still prints. `make
+  demo-fraud` was re-run and the output is clean, exit `0`.
 - **No anti-fraud capture path** — see §4; recorded as missing rather than manufactured.
 

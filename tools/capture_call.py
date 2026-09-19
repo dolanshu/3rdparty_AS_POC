@@ -352,6 +352,28 @@ def write_samples(
     return written
 
 
+def display_path(path: Path) -> str:
+    """Render a written sample path for the printout.
+
+    ``--output-dir`` may be given as an absolute path or as one relative to the current
+    directory (ADR-0007 documents ``--output-dir captures/probe``). ``Path.relative_to``
+    raises ``ValueError`` when one side is relative and the other absolute, which is what made
+    the relative form crash at the end of an otherwise successful capture, so the path is
+    resolved first and falls back to itself when it lies outside the repository.
+
+    Args:
+        path: A sample path as returned by :func:`write_samples`.
+
+    Returns:
+        The path relative to ``REPO_ROOT`` when it is inside it, the resolved path otherwise.
+    """
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(resolved)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the capture.
 
@@ -396,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"captured   : {len(written)} messages")
     for path in written:
-        print(f"  {path.relative_to(REPO_ROOT)}")
+        print(f"  {display_path(path)}")
     return 0
 
 

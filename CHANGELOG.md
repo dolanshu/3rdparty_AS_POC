@@ -45,6 +45,20 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   `test_caller_state.py`, `test_screening_engine.py`, `test_screening_data.py`,
   `test_fraud_configuration.py`, `test_fraud_error_model.py`.
 
+### Fixed
+
+- `tools/capture_call.py` no longer fails when `--output-dir` is a **relative** path.
+  `Path.relative_to` raised `ValueError` when one side was relative and the other absolute, so
+  the ADR-0007 evidence command
+  `uv run python tools/capture_call.py --output-dir captures/probe` wrote its 14 samples and
+  then exited `1`. The printed path is now resolved first and falls back to itself outside the
+  repository, so both an absolute and a relative output directory exit `0`; `make capture`
+  (absolute default) is unchanged.
+- `tools/demo_fraud_call.py` no longer leaks a bare `call rejected by screening` line into its
+  transcript. The tool did not configure logging, so the reject path's `WARNING` record reached
+  `logging.lastResort`; it now configures the root logger at `ERROR`, so routine events stay off
+  the transcript while a real failure still prints.
+
 ### Verified
 
 - The P8 acceptance run: **`ACC-P8-001 … ACC-P8-006` accepted** with evidence in

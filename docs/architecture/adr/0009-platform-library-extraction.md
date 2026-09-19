@@ -60,6 +60,12 @@ an **integration guide** and a **compatibility matrix** (REQ-NF-019), plus the m
 distributable needs — `pyproject.toml`, `VERSION`, `CHANGELOG.md`, `README.md`, `LICENSE`, a
 `Makefile` gate and CI (REQ-NF-021).
 
+**It is a separate repository, not a uv workspace monorepo** (REQ-NF-019). This repository
+consumes it through a `path` source (decision 6), not by workspace membership: neither
+`pyproject.toml` declares the other as a `[tool.uv.workspace]` member, and each keeps its own
+lockfile and its own gate. A workspace would couple the two lockfiles and contradict the
+"two repositories, two gates" split that D8 and REQ-NF-021 require.
+
 **The library is typed, and `py.typed` is load-bearing.** Without it `mypy` refuses the
 import and this repository's `make lint` fails (*Verified facts*, (e)). It is a library
 artefact, not an optional nicety.
@@ -78,6 +84,7 @@ the shells the two applications currently duplicate:
 | --- | --- | --- |
 | `observability/` | `as_app.observability` | structured logging, counters/dispositions/peer status, per-Call-ID trace and console feed |
 | `sip_adapter` | `as_app.sip_adapter` | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `outbound_call_id`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `CallLeg` (`TrunkMessage` is not carried — deleted with the move, below) |
+| `hop` | `as_app.routing.rules` | the `NextHop` value object — the ordered next hop a B2BUA relays towards (its own module, below) |
 | `errors` (mechanism) | `as_app.errors` | the memberless `ErrorCode` base, `SIP_PHRASES`, `sip_status_for`, `AsError` (decision 3) |
 | `bootstrap` (plumbing) | `as_app.bootstrap` | `ShutdownController`, `install_signal_handlers`, `check_port_available` |
 | `version` | `as_app.__init__` | the distribution → `VERSION` chain |
@@ -89,8 +96,9 @@ the shells the two applications currently duplicate:
 **What stays in this repository** — the use cases and everything that is this repository's
 identity:
 
-- `as_app/`: `routing/` (`rules.py`, `engine.py`), `errors.py` (the RULE/ROUTE codes),
-  `call_controller.py` (`CallController`), `main.py` (`AsStack`), `bootstrap.py`
+- `as_app/`: `routing/` (`rules.py` — the document model, `RuleSet` and `RuleSetStore`, plus a
+  re-export facade for `NextHop`; `engine.py` — the translation), `errors.py` (the RULE/ROUTE
+  codes), `call_controller.py` (`CallController`), `main.py` (`AsStack`), `bootstrap.py`
   (`AsSettings` and the self-check), `internal_api.py` (routes and bindings),
   `sip_adapter.py` (facade).
 - `anti_fraud_as/`: `screening.py`, `caller_state.py`, `screening_data.py`, `errors.py` (the
@@ -106,6 +114,26 @@ frozen ADRs and LLD. The implementation moves to the library; the modules stay a
 facades so those references keep resolving and the three-layer suite stays the unchanged
 anti-regression guard of REQ-F-031. A facade adds no behaviour and no state, and it is a
 permanent part of the design, not a migration shim.
+
+**`NextHop` moves into the library, and `as_app.routing.rules` re-exports it.** The base
+controller walks a hop's `name` / `address` / `port`, `sip_adapter.build_request_uri(number,
+hop)` is typed on `NextHop`, and `PolicyDecision.next_hops` is an ordered `NextHop` list — so
+the moving skeleton needs the *hop value object*, and if it stayed in `routing/` the library
+would have to import `as_app.routing.rules` and **REQ-F-030 would fail**. `NextHop` therefore
+gets its **own module** in the library — `as_platform/hop.py` — precisely so `sip_adapter` and
+`call_controller` can both import it without a cycle; **the owning module is stated, not left
+to the implementer**. `src/as_app/routing/rules.py` imports it from the library and
+**re-exports** it, so `as_app.routing.rules.NextHop` stays importable — `tests/`, `tools/` and
+the frozen ADRs and LLD reference it by that path — and the routing YAML schema is unchanged.
+This is the **same facade pattern** decision 2 already uses for `as_app.sip_adapter` and
+`as_app.observability.*`, and it is the third such facade.
+
+**Why `NextHop` is skeleton and not number-translation-specific.** A B2BUA always relays
+towards an ordered list of next hops, so the *hop value object* is skeleton. What is
+use-case-specific is the **catalogue that produces the list** — `routing/rules.py`'s document,
+schema, `RuleSet` and `RuleSetStore`, and `routing/engine.py`'s translation — and those stay
+in this repository. `NextHop.transport` stays `Literal["udp"]` in P10 (REQ-NF-020); P11 widens
+it when it adds TLS.
 
 **`extract_called_number` keeps its name.** LLD section 9.1 records that the name is wrong
 for the anti-fraud caller (it parses a URI user part). Renaming it during the move would
@@ -166,18 +194,36 @@ requirement, and `AGENT.md` section 13 requires structural changes to update it 
 4.3 is updated **in the implementation commit** to name the library mechanism and the three
 families.
 
-**The one bounded test edit — accepted and recorded.** The extraction's anti-regression promise
-is that this repository's suite does not change (REQ-F-031). One class of unit test is a
-**bounded exception**: a test that reads a member off `AsErrorCode` (`AsErrorCode.CFG_*`,
-`PEER_*`, `FRAUD_*`) must import it from the family enum that now owns it (`SkeletonErrorCode` /
-`FraudErrorCode`). The **assertions are unchanged**; only the module the member is read from
-changes, and it changes because the member genuinely moved. This is the one place where the
-literal sentence *"If that suite has to change to accommodate the extraction, the extraction
-is wrong, not the tests"* (requirements traceability note) meets the split, and it is
-recorded here rather than discovered in the implementation stage. **The maintainer's ruling
+**The one bounded class of test edit — accepted, enumerated and recorded.** The extraction's
+anti-regression promise is that this repository's suite does not change (REQ-F-031). One class
+of unit test is a **bounded exception**, and it is stated precisely rather than as "an import
+line":
+
+> The permitted class of test change is **"repoint a read, an iteration or a type annotation
+> of a moved enum member at the family enum that now owns it"**. No assertion's expected value
+> changes; no test is deleted, weakened or added. The single assertion whose *scope* changes is
+> the uniqueness/status-coverage test, which is **strengthened** to cover all three families.
+
+The sites are known, not hypothetical (verified against `dc1ab18`). The implementation stage
+repoints every site whose member genuinely moved — a grep of `tests/` for `AsErrorCode` finds
+them all — and reports the complete list in the acceptance evidence:
+
+| Test | Site | Why it is repointed |
+| --- | --- | --- |
+| `tests/unit/test_errors.py::test_every_code_has_a_unique_identifier_and_status` | `:28-31` | iterates `AsErrorCode` to assert codes are unique and every status has a phrase; after the split it must assert this **across all three families** — the one test whose *scope* is **strengthened**, not merely repointed |
+| `tests/unit/test_errors.py::test_relevant_sip_statuses_are_present` | `:36-37` | asserts `{404, 603, 403, 500}` is a subset; `403` is `AS-PEER-001`, now a `SkeletonErrorCode`, so the read moves |
+| `tests/unit/test_fraud_error_model.py::test_the_fraud_codes_are_unique_and_prefixed` | `:112` | derives the fraud list by iterating `AsErrorCode`; iterates `FraudErrorCode` |
+| `tests/unit/test_fraud_error_model.py::test_fraud_codes_live_in_the_shared_error_model` | `:133-134` | asserts `call_controller.AsErrorCode is AsErrorCode` and `screening_data.AsErrorCode is AsErrorCode`; becomes `FraudErrorCode`. The assertion's **intent** — one authoritative model, no private per-process vocabulary (REQ-F-023) — is preserved and still asserted |
+| `tests/unit/test_fraud_error_model.py::test_the_configuration_failures_are_answered_with_500` | `:101` | parametrised over `AsErrorCode` with FRAUD codes; the annotation repoints |
+
+This is the one place where the literal sentence *"If that suite has to change to accommodate
+the extraction, the extraction is wrong, not the tests"* (requirements traceability note) meets
+the split; the note is **qualified in place** so it keeps its force — the extraction may not
+change what a test *asserts* — while naming this bounded exception. **The maintainer's ruling
 (2026-09-19): the bounded edit is accepted and recorded.** `REQ-F-031`'s promise is that the
-three layers **stay green**, which holds — it is not a promise that no test file's import line
-ever changes. This is the only class of test change the extraction is allowed to make.
+three layers **stay green**, which holds — it is not a promise that no test file's read,
+iteration or annotation ever changes. This is the only class of test change the extraction is
+allowed to make.
 
 ### 4. The controller seam: the base owns the relay, the application owns the decision, `PolicyDecision` is the one value between them
 
@@ -202,7 +248,19 @@ use case's vocabulary:
 | `next_hops` | relay path: ordered `NextHop` list; empty means no failover |
 | `error` | reject path: the `AsError` carrying the family code, its SIP status and its phrase |
 | `disposition` | the `CallDisposition` to record, supplied rather than derived (LLD section 9.6) |
-| `attributes` | extra trace/log fields for this decision (for example `rule_id`, `screen_source`, `sip_608_declared`) |
+| `attributes` | extra **trace** fields for this decision (for example `leg`, `error_code`, `rule_id`) |
+| `reject_trace_summary` | reject path: the trace summary string — *"…relayed to the trunk leg"* for the translation AS, *"…answered on the trunk leg"* for the anti-fraud |
+| `reject_log_message` | reject path: the log message — *"call rejected by routing policy"* vs *"call rejected by screening"* |
+| `reject_log_fields` | reject path: the extra **log** fields beside `error.as_log_fields()` — the translation AS contributes `rule_id`; the anti-fraud contributes `screen_source`, `list_entry`, `sip_608_declared` |
+| `relay_log_message` | relay path: the originate log message — *"invite originated towards the next hop"* vs *"invite relayed towards the next hop"* |
+| `relay_log_fields` | relay path: the extra **log** fields — the anti-fraud contributes `verdict=ScreeningVerdict.ALLOW.value` |
+
+**Those string fields exist so the two applications' current trace and log lines are
+reproduced exactly, byte for byte — that is what REQ-F-031 requires.** This is the one place
+the design has to carry per-application **strings**, and it is preferable to branching on
+"which application am I" (which the design forbids): the base owns the *mechanism* — when to
+emit, at which level, on which leg — and the application supplies the *vocabulary* as data,
+exactly as it already supplies the error code and the disposition.
 
 The two applications become subclasses:
 
@@ -211,6 +269,17 @@ The two applications become subclasses:
 - `FraudCallController.decide()` calls `CallerStateStore.observe` then `screening.screen` and
   returns `REJECT` with the `FraudErrorCode` error and `screen_source` / `list_entry` /
   `sip_608_declared`, or `RELAY` with the unchanged event and its single configured hop.
+
+**The peer-status key is an overridable point on the base.** The default renders
+`name:address:port` (the translation AS's `_next_hop_peer`); the anti-fraud **overrides** it to
+render `address:port`, with the `"-"` fallback when no hop is configured. The anti-fraud's
+single hop therefore needs a `NextHop` whose `name` is **never rendered** — it is
+`fraud_sbc_peer` (the `FRAUD_SBC_PEER_*` knob) — so its key is unchanged.
+
+**The base stores the serving hop as a `NextHop`, while `uaO` still receives the
+`(address, port)` tuple.** `build_request_uri` and the default peer key need the value object;
+the outbound `UA` is constructed with `(hop.address, hop.port)`, so `UA(..., nh_address=...)`
+is unchanged and the anti-fraud's tuple form is preserved at the sippy boundary.
 
 **The one behavioural difference is reconciled by the base owning the full version.**
 `CallController._relay_from_next_hop` walks a failover list; `FraudCallController`'s has no
@@ -284,12 +353,30 @@ of them shape the decision:
    `editable = false` is the explicit spelling of the same thing. Only `editable = true`
    links the checkout.
 3. **A version constraint in `dependencies` is ignored.** `as-platform>=99.0` against a
-   `0.4.0` checkout installed `0.4.0` and exited `0`. The pin is not a guard; the lockfile is.
-4. **The lock is the guard, and `--frozen` is not.** `uv sync --locked` refuses when the
-   library's version changed (*"The lockfile at `uv.lock` needs to be updated, but `--locked`
-   was provided"*); `uv sync --frozen` accepted the same skew and installed the new version
-   silently. CI's lock verification (`AGENT.md` section 4.7) is therefore the only thing that
-   catches a library move under a stale lock.
+   `0.4.0` checkout installed `0.4.0` and exited `0`. The pin is not a guard.
+4. **With a `path` source the lockfile cannot constrain the library's version either.**
+   `uv sync --locked` refuses when the library's version changed (*"The lockfile at `uv.lock`
+   needs to be updated, but `--locked` was provided"*), but `uv sync --frozen` accepted the
+   same skew, installed the new version silently, and left the lock recording the old one. A
+   `path` dependency has no version to resolve against, so neither the pin nor the lock is a
+   version guard.
+
+**The honest position on the guard, because ADR-0009 measured the opposite of what an earlier
+draft concluded.** With a `path` source the lockfile **cannot constrain the library's
+version**: a constraint in `[project.dependencies]` is silently ignored (fact 3) and
+`--frozen` accepts a skew (fact 4). Therefore **the lock is not what catches a library move**,
+and `.github/workflows/ci.yml`'s comment that every job runs `uv sync --frozen`, "which fails
+when …", is true for **registry** dependencies and **not** for this path dependency. Every CI
+job needs a **second checkout** of the sibling library repository or it fails with
+`Distribution not found at: file:///…` (LLD section 11.6's structural list already records
+that checkout; the two are now consistent and explicit). What actually catches a skew is a
+**gate**, not a lock: the library carries its own `ruff` / `mypy` / `pytest` gate (REQ-NF-021)
+and this repository's gates run against whatever sibling checkout is present, so a skew shows
+up as a **gate failure**, not a lock failure. The residual — no versioned consumption, so
+nothing enforces the compatibility matrix at install time — is an **accepted gap** of the
+chosen mechanism, entered in `docs/production-gaps.md` in the implementation commit. A real
+deployment would consume a published wheel or a pinned VCS source; this POC cannot, because
+the library has no remote and pushing is out of scope.
 
 **`py.typed` is now a hard requirement of this repository's gate** (*Verified facts*, (e)):
 without it `mypy` reports `import-untyped` and `make lint` fails.
@@ -341,10 +428,12 @@ section 11); the two are different evidence, and neither substitutes for the oth
 `AGENT.md` section 6: `uv` behaviour is observed, never assumed. The consumption mechanism of
 decision 6 was settled by a **scratch probe** under `/tmp/p10probe` — a throwaway library
 (`as_platform`, `VERSION` 0.4.0) and seven consumer variants (six top-level, one nested), each
-varying one key of `pyproject.toml`. **It is not committed and it is not a repository artefact**: unlike
-`tools/anti_fraud_probe.py` (ADR-0007) and `tools/chained_as_probe.py` (ADR-0008), this probe
-has no runnable form here, so the recorded output below is the evidence. Tool versions:
-`uv 0.12.15`, CPython `3.10.12`.
+varying one key of `pyproject.toml`. That scratch form is not committed; **its reproducible
+form is `tools/path_dependency_probe.py`**, which rebuilds the same layout in a temporary
+directory and re-measures every fact below, exiting non-zero when any expectation does not
+hold (the P9.5 probe's guard is the precedent). Run it with `uv run python
+tools/path_dependency_probe.py`; the recorded output below is from the run that closed this
+stage. Tool versions: `uv 0.12.15`, CPython `3.10.12`.
 
 **(a) A dependency key with no `[tool.uv.sources]` entry does not resolve.**
 
@@ -371,8 +460,8 @@ $ uv sync          # dependencies = ["as-platform>=99.0"], path source, editable
  + as-platform==0.4.0 (from file:///tmp/p10probe/as_platform)     # exit 0; the pin is ignored
 ```
 
-**(d) The lockfile is the guard; `--frozen` is not.** With the library bumped `0.4.0` →
-`0.5.0` and a lock recording `0.4.0`:
+**(d) `--locked` refuses a stale lock; `--frozen` accepts the same skew and does not update
+the lock.** With the library bumped `0.4.0` → `0.5.0` and a lock recording `0.4.0`:
 
 ```text
 $ uv sync --locked
@@ -380,7 +469,7 @@ error: The lockfile at `uv.lock` needs to be updated, but `--locked` was provide
 
 $ uv sync --frozen
  - as-platform==0.4.0 (from file:///tmp/p10probe/as_platform)
- + as-platform==0.5.0 (from file:///tmp/p10probe/as_platform)     # accepted silently
+ + as-platform==0.5.0 (from file:///tmp/p10probe/as_platform)     # accepted silently; uv.lock still records 0.4.0
 ```
 
 **(e) `py.typed` is required or `mypy` refuses the import.**
@@ -405,33 +494,37 @@ the same distribution (PEP 503 normalisation); one probe variant used the unders
 
 **Conclusion.** The `path` + `editable = true` mechanism works and is the right one for the
 staged extraction, and four of its properties are **not** what a reader would assume: the
-default is a copy, the version pin is ignored, `--frozen` hides a library move, and the
-import needs `py.typed`. Each is now a stated property of decision 6 rather than a surprise
-in the implementation stage.
+default is a copy, the version pin is ignored, `--frozen` accepts a version skew (so the lock
+is not a version guard), and the import needs `py.typed`. Each is now a stated property of
+decision 6 rather than a surprise in the implementation stage.
 
-**What the probe does not prove.** It ran in `/tmp`, against a two-module stand-in library,
-not the real skeleton; it therefore measures `uv`'s resolution and install behaviour, not the
-extraction itself. It says nothing about the runtime of the extracted code — that is what
-this repository's three layers and the committed probes are for.
+**What the probe does not prove.** It measures `uv`'s resolution and install behaviour against
+a two-module stand-in library, not the real skeleton, so it says nothing about the extraction
+itself or about the runtime of the extracted code — that is what this repository's three
+layers and the committed probes are for. `tools/path_dependency_probe.py` reproduces exactly
+this scope and no more.
 
 ## Consequences
 
 - **Two repositories to clone.** The clean-checkout guarantee of `AGENT.md` section 10 is
   restated as "clone both side by side" (decision 8, REQ-F-032). A checkout with only this
   repository does not resolve `as-platform` at all (*Verified facts*, (a)).
-- **The library version is not a compatibility guard.** A `path` source ignores the version
-  constraint in `dependencies` (*Verified facts*, (c)), so the contract between library and
-  application is the **compatibility matrix** (REQ-NF-019) and the lockfile, not a pin. A
-  stale lock is caught by `--locked` in CI, not by `uv sync` (*Verified facts*, (d)).
+- **The library version is not a compatibility guard, and the lock does not supply one.** A
+  `path` source ignores the version constraint in `dependencies` (*Verified facts*, (c)) and
+  `--frozen` accepts a version skew (*Verified facts*, (d)), so neither the pin nor the lock
+  constrains the library. The contract is the **compatibility matrix** (REQ-NF-019), enforced
+  by the library's own gate and this repository's gates running against the sibling checkout —
+  a gate failure, not a lock failure (decision 6).
 - **`py.typed` is a hard requirement.** Without it this repository's `make lint` fails, so it
   is part of the library's definition of done, not a later addition.
 - **The error model is one mechanism with three code sets** (decision 3). `REQ-F-023`'s text is
   **not reworded**; the delta is recorded in the SRS traceability note, and `AGENT.md` section
   4.3 is updated in the implementation commit.
-- **The three-layer suite is the anti-regression guard.** The only test edit the extraction
-  forces is the bounded import change of decision 3 — accepted by the maintainer on 2026-09-19
-  and the only class of test change the extraction is allowed to make; the assertions
-  themselves do not change (REQ-F-031).
+- **The three-layer suite is the anti-regression guard.** The only class of test change the
+  extraction forces is the bounded repoint of decision 3 — a read, an iteration or a type
+  annotation of a genuinely moved enum member, accepted by the maintainer on 2026-09-19 and
+  the only class the extraction is allowed to make. No assertion's expected value changes; the
+  one uniqueness/status-coverage test is **strengthened** in scope (REQ-F-031).
 - **The reference implementation has an update obligation.** When the library changes, this
   repository follows in the same piece of work: it is the first user, not a consumer at a
   distance (D8).
@@ -443,10 +536,11 @@ this repository's three layers and the committed probes are for.
 
 ## Gaps accepted
 
-- **No versioned consumption.** The library is consumed from a filesystem path, not a
-  registry, so there is no version resolution, no pin enforcement (*Verified facts*, (c)) and
-  no way for a third party to consume it without the checkout. Production: publish the
-  library and consume it by version, keeping the compatibility matrix as the contract.
+- **No versioned consumption, and no lockfile constraint either.** The library is consumed
+  from a filesystem path, not a registry, so there is no version resolution, no pin
+  enforcement (*Verified facts*, (c)), no lockfile constraint (*Verified facts*, (d)) and no
+  way for a third party to consume it without the checkout. Production: publish the library
+  and consume it by version, keeping the compatibility matrix as the contract.
 - **The interface is induced from two instances.** The extraction has exactly two samples
   (D2, ADR-0007 decision 9), so `PolicyDecision`, `Transport` and `StateStore` are shaped by
   them. A third use case may show a dimension neither has; the seams are the mitigation, not
@@ -464,6 +558,8 @@ this repository's three layers and the committed probes are for.
 - **`REQ-F-023`'s text names a location the split moves** (decision 3). The requirement is
   **not reworded** — the delta is recorded in the SRS traceability note, and `AGENT.md` section
   4.3 is updated in the implementation commit.
-- **The probe is scratch.** It is not committed and cannot be re-run from this repository
-  (*Verified facts*); the recorded output is the evidence, and the implementation stage cannot
-  re-measure it without rebuilding the throwaway library.
+- **The probe's measurements are only as good as its stand-in.** It measures `uv`'s resolution
+  and install behaviour against a two-module stand-in library, not the real skeleton, so it
+  says nothing about the extraction itself or the runtime of the extracted code. Its
+  **reproducible form is `tools/path_dependency_probe.py`** (*Verified facts*); what it cannot
+  prove is covered by this repository's three layers and the committed probes.

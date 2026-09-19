@@ -1061,7 +1061,13 @@ The ADR settles eight decisions, in its own words:
    stack shell move; `routing/`, `screening.py`, `caller_state.py`, `screening_data.py`, the
    config and the entry points stay; `as_app.sip_adapter` and `as_app.observability.*` stay as
    thin **re-export facades** so the by-path references in `tools/`, `tests/`, the ADRs and the
-   LLD keep resolving and the three layers remain the unchanged anti-regression guard.
+   LLD keep resolving and the three layers remain the unchanged anti-regression guard. The
+   `NextHop` **value object** moves too, into its own library module (`as_platform/hop.py`), with
+   `as_app.routing.rules` **re-exporting** it — a third facade — because the base controller and
+   `sip_adapter.build_request_uri` are typed on it and leaving it in `routing/` would make the
+   library import `as_app.routing.rules`, breaking `REQ-F-030`. The catalogue that *produces* the
+   hop list (`routing/rules.py`'s document, schema, `RuleSet` and `RuleSetStore`, and
+   `routing/engine.py`) stays use-case-specific in this repository.
 3. **The error model: one mechanism, per-family code sets, and the `REQ-F-023` delta.** Python
    forbids extending an `Enum` that has members, so the library owns a **memberless `ErrorCode`
    base** with `SIP_PHRASES`, `sip_status_for` and `AsError`; the skeleton codes
@@ -1069,14 +1075,28 @@ The ADR settles eight decisions, in its own words:
    in `src/as_app/errors.py`, and the anti-fraud gains `FraudErrorCode` in its own package.
    Every code, status and message is byte-identical (REQ-F-031), but `REQ-F-023` and `AGENT.md`
    §4.3 name a **location** (`src/as_app/errors.py`) that the split moves — a wording delta,
-   escalated the way §7 item 10 was rather than reworded by a stage (§5.2).
+   escalated the way §7 item 10 was rather than reworded by a stage (§5.2). The split forces one
+   **bounded test edit**, stated precisely rather than as "an import line": the permitted class
+   of test change is *"repoint a read, an iteration or a type annotation of a moved enum member
+   at the family enum that now owns it"*. No assertion's expected value changes; no test is
+   deleted, weakened or added; the one uniqueness/status-coverage test is **strengthened** in
+   scope to cover all three families. The five affected sites are enumerated in ADR-0009
+   decision 3 and the implementation stage reports the complete list in its acceptance evidence.
 4. **The controller seam and `PolicyDecision`.** `BaseCallController.apply_call_policy()` keeps
    the LLD's "single seam" name and calls one application hook, `decide(event) ->
    PolicyDecision`; `PolicyDecision` is plain data (`action`, `outbound_event`, `next_hops`,
-   `error`, `disposition`, `attributes`), so the base applies a decision without knowing either
-   use case's vocabulary. The base owns the failover form of `_relay_from_next_hop`; the
+   `error`, `disposition`, `attributes`, plus the reject trace/log strings `reject_trace_summary`
+   / `reject_log_message` / `reject_log_fields` and the relay `relay_log_message` /
+   `relay_log_fields`), so the base applies a decision without knowing either use case's
+   vocabulary. The base owns the failover form of `_relay_from_next_hop`; the
    anti-fraud's one-element hop list reproduces its no-failover behaviour exactly. The one-leg
    relaxation of LLD §9.6 becomes a stated base invariant, not an anti-fraud special case.
+   **The seam reproduces both reject and allow paths byte for byte:** the per-application trace
+   summary and log messages travel as **data**, because branching on "which application am I" is
+   forbidden; the peer-status key is an **overridable point** on the base (default
+   `name:address:port`; the anti-fraud overrides to `address:port` with a `"-"` fallback, and its
+   hop name `fraud_sbc_peer` is never rendered); and the base stores the serving hop as a
+   `NextHop` while `uaO` still receives the `(address, port)` tuple.
 5. **The two pluggable seams are interfaces only** (REQ-NF-020): `Transport` / `UdpTransport` and
    `StateStore` / `InMemoryStateStore`, one implementation each. No second transport, no external
    store, no load harness; the state-store seam sits **under** `CallerStateStore`, which stays
@@ -1101,11 +1121,12 @@ The ADR settles eight decisions, in its own words:
 **The consumption probe (design instrument, run and recorded in this stage).** A scratch probe
 under `/tmp/p10probe` — a throwaway `as_platform` (`VERSION` 0.4.0) and seven consumer variants
 (six top-level, one nested), each varying one `pyproject.toml` key — settled the mechanism of
-ADR-0009 decision 6. **It is
-not committed**, unlike `tools/anti_fraud_probe.py` (ADR-0007) and `tools/chained_as_probe.py`
-(ADR-0008): the recorded output is the evidence. Tool versions `uv 0.12.15`, CPython `3.10.12`.
-Four facts are **not** what a reader would assume, and each is now a stated property of the
-decision rather than a surprise in the implementation stage:
+ADR-0009 decision 6. The scratch form is not committed, but its **reproducible form is
+`tools/path_dependency_probe.py`** (registered in `tools/README.md`), which rebuilds the layout
+in a temporary directory, re-measures every fact and exits non-zero when any expectation does
+not hold — the `tools/capacity_probe.py` (P9.5) guard is the precedent. Tool versions
+`uv 0.12.15`, CPython `3.10.12`. Four facts are **not** what a reader would assume, and each is
+now a stated property of the decision rather than a surprise in the implementation stage:
 
 - **The source is mandatory.** A dependency key alone does not resolve — `uv sync` fails with
   *"Because as-platform was not found in the package registry … your project's requirements are
@@ -1116,23 +1137,30 @@ decision rather than a surprise in the implementation stage:
   `_editable_impl_as_platform.pth` link.
 - **The version pin is ignored.** `dependencies = ["as-platform>=99.0"]` with a `path` source
   installed the checkout's `0.4.0` and exited `0`, so the pin is not a guard.
-- **The lock is the guard and `--frozen` is not.** With the library bumped `0.4.0` → `0.5.0`,
+- **The lock is not a version guard either.** With the library bumped `0.4.0` → `0.5.0`,
   `uv sync --locked` refused (*"The lockfile at `uv.lock` needs to be updated, but `--locked`
-  was provided"*) while `uv sync --frozen` accepted the skew and installed `0.5.0` silently.
-  `py.typed` is a hard requirement for the same reason the lock is: without it `mypy` reports
-  `Skipping analyzing "as_platform": … missing library stubs or py.typed marker [import-untyped]`
-  and `make lint` fails. The `path` is resolved relative to the consuming `pyproject.toml`, so
-  `../as_platform` means a sibling of this repository's root and a deeper nesting does not find
-  it — which is what makes REQ-F-032's "side by side" exact.
+  was provided"*) while `uv sync --frozen` accepted the skew, installed `0.5.0` silently and
+  left the lock recording `0.4.0`. A `path` dependency has no version to resolve against, so
+  neither the pin nor the lock constrains the library; what catches a skew is a **gate** — the
+  library's own gate plus this repository's gates against the sibling checkout — and CI's
+  `uv sync --frozen` lock comment is true for **registry** dependencies and **not** for this
+  path dependency, so **every CI job needs a second checkout** of the library repository.
+
+`py.typed` is a hard requirement of the same gate: without it `mypy` reports `Skipping analyzing
+"as_platform": … missing library stubs or py.typed marker [import-untyped]` and `make lint`
+fails. The `path` is resolved relative to the consuming `pyproject.toml`, so `../as_platform`
+means a sibling of this repository's root and a deeper nesting does not find it — which is what
+makes REQ-F-032's "side by side" exact.
 
 **Obligations this design places on the implementation commit** (all stated in ADR-0009, none
 performed here): `AGENT.md` §10 (the restated clean-checkout sentence) and §4.3 (the error model's
-location, only if the maintainer rules that way), `README.md` and `docs/README.md` (the second
+location — **§4.3 is updated in the implementation commit**, because it is a structural document
+and `AGENT.md` §13 requires structural changes to update it), `README.md` and `docs/README.md` (the second
 checkout and the **ADR index range**, which both read "ADR-0001 … ADR-0008" today), the
 `docs/production-gaps.md` rows the ADR's *Gaps accepted* lists (no versioned consumption; the
 interface induced from two instances; no second transport / store / harness; no mock or console
 in the library; the naming debt; the library gate not in this repository's CI; the `REQ-F-023`
-location delta; the scratch probe), and `ACC-P10-*` in the acceptance stage.
+location delta; the probe's stand-in scope), and `ACC-P10-*` in the acceptance stage.
 
 **Unsettled at the time of this record, and recorded rather than hidden.**
 
@@ -1142,12 +1170,15 @@ location delta; the scratch probe), and `ACC-P10-*` in the acceptance stage.
   artefact before any code moves; the reason they are small is that the extraction changes no
   observable behaviour (REQ-F-031) and LLD §9.1 already states the shared/use-case-specific
   boundary.
-- **The error-model split forces one bounded test edit** (ADR-0009 decision 3): a unit test that
-  reads `AsErrorCode.CFG_*` / `PEER_*` / `FRAUD_*` must import the member from the family enum
-  that now owns it. The **assertions are unchanged**; only the module the member is read from
-  changes, because the member genuinely moved. This is the one place where the traceability
-  note's literal *"If that suite has to change to accommodate the extraction, the extraction is
-  wrong, not the tests"* meets the split, and it is reported plainly rather than smoothed over.
+- **The error-model split forces one bounded test edit** (ADR-0009 decision 3). The permitted
+  class of test change is *"repoint a read, an iteration or a type annotation of a moved enum
+  member at the family enum that now owns it"*. No assertion's expected value changes; no test
+  is deleted, weakened or added; the one uniqueness/status-coverage test is **strengthened** in
+  scope to cover all three families. The five affected sites are enumerated in ADR-0009
+  decision 3. This is the one place where the traceability note's literal *"If that suite has to
+  change to accommodate the extraction, the extraction is wrong, not the tests"* meets the
+  split; the note is **qualified in place** so it keeps its force — the extraction may not
+  change what a test asserts — while naming this bounded exception.
 - **`REQ-F-023` and `AGENT.md` §4.3 name a location the split moves**, and a stage may not reword
   a frozen requirement (§5.2). Escalated to the maintainer, like §7 item 10.
 
@@ -1173,19 +1204,39 @@ carries the `REQ-F-023` delta:
   `AGENT.md` §4.3 is a structural document, not a frozen requirement, so `AGENT.md` §13 requires
   it to be updated **in the implementation commit** to name the library mechanism and the three
   families.
-- **The bounded test edit is accepted and recorded.** A test that reads a moved enum member off
-  `AsErrorCode` (`CFG_*`, `PEER_*`, `FRAUD_*`) imports it from the family enum that now owns it;
-  the assertions do not change. `REQ-F-031` promises the three layers **stay green**, not that no
-  test file's import line ever changes — this is the only class of test change the extraction is
-  allowed to make.
+- **The bounded test edit is accepted and recorded, stated precisely.** The permitted class of
+  test change is *"repoint a read, an iteration or a type annotation of a moved enum member at
+  the family enum that now owns it"*; no assertion's expected value changes, and the one
+  uniqueness/status-coverage test is **strengthened** in scope to cover all three families.
+  `REQ-F-031` promises the three layers **stay green**, not that no test file's read, iteration
+  or annotation ever changes — this is the only class of test change the extraction is allowed
+  to make, and the five sites are enumerated in ADR-0009 decision 3.
 - **`TrunkMessage` is deleted with the move, not carried into the library.** It is provably dead
   (two references, both inside its own module: `src/as_app/sip_adapter.py:41` and `:122`), and
   carrying known-dead code into a brand-new artefact is the wrong default; the deletion is
   behaviour-neutral and is performed as part of the move, with its `__all__` entry. LLD §9.1's
   friction note now records that P10 removed it rather than inherited it.
 
-**The design-stage review gate is the next step and has not run.** The stage is not claimed to
-pass it, and no code has moved.
+**P10 design stage (stage 2) — the design-stage review gate and its findings (2026-09-19).** The
+gate §5.2 requires ran against `dc1ab18` and returned **FAIL: one blocker, three major and four
+minor findings**. Per §5.2 the findings are fixed **inside the stage** and the stage is **not
+re-reviewed**. All eight are closed in this commit; **no code moved** — nothing under `src/` or
+`tests/` changes, and the only added file is the design instrument `tools/path_dependency_probe.py`
+(§8 item 2's "no code moves before the plan is reviewed" still holds, and the implementation stage
+has not started). Each finding, and the one-line fix:
+
+- **Finding 1 [blocker] — `NextHop` had no home, so the library would have imported `as_app.routing.rules`, breaking `REQ-F-030`.** `NextHop` now moves into the library in its own module (`as_platform/hop.py`) and `src/as_app/routing/rules.py` **re-exports** it (a third facade), with the reasoning — why the hop value object is skeleton while the catalogue that produces the list stays use-case-specific — recorded in ADR-0009 decision 2, LLD §11.1 and the plan's item 2.
+- **Finding 2 [major] — the permitted test change was understated as "only an import line".** It is now stated precisely as *"repoint a read, an iteration or a type annotation of a moved enum member at the family enum that now owns it"*, with the five affected test sites enumerated in ADR-0009 decision 3, the uniqueness/status-coverage test marked **strengthened** in scope, and the SRS traceability note's *"the extraction is wrong, not the tests"* sentence **qualified in place** (ADR-0009 decision 3, LLD §11.3, SRS note, plan items 3 and the two stage records).
+- **Finding 3 [major] — the seam could not reproduce the two applications' reject/allow paths.** `PolicyDecision` now carries the reject trace summary, the reject log message, the reject extra trace/log fields and the allow-path originate log message plus extra log fields; the peer-status key is an **overridable** point (default `name:address:port`, anti-fraud overrides to `address:port` with a `"-"` fallback and never renders `fraud_sbc_peer`); the base stores the serving hop as a `NextHop` while `uaO` still receives the `(address, port)` tuple; and the per-application **strings vs forbidden branching** trade-off is stated honestly (ADR-0009 decision 4, LLD §11.2, plan item 4).
+- **Finding 4 [major] — the lockfile guard was claimed to catch a library move; the design said otherwise.** ADR-0009 decision 6 now states the honest position: with a `path` source the lockfile **cannot constrain** the library's version, so the lock does **not** catch a move; `.github/workflows/ci.yml`'s lock comment is true for **registry** dependencies and **not** for the path dependency; **every CI job needs a second checkout**; what catches a skew is a **gate**; and the residual is an accepted gap for `docs/production-gaps.md` in the implementation commit (ADR-0009 decision 6, LLD §11.5 and §11.6, plan item 6).
+- **Finding 5 [minor] — the "separate repository, not a uv workspace" fact was implicit.** It is now stated explicitly in ADR-0009 decision 1 and LLD §11.1.
+- **Finding 6 [minor] — `docs/architecture/lld.md:12` listed `TrunkMessage` in the `sip_adapter.py` row.** `TrunkMessage` is removed from that row (it is deleted with the move, ADR-0009 decision 2).
+- **Finding 7 [minor] — the plan record said `AGENT.md` §4.3 is updated "only if the maintainer rules that way".** Reconciled: §4.3 **is** updated in the implementation commit, because it is a structural document and `AGENT.md` §13 requires it (ADR-0009 decision 3, LLD §11.6, plan's obligations paragraph).
+- **Finding 8 [minor] — the probe was a scratch directory that a reader could not re-run.** Its **reproducible form `tools/path_dependency_probe.py`** is added and registered in `tools/README.md`, cited in ADR-0009 as the reproducible form of its *Verified facts*, and it exits non-zero when any measured expectation does not hold (its recorded output is in ADR-0009 *Verified facts*). It is a design instrument, not a test: pytest does not collect it and it is not in `make test` or CI.
+
+The gate record above is the stage's close. The HLD/LLD deltas the earlier records listed as
+"not written" are now written (HLD §10, LLD §11), and the stage's own documents are internally
+consistent (ADR-0009 vs HLD §10 and LLD §11 re-read).
 
 ### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 

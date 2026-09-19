@@ -148,7 +148,11 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
   the SIP signalling, the `AS-*` error codes and the per-instance console feed are identical,
   and the existing three-layer suite (the layer counts are on record in
   `docs/acceptance/report.md`) stays green. If that suite has to change to accommodate the
-  extraction, the extraction is wrong, not the tests.
+  extraction, the extraction is wrong, not the tests — with one bounded exception, recorded in
+  ADR-0009 decision 3: a unit test that reads, iterates or annotates a **genuinely moved** enum
+  member may be repointed at the family enum that now owns it. No assertion's expected value
+  changes, and the single uniqueness/status-coverage test is strengthened in scope. The
+  extraction may not change what a test asserts.
   **The one-way independence (`REQ-F-030`) has a direction.** `src/anti_fraud_as/**` imports
   `as_app` in several places by design (ADR-0007 decision 9) — the reuse of the
   use-case-agnostic skeleton — so the invariant that is assertable, and the one the library

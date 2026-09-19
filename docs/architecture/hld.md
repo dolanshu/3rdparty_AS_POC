@@ -518,6 +518,7 @@ imports neither application (REQ-F-030).
 | error mechanism | the memberless `ErrorCode`, `SIP_PHRASES`, `sip_status_for`, `AsError`, and the `SkeletonErrorCode` family | decision 3 |
 | observability | structured logging, counters/dispositions/peer status, per-Call-ID trace and console feed | decision 2 |
 | sippy adapter | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `outbound_call_id`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `CallLeg` | decision 2 |
+| hop | the `NextHop` value object, in its own module (`hop.py`) so `sip_adapter` and `call_controller` can both import it without a cycle; `as_app.routing.rules` re-exports it | decision 2 |
 | bootstrap plumbing | `ShutdownController`, `install_signal_handlers`, `check_port_available` | decision 2 |
 | controller shell | `BaseCallController`, `BaseCallMap`, `PolicyDecision` | decision 4 |
 | stack shell | `BaseAsStack` | decision 4 |
@@ -555,8 +556,9 @@ symmetry with sections 8 and 9; its content is the absence of a flow delta (REQ-
   documented entry points keep working from a clean checkout, with the second checkout in place
   (REQ-F-032).
 - **The three test layers stay green** — unit, integration and e2e (REQ-F-031, `AGENT.md`
-  section 11). The one bounded exception is recorded in ADR-0009 decision 3 and changes no
-  assertion.
+  section 11). The one bounded exception is recorded in ADR-0009 decision 3: it changes no
+  assertion's expected value, and the single uniqueness/status-coverage test is **strengthened**
+  in scope to cover all three error families.
 
 **The extraction is a pure refactor with no wire-visible change.** It moves the skeleton both
 AS instances already share into a library in a new repository; it changes where code lives, not

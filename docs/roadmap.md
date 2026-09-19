@@ -805,6 +805,10 @@ as "not started" after the plan recorded it done, and its P8a row named
 Per-item status and handover notes are kept in `docs/phase2-plan.md` **on `phase2`**, which
 every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
 
+- **P8 — anti-fraud AS. [Status: Done]** (2026-09-19, on `phase2`). A pointer only: the plan,
+  status, review-gate findings and the P9 entry state live in `docs/phase2-plan.md` §3 on
+  `phase2`; the acceptance evidence is in `docs/acceptance/report.md`.
+
 ## Conventions
 
 - **Single source of truth:** rules live in `AGENT.md`; live status lives here; evidence

@@ -469,6 +469,90 @@ stills ship the defect, and the repository cancels what it armed itself, from it
   unreachable hops stay armed for `timerB` = 32 s regardless of what the application gives
   up on, which is what a load run must expect to find.
 
+- **Status: done (2026-09-19), worked on `phase2`; not merged into `main`, not tagged.**
+  Stages 1–5 of §5.1 were completed, each with its own read-only review gate (§5.2).
+  Acceptance items **ACC-P8-001 … ACC-P8-006** accepted with evidence in
+  `docs/acceptance/report.md`; `VERSION` / `pyproject.toml` / `uv.lock` bumped together to
+  **`0.6.0`** with the CHANGELOG node `[0.6.0] - 2026-09-19`. Merging into `main` and tagging
+  remain the maintainer's steps (`AGENT.md` §13).
+
+**What was learned (2026-09-19).**
+
+1. **The reject assertion that matters is the absence of the second leg, not the `608`.** A
+   reject that quietly relayed the call first would still answer `608` to the caller. Asserting
+   that the **core side received no INVITE** — with a positive control proving the recorder
+   sees the *allowed* relay in the same test — is what actually pins REQ-F-021.
+2. **`Feature-Caps` selects no status code.** RFC 8688 §3.4 forwards the `608` as the final
+   response whether or not `sip.608` was declared; the declaration only decides whether the
+   announcement obligation was met. So the AS must not branch on it, and the unmet-obligation
+   case is made **observable** (`sip_608_declared`, counter `reject.sip_608_undeclared`)
+   instead of silent (ADR-0007 decision 5).
+3. **sippy renders `Feature-Caps` as `Feature-caps`.** `SipGenericHF.getCanName()` capitalises
+   only the first letter, so the on-wire spelling differs from the source spelling. The
+   integration layer asserts the on-wire form, never the source string — the same caveat the
+   LLD already records for `P-Charging-Vector`. Accepted, RFC-conformant (§7.3.1).
+4. **`SIP_PHRASES[608]` is load-bearing.** sippy puts the reason phrase it is handed on the wire
+   verbatim, so without the map entry the caller would read
+   `SIP/2.0 608 Server Internal Error` (ADR-0007 *Verified facts*).
+5. **The P8a lesson 5 scaled exactly as predicted.** The second process's timers are its own:
+   `FraudAsStack.stop()` cancels its loop timers, `FraudCallMap.dispose()` cancels the per-call
+   no-answer timers, and `cancel_transaction_timers()` runs **before** sippy's own
+   `SipTransactionManager.shutdown()`. `test_stopping_the_process_leaves_no_timer_armed`
+   asserts both the premise and the property.
+6. **The `608` reject adds no retransmission population** (it originates no transaction), so
+   P8 does not deepen the P8a capacity consequence — that stays P9.5's to measure.
+7. **Duplication here is friction, not a design.** The internal API and the relay shell are
+   mirrored, not shared; that is deliberate (ADR-0007 decision 9, no framework) and is recorded
+   as a gap row that the P10 extraction inherits.
+
+**Review gates (§5.2) — findings, and the stage in which each was fixed.** After every stage, a
+read-only agent **other than the one that produced it** inspected the stage; a finding is fixed
+inside its stage and the stage is not re-reviewed.
+
+- **Stage 1 — requirements.** The gate raised reputation **decay**, the second process's own
+  **stop path**, and the reconciliation of the UAS-only reject with `REQ-F-002`'s "B2BUA only";
+  all three were folded into `REQ-F-016`, `REQ-F-018`, `REQ-F-021` and the SRS traceability note.
+- **Stage 2 — design.** The gate asked the §5.2 design question — requirements covered, and the
+  probe result actually supporting the design; the design artefacts are ADR-0007 and the
+  committed `tools/anti_fraud_probe.py`, and the caveats the stage **accepted** (the
+  `Feature-caps` casing, and the unmet announcement obligation for a UAC that does not declare
+  `sip.608`) live in the ADR's *Verified facts* and *Gaps accepted*.
+- **Stage 3 — implementation.** Findings that could not be fixed without inventing a **new,
+  undesigned** behaviour were **registered, not improvised**: the unbounded retained-controller
+  set (`FraudCallMap.controllers`) and the internal-API/relay-shell duplication are rows in
+  `docs/production-gaps.md`.
+- **Stage 4 — tests (rework done in this stage).** The gate found the coverage **over-claimed**;
+  the test stage was reworked by a fresh member and the accurate positions were left visible:
+  `REQ-NF-015` is satisfied by the committed **probe** plus the new **on-wire** assertion of
+  `SIP/2.0 608 Rejected` (the probe is **not** a test and does **not** run in CI); `REQ-NF-012`'s
+  "a restart loses it" half and `REQ-NF-013`'s "would require an announcement" half have **no
+  test** — they are non-behaviours covered by the gap register; `CallScenario.expect_status` is a
+  **dead Phase 1 field** (set by tests, read nowhere); the `AS-FRAUD-006` fallback and the
+  unreachable `next_hop is None` branch are **untested**. All four are accepted and stated in the
+  report, not hidden.
+- **Stage 5 — acceptance.** Its output is the `## Phase 2 — P8 anti-fraud AS` section of
+  `docs/acceptance/report.md` and the `ACC-P8-*` rows in `docs/acceptance/criteria.md`: the
+  §4.8 evidence was executed from scratch by an agent that wrote none of stages 1–4, the CI
+  position is recorded honestly (no run can exist for `phase2`), and the capture gap is recorded
+  as **missing** rather than manufactured.
+
+**Note for a fresh conversation — how the P8 write side was staffed (2026-09-19).** For the write
+side, **one** member (`p8-designer`) produced stages 2–4 instead of a member per stage; the
+maintainer flagged that. The §5.2 review gates were nevertheless performed, by **independent
+read-only agents** (which also keeps the one-writing-member rule intact — see `AGENT.md` §14.1).
+Stage 4's rework and stage 5 were then done by **fresh, correctly-named** members (`p8-tests`,
+`p8-acceptance`). Recorded here so a fresh conversation does not have to re-derive either the
+staffing deviation or the fact that the gates it did not skip were actually run.
+
+**Entry state for P9 (set 2026-09-19).** Two B2BUA-capable AS processes now exist, each with
+configurable peers and ports and both green on `phase2`, so P9 needs **no iFC emulation**:
+pointing AS-1's next hop at AS-2's listen address is a `next_hops`-catalogue change (§3 P9).
+Two properties P9 inherits: the anti-fraud AS relays to a **single** next hop
+(`FRAUD_SBC_PEER_*`), and **two B2BUAs in series produce two Call-IDs** — the anti-fraud leg is
+screened on the first Call-ID and the number-translation leg originates its own, so cross-AS
+correlation is still unsolved and remains P9's known issue (§3 P9). The reject path adds no
+retransmission population, so P9.5 inherits the P8a timer population unchanged.
+
 ### P9 — Chained demo
 
 - **Goal.** `SBC → AS-1 (anti-fraud) → AS-2 (number translation) → core`, running and
@@ -776,6 +860,14 @@ maintainer reviewed this on 2026-09-19 and **deferred** it: the tension is known
 is left as it is for now, and it is **not** to be "helpfully" corrected by a later agent. It is
 recorded here only so that a future conversation meets the ruling instead of re-deriving the
 question.
+
+**How it was actually handled at the P8 close (2026-09-19).** With that wording left unchanged,
+P8 was closed by following step 3 as it reads: `VERSION`, `pyproject.toml` and `uv.lock` were
+bumped together to **`0.6.0`** — the bump for a new capability, the Phase 1 precedent being
+`0.5.0` for M4 and `0.5.1` for the defect-fix P8a — and a dated **`[0.6.0] - 2026-09-19`**
+CHANGELOG node was opened at the item's own close, on `phase2`. The tension with "one version
+node per milestone" is real and still deferred: P8 is not a milestone, and the node exists
+because §5.4 step 3 asks for it.
 
 Execution follows `AGENT.md` §14.2: the main agent plans and tracks status and delegates
 implementation to a team-mode member (`mode = "acceptEdits"`); it does not implement.

@@ -8,6 +8,66 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-19 — P8 anti-fraud AS (Phase 2)
+
+### Added
+
+- A **second, independently runnable AS** — the anti-fraud / unwanted-call AS
+  (`python -m anti_fraud_as.main`; ADR-0007 and `docs/phase2-plan.md` §3 P8). It screens the
+  **calling** party of a trunk INVITE and returns a verdict: a caller the operator's screening
+  data allows is relayed as a B2BUA with the Request-URI, the SDP body and the pass-through
+  header set unchanged and **no header added**; a caller on the block list is answered
+  **`608 Rejected`** (RFC 8688) from the UAS side, with **no second leg**, no media and no
+  `Call-Info`. It has its own SIP listen port (default `5062`), its own declarative screening
+  file `config/caller_screening.yaml`, its own internal API / console feed, its own startup
+  self-check and its own stop path. It reuses the use-case-agnostic modules of `as_app` by
+  direct import — no framework, no registry (ADR-0007 decision 9).
+- The **verdict** is a pure function (`anti_fraud_as/screening.py`): inputs are caller
+  reputation (decayed over time), a per-caller call-rate window and block/allow lists; the
+  signal order is allow list → block list → rate window → reputation and the deciding signal
+  is named. Cross-call state lives in a **process-level, in-memory** store
+  (`anti_fraud_as/caller_state.py`) with an injected clock, never in the per-call controller
+  (D9). A restart loses it — a registered POC gap, closed in P11 by the pluggable state store.
+- New `AS-FRAUD-001 … AS-FRAUD-006` codes in the shared error model
+  (`src/as_app/errors.py`): the three rejection reasons map to `608`, the screening-data
+  failures to `500`, and `SIP_PHRASES[608] = "Rejected"` is what puts the reason phrase on the
+  wire (ADR-0007). The verdict, its signals/score and the matched list entry are observable
+  through counters, the Call-ID keyed trace and the read-only internal-API payloads.
+- The mock S-SBC's UAC declares `Feature-Caps: *;+sip.608` in its INVITE, so the
+  signalling-only AS may answer `608` without owing an announcement (RFC 8688 §3.4).
+- `make fraud` (run the anti-fraud AS on its own ports) and `make demo-fraud` (two calls: one
+  allowed and relayed, one rejected with `608`); `make probe-608` runs the design probe.
+- `tools/demo_fraud_call.py` (the narrated two-call screening demo) and
+  `tools/anti_fraud_probe.py` (the design probe that verified sippy emits `608 Rejected`
+  through `CCEventFail((status, phrase, None))` — a design instrument, not a test, not in CI).
+- Test layers: `tests/e2e/test_fraud_call_flows.py`,
+  `tests/integration/test_fraud_screening_path.py`, and the unit files
+  `test_caller_state.py`, `test_screening_engine.py`, `test_screening_data.py`,
+  `test_fraud_configuration.py`, `test_fraud_error_model.py`.
+
+### Verified
+
+- The P8 acceptance run: **`ACC-P8-001 … ACC-P8-006` accepted** with evidence in
+  `docs/acceptance/report.md` — the verification commands with real output, Call-ID keyed
+  allow/reject log excerpts, the honest CI position, and the capture gap recorded rather than
+  filled. Local gate: `ruff format --check .` → 86 files, `ruff check .` → clean, `mypy` → no
+  issues in 28 source files, `pytest tests -q` → **237 passed**. `make demo` (the Phase 1 path,
+  unchanged) and `make demo-fraud` both exit `0`.
+- The `608` reject path over real UDP: the probe's `final status line: SIP/2.0 608 Rejected`
+  and `CCEventFail 608 'Rejected' reject path: OK`, and the integration test's assertion of the
+  full on-wire line `SIP/2.0 608 Rejected` with no `Call-Info` and no second-leg INVITE.
+- **No CI run exists for `phase2`**: `.github/workflows/ci.yml` triggers on `main` only, so the
+  run is recorded as the maintainer's required post-merge action, not as an observed result.
+
+### Notes
+
+- Version node: `0.6.0` — a new user-visible capability (a second AS use case). The Phase 1
+  precedent is `0.5.0` for M4; P8a, a defect fix, stayed `0.5.1`. The `VERSION` /
+  `pyproject.toml` / `uv.lock` trio was updated together and the editable install re-synced, so
+  `as_app.__version__` reports `0.6.0` and the baseline test holds.
+- Worked on `phase2` (P8 has no branch of its own — `docs/phase2-plan.md` §4). Tagging is the
+  maintainer's step; agents do not tag.
+
 ## [0.5.1] - 2026-09-18
 
 ### Added

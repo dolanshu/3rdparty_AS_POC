@@ -64,8 +64,11 @@ Production Gap Register (§3).
 - **No real IMS core.** No S-CSCF, I-CSCF, HSS, MRF or real S-SBC; the mock only has to
   behave like one on the trunk.
 - **No media.** No RTP handling, no transcoding, no DTMF, no MRF interaction.
-- **No performance or capacity work.** No calls-per-second targets, no load tests, no
-  benchmarking claims.
+- **No published performance or capacity figures.** No calls-per-second targets and no
+  benchmarking claims. **Amended 2026-09-19** (`docs/phase2-plan.md` §8 item 1, maintainer
+  approval): a **capacity harness** is permitted — P9.5 and P11 build load and observation
+  to find where the boundary is — but any published figure remains out of scope (D10).
+  The harness reports constraints, never a headline number.
 - **No production-grade HA, multi-tenancy or auditing.**
 - **No charging.** No CDRs, no RADIUS, no settlement.
 - **No transport beyond UDP.** TCP and TLS are not implemented.

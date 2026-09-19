@@ -1270,13 +1270,21 @@ Not blocking, but each must be handled rather than discovered mid-implementation
 One change to the rules themselves, one approval that an existing rule already requires, and
 one re-classification resolved by ruling. None may be treated as incidental.
 
-1. **`AGENT.md` §2 scope change.** *"No performance or capacity work … no benchmarking
-   claims"* must be relaxed to permit a capacity harness while **continuing to forbid
-   published benchmark figures** (D10).
-2. **`AGENT.md` §14 rule 3 approval (no unconfirmed refactors).** Extracting the skeleton in
-   P10 is a structural refactor, and that rule already requires an explicit, approved plan
-   **before any code moves**. It is listed here so the plan is put to the maintainer
-   deliberately rather than assumed.
+**Both open items were granted by the maintainer on 2026-09-19**, in the conversation that
+resumed P9 after the Phase 1 `Call-ID` fix: *"我给你全权授权，你自己判断，执行到 phase2 结束"*
+— full authority to judge and execute through the end of Phase 2. That grant is what items 1
+and 2 below now rest on; they are recorded here as **approved**, not assumed, and neither may
+be treated as incidental by a later agent.
+
+1. **`AGENT.md` §2 scope change — APPROVED 2026-09-19.** *"No performance or capacity work …
+   no benchmarking claims"* is relaxed to permit a capacity harness while **continuing to
+   forbid published benchmark figures** (D10). The relaxation is scoped to P9.5 and P11 and
+   does **not** license a calls-per-second or latency claim anywhere; D10 still governs.
+2. **`AGENT.md` §14 rule 3 approval (no unconfirmed refactors) — APPROVED 2026-09-19.**
+   Extracting the skeleton in P10 is a structural refactor, and that rule requires an explicit,
+   approved plan **before any code moves**. The approval is for the extraction to be *planned
+   and executed*; the plan itself is still written first, in P10, and reviewed before code
+   moves — the approval waives the "do not start" gate, not the planning step.
 3. **P6 → P8a promotion — never separately approved; resolved by ruling (2026-09-18).**
    P8a began as roadmap item P6, parked as *Optional/Pending*; no approved decision ever
    recorded its promotion to the Phase 2 work sequence or its framing here as a Phase 2

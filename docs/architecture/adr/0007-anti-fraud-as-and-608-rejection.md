@@ -54,7 +54,7 @@ The three dimensions that make it orthogonal to number translation:
 | Dimension | Number translation (Phase 1) | Anti-fraud AS (P8) |
 | --- | --- | --- |
 | State | none — each INVITE is decided alone | **cross-call** — rate window and reputation decay span calls |
-| Data source | the routing rule file | a **separate** list/reputation source |
+| Data source | the routing rule file | a **separate, operator-supplied** list/reputation source — external to the AS's own logic: a local data file in the POC, a service in production |
 | Decision result | rewrite the Request-URI | **reject or allow** — no rewrite at all |
 
 Judged on topic interest as well, unwanted calls are the dominant abuse problem for
@@ -88,26 +88,55 @@ for INVITE … that pass validation by STIR"* — because handing a suspected-ab
 contact address gives that caller a vector for attacking the intermediary.
 
 Calls rejected by this AS are, by definition, the *suspected-abusive* ones, so omitting
-`Call-Info` is what section 6 recommends rather than a corner cut. The `jCard`/`JWS`
-redress mechanism is therefore deferred to an optional enhancement.
+`Call-Info` is what section 6 recommends rather than a corner cut. **Section 3.3** is the
+counterpart on the UAC side: a conforming UAC **MUST** include `sip.608` in the INVITE's
+`Feature-Caps`. The three sections together describe one negotiation — §3.1 (when
+`Call-Info` is mandatory), §3.3 (what the UAC declares) and §3.4 (how the response is sent
+and who plays the announcement) — so §3.1 and §3.3 are cited here to show the omission is
+**lawful under the RFC**, not a shortcut taken around it. The `jCard`/`JWS` redress
+mechanism is therefore deferred to an optional enhancement.
 
-### 5. `Feature-Caps: *;+sip.608` protects ADR-0006
+### 5. The reject path always answers `608`; `Feature-Caps` sets the announcement obligation
 
-RFC 8688 section 3.4 requires that when the UAC has **not** declared `sip.608`, the
-intermediary **MUST play an announcement**. A signalling-only AS cannot play one. Section
-3.4 also states that *"if the UAC indicates support for 608 and the intermediary issues a
-608, life is good"*.
+The reject path is **unconditional**: the AS always answers a rejected INVITE with `608`,
+whether or not the UAC declared `sip.608`. RFC 8688 section 3.4 requires the `608` to be
+forwarded **as the final response to the INVITE** even when an announcement is played, and
+places the announcement duty on the element that inserts the `sip.608` capability token.
+The declaration therefore changes *who owes the caller an announcement*, **not** which
+status code the caller receives. Branching to a different code when `sip.608` is absent
+would contradict section 3.4 and would misreport an automated anti-fraud decision as
+something else.
 
-The mock S-SBC's UAC side therefore declares **`Feature-Caps: *;+sip.608`** in its INVITE.
-Declaring it keeps the reject path free of media and therefore keeps ADR-0006 intact: the
-AS can emit `608` without opening an RTP stream, an MRF interaction or an announcement
-port. Without the declaration the AS would have to choose between two unacceptable
-outcomes — play media (overturning ADR-0006) or send a `608` the UAC is not prepared to
-handle.
+The three RFC 8688 obligations that surround the code:
 
-A **real** UAC that does not declare `sip.608` would require a media announcement. That is
-an **accepted gap, not a hidden defect**: it is registered below and in
-`docs/production-gaps.md` in the implementation commit.
+| Section | Obligation |
+| --- | --- |
+| **§3.1** | `Call-Info` **MUST** be included unless there are indicators the caller would use the contents for malicious purposes — rejected calls are exactly those with such indicators (Decision 4) |
+| **§3.3** | A conforming UAC **MUST** include `sip.608` in the INVITE's `Feature-Caps` — the counterpart of the declaration, and why the mock UAC sends it |
+| **§3.4** | The `608` is forwarded as the final response **regardless**, and the element that inserts `sip.608` owns the announcement |
+
+**What this means for a signalling-only AS.** The mock S-SBC's UAC side declares
+**`Feature-Caps: *;+sip.608`** in its INVITE. In the POC the UAC has declared support, so
+the section 3.4 announcement obligation **does not arise** and the reject path stays
+media-free — which keeps ADR-0006 intact: no RTP stream, no MRF interaction, no announcement
+port. When a **real**
+UAC does not declare `sip.608`, the announcement obligation is **unmet** — this AS cannot
+play one — but the AS **still answers `608`**. That is the registered gap, not a different
+status code.
+
+**The gap is made observable.** Because the obligation differs with the declaration while
+the behaviour does not, the AS records the declaration state on every INVITE it screens
+(`sip_608_declared: true|false`, `docs/architecture/lld.md` section 9). The declaration is
+therefore visible in the Call-ID keyed trace and in the structured log, so a reviewer sees
+which calls the AS answered without being able to meet §3.4's announcement duty, instead of
+that distinction disappearing.
+
+**Interoperability assumption — not verified.** In a real IMS the `Feature-Caps` header
+originates at the **UAC** and has to be passed through by the S-SBC for this AS to see it
+(RFC 3261 section 16.6, proxy behaviour). The POC cannot demonstrate that hop: the mock
+UAC, the mock S-SBC and the AS all run the same sippy stack on loopback, so the declaration
+arrives end-to-end by construction and the pass-through is untested. It is recorded below
+and in `docs/production-gaps.md` as an **assumption**, not as verified behaviour.
 
 ### 6. The allow path adds no header
 
@@ -185,71 +214,120 @@ Command:
 uv run python tools/anti_fraud_probe.py
 ```
 
-Observed output (ports are ephemeral and vary per run; the rest is verbatim):
+Observed output (ports and Call-ID are ephemeral and vary per run; the rest is verbatim):
 
 ```text
 python      : 3.10.12
 sippy       : 2.4.2
-stack port  : 127.0.0.1:45894  (client port 47246)
+stack port  : 127.0.0.1:45872  (client port 47528)
 reject      : 608 Rejected  via CCEventFail((status, phrase, None))
 --- INVITE sent -------------------------------------------------
-INVITE sip:+8613800138000@127.0.0.1:45894;user=phone SIP/2.0
-Via: SIP/2.0/UDP 127.0.0.1:47246;branch=z9hG4bK608probe0001;rport
+INVITE sip:+8613800138000@127.0.0.1:45872;user=phone SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:47528;branch=z9hG4bK608probe0001;rport
 Max-Forwards: 70
 From: <sip:+86216180001@127.0.0.1>;tag=608probe-from-0001
 To: <sip:+8613800138000@127.0.0.1>
-Call-ID: 608probe-93364@example.invalid
+Call-ID: 608probe-30165@example.invalid
 CSeq: 1 INVITE
-Contact: <sip:127.0.0.1:47246>
+Contact: <sip:127.0.0.1:47528>
 Feature-Caps: *;+sip.608
 Content-Length: 0
 --- responses received -------------------------------------------
 [1] SIP/2.0 100 Trying
-Via: SIP/2.0/UDP 127.0.0.1:47246;branch=z9hG4bK608probe0001;rport=47246
+Via: SIP/2.0/UDP 127.0.0.1:47528;branch=z9hG4bK608probe0001;rport=47528
 From: <sip:+86216180001@127.0.0.1>;tag=608probe-from-0001
 To: <sip:+8613800138000@127.0.0.1>
-Call-ID: 608probe-93364@example.invalid
+Call-ID: 608probe-30165@example.invalid
 CSeq: 1 INVITE
 Server: AS POC anti-fraud probe
 Content-Length: 0
 [2] SIP/2.0 608 Rejected
-Via: SIP/2.0/UDP 127.0.0.1:47246;branch=z9hG4bK608probe0001;rport=47246
+Via: SIP/2.0/UDP 127.0.0.1:47528;branch=z9hG4bK608probe0001;rport=47528
 From: <sip:+86216180001@127.0.0.1>;tag=608probe-from-0001
-To: <sip:+8613800138000@127.0.0.1>;tag=37a6f743dd178ae6ba1b7b09325da5b0
-Call-ID: 608probe-93364@example.invalid
+To: <sip:+8613800138000@127.0.0.1>;tag=c011c5ca806da8f273df0e04dc753797
+Call-ID: 608probe-30165@example.invalid
 CSeq: 1 INVITE
 Server: AS POC anti-fraud probe
 Content-Length: 0
 handler: CCEventTry -> CCEventFail((608, 'Rejected', None))
 --- verdict --------------------------------------------------------
 final status line: SIP/2.0 608 Rejected
-CCEventFail 608 reject path: OK
+expected         : SIP/2.0 608 Rejected
+CCEventFail 608 'Rejected' reject path: OK
 ```
 
 **Conclusion.** sippy emits an arbitrary 6xx through `CCEventFail((status, phrase, None))`
 over real UDP: the answering leg turned the event into `SIP/2.0 608 Rejected` on the wire.
 The design assumption behind the reject path holds, and the implementation can rely on it.
-The probe exits non-zero when the observed status line does not carry the requested code, so
-it is a guard rather than a printout.
+The probe compares the whole status line — **code and reason phrase** — and exits non-zero on
+any mismatch, so it is a guard rather than a printout.
+
+**sippy emits the phrase verbatim.** A second run with `--status 608 --phrase Decline`
+produced `SIP/2.0 608 Decline`, i.e. the stack does **not** normalise the reason phrase
+through a status-code table; it puts on the wire exactly the phrase the caller supplied.
+The consequence for the design is direct: the production reject path is the only thing that
+can get the phrase right, so `AsError.sip_phrase` must resolve `608` to `Rejected` —
+which is why `SIP_PHRASES` has to gain the `608` entry (`docs/architecture/lld.md`
+section 9.5). Without it the caller would see `SIP/2.0 608 Server Internal Error`.
 
 ### `Feature-Caps` leaves the mock as `Feature-caps`
 
 `Feature-Caps` is not a header sippy has a dedicated class for, so it is rendered by
 `SipGenericHF`, whose `getCanName()` returns `name.capitalize()` — it capitalises **only the
 first letter**. The on-wire spelling is therefore *not* the spelling written in
-`src/s_sbc_mock/uac.py`:
+`src/s_sbc_mock/uac.py`.
+
+The `608` probe above **cannot** evidence this: it hand-writes its INVITE on a plain UDP
+socket, so its `Feature-Caps` line is the probe's own text rather than sippy's rendering.
+The evidence comes instead from running the **real mock UAC** through the real stack and
+reading the message the receiving side got. Reproducible with the committed capture tool:
+
+```bash
+uv run python tools/capture_call.py --output-dir captures/probe
+grep -rin 'feature-caps' captures/probe/
+```
+
+Observed:
+
+```text
+captures/probe/01-in-invite-trunk.txt:18:Feature-caps: *;+sip.608
+```
+
+The captured file is the INVITE as it arrived at the AS, verbatim (header block; the ports
+and Call-ID are ephemeral):
+
+```text
+INVITE sip:+8613800138000@127.0.0.1:45573 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:48693;rport;branch=z9hG4bKa0ded27260b940285d6787c2ac61b2b6
+Max-Forwards: 70
+From: <sip:+86216180001@127.0.0.1>;tag=44219a443794445067ac659605ad6ef0
+To: <sip:+8613800138000@127.0.0.1>
+Call-ID: e7a6992929daac36ec40bd5d63903d0f
+CSeq: 779528955 INVITE
+Contact: <sip:+86216180001@127.0.0.1:48693>
+Expires: 300
+User-Agent: 3rd-party AS POC mock S-SBC
+P-Asserted-Identity: <sip:+86216180001@ims.example.invalid>
+P-charging-vector: icid-value=poc-office-to-mobile;icid-generated-at=ims.example.invalid
+P-visited-network-id: ims.example.invalid
+Privacy: none
+Subject: office-to-mobile
+Organization: office-to-mobile
+Priority: normal
+Feature-caps: *;+sip.608
+Content-Type: application/sdp
+Content-Length: 230
+```
+
+So:
 
 ```text
 declared in src/s_sbc_mock/uac.py : "Feature-Caps: *;+sip.608"
-rendered by sippy                 : "Feature-caps: *;+sip.608"
+on the wire from the mock UAC     : "Feature-caps: *;+sip.608"
 ```
 
-Measured by running the mock UAC through the real stack and reading the bytes the AS
-received (the same path `tools/capture_call.py` uses); the inbound INVITE carried:
-
-```text
-Feature-caps: *;+sip.608
-```
+`captures/` is gitignored, so the command is the artefact, not the file; nothing captured
+is committed.
 
 **This is not a defect.** RFC 3261 section 7.3.1 makes header field names
 **case-insensitive**, so `Feature-caps` and `Feature-Caps` are the same header field, and
@@ -288,9 +366,18 @@ Each of the following is destined for `docs/production-gaps.md` in the **impleme
 commit** — stated here, not registered now, because the register records behaviour that
 exists.
 
-- **No media announcement for a UAC that does not declare `sip.608`.** RFC 8688 section 3.4
-  requires one; a signalling-only AS cannot provide it (Decision 5). Production: play the
-  announcement, or refuse to emit `608` towards such a UAC.
+- **The RFC 8688 section 3.4 announcement obligation is unmet for a UAC that does not
+  declare `sip.608`.** The AS still answers `608` — the obligation is *not met*, not avoided,
+  and it is visible rather than silent: the declaration is recorded as `sip_608_declared` on
+  every screened INVITE (Decision 5). Production: play the announcement, or accept traffic
+  only from UACs that declare `sip.608`.
+- **`Feature-Caps` pass-through by the S-SBC is assumed, not verified (interoperability).**
+  In a real IMS the `sip.608` declaration originates at the UAC and must be forwarded by the
+  S-SBC to reach this AS (RFC 3261 section 16.6, proxy behaviour). The POC's mock UAC, mock
+  S-SBC and AS share one sippy stack on loopback, so the hop that has to pass the header
+  through is not exercised and the declaration arrives by construction (Decision 5).
+  Production: verify that the S-SBC forwards `Feature-Caps` unchanged before relying on the
+  declaration.
 - **No `Call-Info` / `jCard` / `JWS` redress mechanism.** Lawful under RFC 8688 section 6
   (Decision 4), but a production AS serving a jurisdiction that mandates redress would need
   it.
@@ -307,6 +394,9 @@ exists.
   capitalised (*Verified facts*, `Feature-Caps` leaves the mock as `Feature-caps`).
   Cosmetic and RFC-conformant, but a byte-for-byte
   conformance test against a real S-SBC would see it.
-- **A missing calling identity fails open.** An INVITE without any calling-party identity
-  cannot be screened; the POC allows it and records that it could not screen. Production
-  would use network-provided identity or reject.
+- **A missing calling identity fails open — security-relevant.** An INVITE without any
+  calling-party identity cannot be screened. The POC deliberately **allows** it and records
+  `identity_present=false` rather than rejecting, because no attestation mechanism is in
+  scope (STIR is out of scope, Decision 7) and rejecting on a missing optional header would
+  break legitimate traffic. Production: screen on a network-provided identity or on STIR
+  attestation, or fail closed.

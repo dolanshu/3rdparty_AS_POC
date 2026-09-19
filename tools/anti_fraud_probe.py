@@ -28,6 +28,16 @@ phrase. It prints the request it sent, the response that actually came back and 
 handler path it took. ``CallController._reject_on_trunk`` is the production code this
 mirrors.
 
+The verdict compares the **status line as a whole** — code *and* reason phrase — because
+the design depends on ``SIP_PHRASES[608] == "Rejected"``: a stack that emitted ``608``
+with a different phrase (for example the ``Server Internal Error`` fallback) has to fail
+the probe, not pass on the status code alone. The probe exits non-zero on any mismatch.
+
+sippy emits the supplied phrase **verbatim** (observed: ``--phrase Decline`` produced
+``SIP/2.0 608 Decline``), so the phrase on the wire is entirely the caller's. The
+production path therefore has to supply ``Rejected`` from ``SIP_PHRASES`` itself; the
+integration layer exercises that real map, this probe pins the stack's behaviour.
+
 Usage:
     uv run python tools/anti_fraud_probe.py
     uv run python tools/anti_fraud_probe.py --status 608 --phrase Rejected
@@ -238,11 +248,17 @@ def run_probe(status: int = 608, phrase: str = "Rejected") -> int:
         print(f"[{index}] " + data.decode(errors="replace").replace("\r\n", "\n").strip())
     for line in handler_path:
         print(f"handler: {line}")
-    final_line = responses[-1].decode(errors="replace").split("\r\n", 1)[0]
+    final_line = responses[-1].decode(errors="replace").split("\r\n", 1)[0].strip()
+    expected_line = f"SIP/2.0 {status} {phrase}"
     print("--- verdict --------------------------------------------------------")
     print(f"final status line: {final_line}")
-    ok = final_line.startswith("SIP/2.0") and str(status) in final_line
-    print(f"CCEventFail {status} reject path: {'OK' if ok else 'FAILED'}")
+    print(f"expected         : {expected_line}")
+    # Both the code and the reason phrase are asserted: the design depends on
+    # ``SIP_PHRASES[608] == "Rejected"``, so a stack that emitted 608 with the wrong
+    # phrase (for example the ``Server Internal Error`` fallback) must fail the probe
+    # rather than pass on the status code alone.
+    ok = final_line == expected_line
+    print(f"CCEventFail {status} {phrase!r} reject path: {'OK' if ok else 'FAILED'}")
     return 0 if ok else 1
 
 

@@ -206,7 +206,7 @@ it, running both instances locally collides on `5060`, which is the trap recorde
 
 | Interface | Direction | Protocol | Notes |
 | --- | --- | --- | --- |
-| SIP trunk (reject) | S-SBC → anti-fraud AS → S-SBC | SIP over UDP | The AS terminates the INVITE and answers it **from the UAS side only**: `608 Rejected`, no second leg, no `Call-Info` (ADR-0007) |
+| SIP trunk (reject) | S-SBC → anti-fraud AS → S-SBC | SIP over UDP | The AS terminates the INVITE and answers it **from the UAS side only**: `608 Rejected`, no second leg, no `Call-Info` (ADR-0007). The answer is **unconditional** — it does not depend on the UAC's `Feature-Caps` declaration, which only bears on RFC 8688 section 3.4's announcement obligation and is recorded as `sip_608_declared` |
 | SIP trunk (allow) | S-SBC → anti-fraud AS → S-SBC | SIP over UDP | The AS relays the INVITE **unchanged** as a B2BUA (Request-URI and headers untouched, **no added header**) and relays the response back |
 | Calling identity | inside the INVITE | `P-Asserted-Identity` | The screening input: the AS inspects the *calling* party, not the called number (D4) |
 | Internal API | console → anti-fraud AS | HTTP (REST) + WebSocket | `GET /healthz`, `/api/v1/metrics`, `/api/v1/screening`, `/api/v1/traces`, `WS /ws/events` |
@@ -268,4 +268,12 @@ The reject is emitted exactly as the two-leg path emits its `404`/`603`: a `CCEv
 carrying `(608, "Rejected", None)` on the answering leg. The observable difference is that
 the originating leg (`uaO`) is **never created**, so the controller must tolerate a call
 with a single leg for its whole lifetime (`docs/architecture/lld.md` section 9).
+
+**The reject does not branch on the declaration.** RFC 8688 section 3.4 requires the `608`
+to be forwarded as the final response to the INVITE and places the announcement duty on the
+element that inserts `sip.608` (ADR-0007 decision 5). The presence or absence of
+`Feature-Caps: *;+sip.608` therefore selects no status code: the AS always answers `608`,
+and an absent declaration only means the announcement obligation is unmet. Because that
+distinction has to be visible, every screened INVITE carries the declaration state
+(`sip_608_declared`) in the trace and the structured log.
 

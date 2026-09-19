@@ -317,8 +317,38 @@ already exist and are not number-translation specific. No new abstraction is int
 | `observability/logging.py` | the fixed structured-log field set (`AGENT.md` section 4.3) |
 | `observability/metrics.py` | counters, dispositions and peer status |
 | `observability/tracing.py` | per-Call-ID trace, console feed and `SipMessageRecorder` |
-| `sip_adapter` — `cancel_transaction_timers`, `is_allowed_peer`, `extract_called_number`, `PASSTHROUGH_HEADERS`, `CallLeg`, `TrunkMessage` | B2BUA/trunk plumbing that describes the trunk, not the service |
+| `sip_adapter` — `cancel_transaction_timers`, `is_allowed_peer`, `PASSTHROUGH_HEADERS`, `CallLeg` | B2BUA/trunk plumbing that describes the trunk, not the service |
+| `sip_adapter.extract_called_number` | the SIP-URI **user-part** parser; it is used here on the `P-Asserted-Identity` URI, not on the called number (see below) |
 | `bootstrap` — `ShutdownController`, `install_signal_handlers`, `check_port_available` | process plumbing: signals, cooperative shutdown, port probing |
+
+**The screening input is the calling party, and that is a different primitive from the
+first AS.** Number translation reads the called number from the Request-URI; this use case
+reads the **calling** party from `P-Asserted-Identity` on the trunk INVITE (3GPP TS 24.229;
+the asserting node is the network, not this AS). The extraction is specified exactly, so it
+is not left to the implementer:
+
+```python
+# FraudCallController, on the captured trunk request (section 9.6):
+if request.countHFs("p-asserted-identity") == 0:
+    return None  # no identity -> fail-open, recorded
+pai = request.getHFBody("p-asserted-identity")  # sippy SipPAssertedIdentity
+return pai.address.url.username  # e.g. "+86216180001"
+```
+
+`getHFBody()` returns the parsed `SipPAssertedIdentity` (a `SipAddressHF`), whose
+`.address.url.username` is the user part — the same attribute the mock UAS already reads as
+`request.getRURI().username` (`src/s_sbc_mock/uas.py`). `countHFs()` guards the absent
+header, because `getHFBody()` raises `IndexError` when the header is missing.
+
+Two consequences worth stating, because both are friction P10 inherits:
+
+- `sip_adapter.extract_called_number` parses a URI string with `^sips?:([^@;?]+)@`; it is
+  reused here for its *URI-user-part* behaviour only, and its name is wrong for this caller.
+  The mismatch is not fixed now (renaming it would touch the first AS), but it is recorded.
+- `sip_adapter.TrunkMessage` already has a `calling_number` field, but it is **never
+  populated and `TrunkMessage` is not used anywhere** in the codebase today; the controller
+  reads the sippy request directly, as the first AS does. The unused plain-data view is
+  noted rather than adopted or deleted (`AGENT.md` section 14 rule 4).
 
 **What deliberately stays use-case-specific** (not generalised, not shared):
 
@@ -346,17 +376,25 @@ and fail silently while single-call unit tests still passed. The controller ther
 the store only through **already-computed plain values**:
 
 ```text
-FraudCallMap.recv_request(request)
-        │  (process-level, created once)
+FraudCallMap.recv_request(request)     # process-level entry: peer allowlist, then
+        │                              #   creates one controller for this INVITE
         ▼
-CallerStateStore.observe(caller, now)  ->  CallerSignals        # plain data, no state leak
+FraudCallController                    # PER CALL: uaA, maybe uaO, the verdict
         │
+        │  apply_call_policy()  <-- the single seam (section 9.6)
+        ▼
+CallerStateStore.observe(caller, now)  ->  CallerSignals        # process-level, injected clock
+        │                                  (already-computed plain values, no state leak)
         ▼
 screening.screen(signals, policy)      ->  ScreeningDecision    # pure function
-        │
-        ▼
-FraudCallController                     # per call: uaA, maybe uaO, the verdict
 ```
+
+**The seam is the per-call controller, not the call map.** `FraudCallMap.recv_request()`
+does exactly two things — enforce the peer allowlist and create a `FraudCallController` —
+mirroring `TrunkCallMap` of the first AS. The verdict is taken inside
+`FraudCallController.apply_call_policy()`, and this section and section 9.6 state the same
+thing; there is one authoritative answer, so an implementer cannot place `observe()` and
+`screen()` on the call map by accident.
 
 ### 9.3 Data structures
 
@@ -478,6 +516,12 @@ disagree; `AS-FRAUD-004/005` are configuration failures and map to `500` like th
 `AS-RULE-00x` family; `AS-FRAUD-006` is the internal fallback when the pure engine returns
 no verdict.
 
+Nothing else in the stack will correct a wrong phrase: sippy puts the phrase it is given on
+the wire **verbatim** (observed — `--phrase Decline` produced `SIP/2.0 608 Decline`,
+`docs/architecture/adr/0007-anti-fraud-as-and-608-rejection.md`, *Verified facts*), so
+`SIP_PHRASES[608]` is the only thing that makes the caller see `608 Rejected`. The design
+instrument `tools/anti_fraud_probe.py` asserts the whole status line for exactly this reason.
+
 ### 9.6 The verdict seam and the one-leg relaxations
 
 `FraudCallController.apply_call_policy()` is the **single seam** where the verdict is taken
@@ -521,6 +565,19 @@ leg is created, so the reject adds **no** outbound transaction and no new retran
 population. On the **allow** path the controller relays the INVITE with the Request-URI and
 headers **unchanged** — `PASSTHROUGH_HEADERS` are copied as in the first AS, and **no
 header is added** (ADR-0007 decision 6).
+
+**The reject does not branch on `Feature-Caps`.** RFC 8688 section 3.4 requires the `608`
+to be forwarded as the final response to the INVITE and places the announcement duty on the
+element that inserts the `sip.608` capability token (ADR-0007 decision 5). The controller
+therefore answers `608` **whether or not** the INVITE declared `sip.608`: the declaration
+selects no status code, and there is no "608 if declared, something else if not" branch to
+write. What the declaration does change is the section 3.4 **announcement obligation**,
+which a signalling-only AS cannot meet. So that the distinction is not invisible, the
+controller reads the declaration off the INVITE (`Feature-Caps` carrying the `+sip.608`
+token, RFC 8688 section 3.3) and records it as **`sip_608_declared`** on every screened
+INVITE — in the Call-ID keyed trace and in the structured log (section 9.8). A reviewer then
+sees, per call, which ones the AS answered without being able to satisfy the announcement
+duty.
 
 **Missing calling identity.** `P-Asserted-Identity` is the screening input. When it is
 absent, no `block_list` / `allow_list` / reputation input exists; the AS records
@@ -605,6 +662,18 @@ by the wrong process and silently point a peer at the wrong port; the observabil
 runtime knobs are shared because they describe the process, not the instance. Every default
 is loopback.
 
+**No new third-party dependency (REQ-NF-014).** The second AS is built **only** from the
+Python 3.10 standard library and the dependencies the repository already pins
+(`sippy==2.4.2` for the stack; `pydantic` / `pydantic-settings` for the settings model;
+`pyyaml` for the screening data file; `fastapi` / `uvicorn` for the internal API). Nothing
+is added to `pyproject.toml` or `uv.lock`: the screening engine is plain arithmetic, the
+window and reputation stores are `collections`-based, the clock is `time.monotonic`, and the
+configuration model reuses the `pydantic-settings` mechanism already present. The
+implementation preserves this by importing no package that is not already a dependency, and
+by keeping the `pyproject.toml` `[project.optional-dependencies]` and `uv.lock` unchanged;
+the only `pyproject.toml` edit it makes is adding the new package to the wheel `packages`
+list (section 9.10).
+
 **New log fields.** Appended per event on top of the fixed field set of section 7 (that set
 is never changed silently):
 
@@ -616,6 +685,8 @@ is never changed silently):
 | `reputation` | `12.5` | effective score at the decision instant |
 | `calls_in_window` | `6` | calls of the caller inside the window, this one included |
 | `list_entry` | `BL-0007` | identifier of the matched list entry, when one matched |
+| `identity_present` | `true` · `false` | whether a calling identity was available at all; `false` is the recorded fail-open case (section 9.6) |
+| `sip_608_declared` | `true` · `false` | whether the INVITE declared `sip.608`; `false` marks a call the AS rejected while RFC 8688 section 3.4's announcement obligation stayed unmet (sections 9.6, ADR-0007 decision 5) |
 
 The matched list entry travels in the trace's `attributes` rather than in the
 routing-named `TraceEvent.rule_id`; overloading a field named after routing would make the
@@ -631,7 +702,9 @@ without reading the code. Three surfaces carry them, and none of them is on the 
   `record_counter(name)` method over a `counters: Counter[str]` field, surfaced in
   `MetricsSnapshot` and in the `/api/v1/metrics` payload as a new key. The anti-fraud AS
   records `verdict.allow` / `verdict.reject` and one counter per deciding signal
-  (`screen.block_list`, `screen.rate_window`, `screen.reputation`); the number-translation
+  (`screen.block_list`, `screen.rate_window`, `screen.reputation`), plus
+  `reject.sip_608_undeclared` for the RFC 8688 section 3.4 gap (a rejected call whose INVITE
+  did not declare `sip.608`); the number-translation
   AS never writes the bucket, so its payload only gains an empty key. This is a small
   additive change to an existing class — no interface, no registration, no base class, so it
   does not create the framework P8 must not build. Rejections are counted a second time,
@@ -639,8 +712,10 @@ without reading the code. Three surfaces carry them, and none of them is on the 
   outcome still goes through `record_call_disposition`, which records
   `CallDisposition.REJECTED` for a rejected call.
 - **Trace.** The Call-ID keyed trace carries `verdict`, `screen_source`, `screen_reason`,
-  `reputation`, `calls_in_window` and `list_entry` as event attributes (section 9.8), so a
-  rejected call explains itself in the console exactly as a routed call names its rule.
+  `reputation`, `calls_in_window`, `list_entry`, `identity_present` and `sip_608_declared` as
+  event attributes (section 9.8), so a rejected call explains itself in the console exactly
+  as a routed call names its rule — including whether the RFC 8688 section 3.4 announcement
+  obligation was met for that call.
 - **Console.** `GET /api/v1/screening` exposes the block/allow lists and the window and
   reputation parameters, read-only; the console renders the verdict on the trace. The
   coverage delta is in section 9.10.
@@ -665,9 +740,29 @@ in the same commit (`AGENT.md` sections 12 and 13), and covers the console delta
 | New deploy service (`anti-fraud-as`) | `deploy/docker-compose.yml`, `docs/operations/deployment.md` |
 | New package in the wheel build | `pyproject.toml` `[tool.hatch.build.targets.wheel] packages` |
 | New `AS-FRAUD-*` error codes and `SIP_PHRASES[608]` | `docs/operations/troubleshooting.md` (keyed by `AS-*`), `docs/architecture/lld.md` section 4 (already extended) |
+| New design artefact `docs/architecture/adr/0007-*.md` | the **ADR index range** in **`README.md`** and **`docs/README.md`**, which both read *"ADR-0001 … ADR-0006"* today, becomes *"ADR-0001 … ADR-0007"*, with the one-line description of ADR-0007 alongside the others |
+| New tool `tools/anti_fraud_probe.py` | **`tools/README.md`** gains its row: what it proves (`608 Rejected` over real UDP via `CCEventFail((status, phrase, None))`), its usage line, and that it asserts code **and** phrase |
+| New service lifecycle | **`docs/operations/runbook.md`** gains start / stop / reload / inspect for the anti-fraud service, alongside the existing AS entries (`AGENT.md` section 4.2) |
+| README positioning sentence | **`README.md`'s first sentence** — the AS *"performs number translation and intelligent routing"* — stops being true once a second use case lands (`docs/phase2-plan.md` section 7 item 1). It must name both uses; it is the repository's front door and the one sentence a reviewer reads first |
 | New gaps accepted | `docs/production-gaps.md` |
 | New acceptance items `ACC-P8-*` and evidence | `docs/acceptance/criteria.md`, `docs/acceptance/report.md` |
 | Item close (version and CHANGELOG) | `VERSION`, `CHANGELOG.md` — per `docs/phase2-plan.md` section 5.4, tagging remains the maintainer's step |
+
+**Independent-demo wiring.** The HLD section 8.2 draws `MOCK → FRAUD`, so the design has to
+say how the mock is pointed at the *second* AS rather than the first. It already can be: the
+mock's target is `MockConfig.as_address` / `MockConfig.as_port` (`src/s_sbc_mock/main.py`,
+default `127.0.0.1:5060`, exposed as `--as-address` / `--as-port`), so the implementation run
+points it at the anti-fraud AS's `FRAUD_SIP_LISTEN_ADDRESS` / `FRAUD_SIP_LISTEN_PORT`
+(`127.0.0.1:5062`) — a configuration change only, which is the `AGENT.md` section 8 rule.
+
+- A **`Makefile` target** (for example `make demo-fraud`) runs the independent anti-fraud
+  demo, mirroring `make demo`: start the anti-fraud AS, point the mock at `5062`, place one
+  call that is allowed and one that is rejected, and print the verdict and the `608`.
+- `deploy/docker-compose.yml` needs a **second mock instance** (or an override of the
+  existing one's `as_*` environment) so the compose topology can drive either AS; the port
+  matrix in `docs/operations/deployment.md` records which mock talks to which AS.
+- **P8 demonstrates each AS independently.** The chained `SBC → AS-1 → AS-2 → core`
+  topology is P9's; nothing here wires the two AS instances in series.
 
 **Console coverage delta (`AGENT.md` section 4.4 / section 16).** The console must show the
 second instance's flow, not just the first's:

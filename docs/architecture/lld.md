@@ -535,8 +535,8 @@ right phrase on the trunk:
 SIP_PHRASES: Final[dict[int, str]] = { ..., 608: "Rejected" }
 ```
 
-`AsError.sip_phrase` resolves through `SIP_PHRASES`, and `608` is **not** in that map today,
-so without this entry the reject would go out with the fallback phrase `Server Internal
+`AsError.sip_phrase` resolves through `SIP_PHRASES`, and the `608: "Rejected"` entry is what
+makes the reject read correctly: without it the phrase would fall back to `Server Internal
 Error`. With it, the reject emits `CCEventFail((608, "Rejected", None))` on the answering
 leg, which sippy renders as `SIP/2.0 608 Rejected` — verified on the wire
 (`docs/architecture/adr/0007-anti-fraud-as-and-608-rejection.md`, *Verified facts*).

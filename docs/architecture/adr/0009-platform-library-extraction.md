@@ -255,8 +255,10 @@ the split; the note is **qualified in place** so it keeps its force — the extr
 change what a test *asserts* — while naming this bounded exception. **The maintainer's ruling
 (2026-09-19): the bounded edit is accepted and recorded.** `REQ-F-031`'s promise is that the
 three layers **stay green**, which holds — it is not a promise that no test file's read,
-iteration or annotation ever changes. These four bounded classes are the only test changes the
-extraction is allowed to make.
+iteration or annotation ever changes. These four bounded classes bound only the edits the
+extraction itself — the implementation stage — makes to the existing suite. The `Tests` stage of
+P10 (`docs/phase2-plan.md` section 5.1, stage 4) *adds* tests as its own deliverable; that work is
+neither inside these four classes nor in conflict with them.
 
 ### 4. The controller seam: the base owns the relay, the application owns the decision, `PolicyDecision` is the one value between them
 

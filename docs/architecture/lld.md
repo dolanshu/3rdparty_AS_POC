@@ -1135,6 +1135,15 @@ the design has to carry per-application **strings**, and it is preferable to bra
 emit, at which level, on which leg — and the application supplies the *vocabulary* as data,
 exactly as it already supplies the error code and the disposition.
 
+**The application owns the reject conversion** (ADR-0009 decision 4). `decide()` returns a
+reject `PolicyDecision` for a failure it cannot relay and does **not** let an `AsError`
+escape: the base applies the decision as data and cannot build the application's reject
+vocabulary, so the conversion belongs beside the decision (`CallController.decide` turns the
+routing engine's raises — `AS-ROUTE-004` / `500`, `AS-ROUTE-003` / `480` — into the reject
+decision itself, in place of the pre-extraction `_reject_on_trunk` catch). A `RELAY` decision
+always names at least one hop; an application with no hop to relay to rejects the call
+itself.
+
 **The peer-status key is an overridable point on the base.** The default renders
 `name:address:port` (the translation AS's `_next_hop_peer`); the anti-fraud **overrides** it to
 render `address:port`, with the `"-"` fallback when no hop is configured. The anti-fraud's

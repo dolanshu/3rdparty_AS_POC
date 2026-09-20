@@ -117,6 +117,12 @@ class CallController(BaseCallController):
     def decide(self, event: Any) -> PolicyDecision:
         """Translate and route the call, then report the decision to the base.
 
+        The application owns the conversion of a failure it cannot relay: a routing
+        failure the engine raises (``AS-ROUTE-004``, ``AS-ROUTE-003``) becomes a reject
+        decision here rather than an :class:`AsError` escaping to the base, because the
+        base applies data and cannot build this application's reject vocabulary
+        (ADR-0009 decision 4).
+
         Args:
             event: The ``CCEventTry`` raised by the answering leg.
 
@@ -126,19 +132,22 @@ class CallController(BaseCallController):
         """
         original = event.getData()
         called_number = str(original[2])
-        decision = self.route_call(self.call_id, called_number)
+        try:
+            decision = self.route_call(self.call_id, called_number)
+        except AsError as routing_error:
+            # The engine could not produce a decision at all — an empty translation or a
+            # hop it cannot resolve. ``self._decision`` stays ``None``, so the trunk answer
+            # is the pre-P10 one: the error's own status, counted as ``REJECTED``, with no
+            # rule id (the old ``reject_on_trunk`` fell back to ``REJECTED`` when the
+            # decision was ``None``).
+            return self._reject_decision(
+                routing_error, disposition=CallDisposition.REJECTED, rule_id=None
+            )
         self._decision = decision
         if decision.disposition is not Disposition.ROUTE:
             error = self.reject_error(decision, self.call_id)
-            return PolicyDecision(
-                action=PolicyAction.REJECT,
-                error=error,
-                disposition=self.disposition_for(decision),
-                attributes={"rule_id": decision.rule_id or ""},
-                reject_trace_summary=(
-                    f"{error.sip_status} {error.sip_phrase} relayed to the trunk leg"
-                ),
-                reject_log_message="call rejected by routing policy",
+            return self._reject_decision(
+                error, disposition=self.disposition_for(decision), rule_id=decision.rule_id
             )
         translated = decision.translated_number or called_number
         # The second leg gets its own Call-ID: sippy regenerates ``From``, ``To`` and
@@ -295,6 +304,37 @@ class CallController(BaseCallController):
                 break
         return AsError(
             code, decision.reason, call_id=call_id, context={"rule_id": decision.rule_id or ""}
+        )
+
+    @staticmethod
+    def _reject_decision(
+        error: AsError, *, disposition: CallDisposition, rule_id: str | None
+    ) -> PolicyDecision:
+        """Build the reject decision that answers the trunk leg with ``error``.
+
+        Both reject paths share this construction so their trace summary and log message
+        cannot drift: a routing decision that is not a route, and a failure the engine
+        raised before it could decide.
+
+        Args:
+            error: The :class:`AsError` carrying the SIP status and the internal code.
+            disposition: Outcome to count for this call, supplied rather than derived.
+            rule_id: Identifier of the deciding rule, or ``None`` when the engine raised
+                before a rule could decide.
+
+        Returns:
+            The reject :class:`PolicyDecision`, with this AS's trace summary and log
+            message.
+        """
+        return PolicyDecision(
+            action=PolicyAction.REJECT,
+            error=error,
+            disposition=disposition,
+            attributes={"rule_id": rule_id or ""},
+            reject_trace_summary=(
+                f"{error.sip_status} {error.sip_phrase} relayed to the trunk leg"
+            ),
+            reject_log_message="call rejected by routing policy",
         )
 
 

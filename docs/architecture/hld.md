@@ -478,7 +478,7 @@ graph LR
     end
     PLAT -. "build-time import<br/>(no wire, no port)" .-> AS
     PLAT -. "build-time import<br/>(no wire, no port)" .-> FRAUD
-    FRAUD -. "imports as_app's skeleton surface (ADR-0007 decision 9)" .-> AS
+    FRAUD -. "version chain only (from as_app import __version__)" .-> AS
 ```
 
 **This repository is the library's reference implementation (REQ-F-029): the library is
@@ -517,7 +517,7 @@ imports neither application (REQ-F-030).
 | --- | --- | --- |
 | error mechanism | the memberless `ErrorCode`, `SIP_PHRASES`, `sip_status_for`, `AsError`, and the `SkeletonErrorCode` family | decision 3 |
 | observability | structured logging, counters/dispositions/peer status, per-Call-ID trace and console feed | decision 2 |
-| sippy adapter | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `outbound_call_id`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `CallLeg` | decision 2 |
+| sippy adapter | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `outbound_call_id`, `build_request_uri`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `TRANSACTION_TIMER_NAMES`, `CallLeg` | decision 2 |
 | hop | the `NextHop` value object, in its own module (`hop.py`) so `sip_adapter` and `call_controller` can both import it without a cycle; `as_app.routing.rules` re-exports it | decision 2 |
 | bootstrap plumbing | `ShutdownController`, `install_signal_handlers`, `check_port_available` | decision 2 |
 | controller shell | `BaseCallController`, `BaseCallMap`, `PolicyDecision` | decision 4 |
@@ -529,8 +529,11 @@ imports neither application (REQ-F-030).
 
 **The direction rule the library must satisfy is one-way (REQ-F-030):** `as_platform` imports
 **neither** `as_app` nor `anti_fraud_as`, so it carries the skeleton and not either use case.
-The other direction is unchanged: `src/anti_fraud_as/**` continues to import `as_app`'s skeleton
-surface as it does today (ADR-0007 decision 9), and the assertable invariant
+The other direction changed with the extraction: `src/anti_fraud_as/**` now imports the
+**library** (`as_platform`) directly for the skeleton, so the extraction replaced ADR-0007
+decision 9's *mechanism* — direct import from `as_app` — while that decision's *substance*, a
+second process and not a framework, still holds. The only `as_app` import left in that package
+is the version chain (`from as_app import __version__`), and the assertable invariant
 `src/as_app/**` ↛ `anti_fraud_as` (REQ-F-026, REQ-F-030) still holds.
 
 ### 10.4 Key message flows

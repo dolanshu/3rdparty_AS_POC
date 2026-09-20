@@ -214,12 +214,15 @@ one place in the signalling path that can change what is dialled.
 | `AS-FRAUD-006` | 500 | screening produced no verdict | the pure engine returned no usable verdict (internal fallback, P8) |
 | `AS-INT-001` | 500 | unexpected internal failure | anything else |
 
-`AS-FRAUD-*` is the anti-fraud AS's family and lives in the **same** authoritative model
-(`src/as_app/errors.py`), as REQ-F-023 requires: a second process must not grow a second
-error vocabulary. Section 9.4 states the rows together with the `SIP_PHRASES` change that
-makes `608` carry the phrase `Rejected`; `SIP_PHRASES` currently has no `608` entry, so
-without it `AsError.sip_phrase` would fall back to `Server Internal Error` and the reject
-would go out with the wrong phrase.
+`AS-FRAUD-*` is the anti-fraud AS's family, and REQ-F-023's intent still holds: a second
+process must not grow a second error vocabulary. After the P10 extraction the split is by
+family over one shared mechanism — the mechanism and the `SkeletonErrorCode` family are the
+library's, `AsErrorCode` is `src/as_app/errors.py` and `FraudErrorCode` is
+`src/anti_fraud_as/errors.py` (section 11.3, ADR-0009 decision 3). REQ-F-023's own text still
+names `src/as_app/errors.py` and is deliberately not reworded; the location delta is recorded
+in the SRS traceability note. Section 9.4 states the rows together with the `SIP_PHRASES`
+entry that makes `608` carry the phrase `Rejected`, so the reject goes out with `608 Rejected`
+rather than falling back to `Server Internal Error`.
 
 ## 5. Process model and threading
 
@@ -323,12 +326,15 @@ implementation commit mirrors it into `AGENT.md`, `README.md` and `docs/README.m
 | `screening.py` | The **pure** verdict: `screen()` over plain-data inputs and outputs. No sockets, no global state, no clock (REQ-NF-011) |
 | `caller_state.py` | The **process-level** store (D9): the call-rate window and the reputation ledger. The only place a clock is read, and it is an injected `Callable[[], float]` |
 | `screening_data.py` | The declarative data file: Pydantic model, load-time validation and `ScreeningDataStore` with size+mtime reload detection |
-| `internal_api.py` | The anti-fraud AS's console payload builders and its own API server (see the duplication note below) |
+| `internal_api.py` | The anti-fraud AS's console payload builders and its API server, a thin facade over the library's shell (see the row below) |
 
-**What is shared, imported from `as_app`.** Reuse is by direct import of modules that
-already exist and are not number-translation specific. No new abstraction is introduced.
+**What is shared, imported from the library (`as_platform`).** P10 moved this shared surface
+out of `as_app` into the library, so reuse is now by direct import from `as_platform` — the
+modules below; `as_app` keeps a re-export facade at each path so the references in `tools/`
+and `tests/` keep resolving (section 11.1 is the authoritative post-extraction module split).
+No new abstraction was introduced.
 
-| Shared from `as_app` | Why it is not use-case specific |
+| Shared from the library (`as_platform`) | Why it is not use-case specific |
 | --- | --- |
 | `errors` | the one authoritative `AS-*` model; REQ-F-023 adds `AS-FRAUD-*` to it |
 | `observability/logging.py` | the fixed structured-log field set (`AGENT.md` section 4.3) |
@@ -375,7 +381,7 @@ Two consequences worth stating, because both are friction P10 inherits:
 | `screening.py` | the verdict algorithm *is* the use case; there is exactly one implementation, so an interface would be a guess |
 | `caller_state.py` | cross-call state is introduced by this use case; a pluggable state store is P11, and `docs/phase2-plan.md` D9 forbids solving it early |
 | `screening_data.py` | the schema is this use case's data; forcing a common schema with the routing rules would shape the platform like these two samples |
-| `internal_api.py` | the app factory and server are **duplicated on purpose**: `as_app.internal_api.create_internal_api_app` is bound to a `RuleSetStore` and to `/api/v1/rules`, so reusing it would mean parameterising it into the very framework P8 must not build. The duplication is friction for P10 and is recorded as such |
+| `internal_api.py` | the app factory and server were **duplicated on purpose** under ADR-0007 decision 9 — `as_app.internal_api.create_internal_api_app` was bound to a `RuleSetStore` and to `/api/v1/rules`, so reusing it would have meant parameterising it into the very framework P8 must not build. **P10 collapsed the duplication**: the shell (the app factory, `InternalApiServer` and the payload builders) moved into the library, generalised over a payload provider, and both `internal_api.py` modules are now thin facades that supply their own payloads (section 11.1, ADR-0009 decision 2) |
 
 ### 9.2 The D9 ownership boundary
 

@@ -229,14 +229,34 @@ remains an entry, per `AGENT.md` section 6 — and the exact set of `[project].d
 entries is now pinned rather than left open. The assertion's expected *fact* is unchanged; no
 test is added, deleted or weakened.
 
+**(class 3) A test that asserted a bound through a private attribute now asserts it through
+the public API.** The state-store seam (decision 5) removes the window's private deque, so
+`tests/unit/test_caller_state.py` — `test_a_callers_window_is_bounded` and
+`test_the_store_is_bounded_across_callers` — can no longer read `store._window` /
+`bounded._window._events`. The fact asserted is unchanged: a caller's window holds at most
+`max_calls + 1` calls, and the tracked-caller cap evicts oldest-first. The bound is now
+asserted through the public `store.observe(caller).calls_in_window` count, which observes the
+same property through the public surface in place of the private attribute. The class may only
+**strengthen**, never weaken: it adds and removes no assertion, changes no expected value, and
+observes the same property through the surface the seam left rather than the one it removed.
+
+**(class 4) A fixture that enumerates the top-level modules a package may import gains the
+library.** `tests/unit/test_fraud_configuration.py`'s `ALLOWED_IMPORTS` frozenset gained
+`"as_platform"`, because the anti-fraud package now imports the library directly. An allowlist
+necessarily widens when the import target moves; the bound that keeps it honest is that the
+fixture still enumerates its set **exactly** and still fails on any module outside it
+(`unexpected = imported - ALLOWED_IMPORTS`), so the widening names the one new shared surface
+and is not a general loosening. The class may widen only to the moved import target, never to a
+wildcard or an open set; nothing the fixture rejects before, it accepts after.
+
 This is the one place where the literal sentence *"If that suite has to change to accommodate
 the extraction, the extraction is wrong, not the tests"* (requirements traceability note) meets
 the split; the note is **qualified in place** so it keeps its force — the extraction may not
 change what a test *asserts* — while naming this bounded exception. **The maintainer's ruling
 (2026-09-19): the bounded edit is accepted and recorded.** `REQ-F-031`'s promise is that the
 three layers **stay green**, which holds — it is not a promise that no test file's read,
-iteration or annotation ever changes. This is the only class of test change the extraction is
-allowed to make.
+iteration or annotation ever changes. These four bounded classes are the only test changes the
+extraction is allowed to make.
 
 ### 4. The controller seam: the base owns the relay, the application owns the decision, `PolicyDecision` is the one value between them
 

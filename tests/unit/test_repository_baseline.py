@@ -335,6 +335,18 @@ def test_the_library_is_consumed_from_the_sibling_checkout(repo_root: Path) -> N
     assert re.search(r"editable\s*=\s*true", source), source
 
 
+def test_the_library_is_not_a_uv_workspace_member(repo_root: Path) -> None:
+    """The sibling checkout is a `path` dependency, never a uv workspace member (REQ-NF-019).
+
+    LLD section 11.1 states that neither manifest declares the other a
+    `[tool.uv.workspace]` member; this asserts this repository's half. A workspace member is
+    resolved by one shared lock and one root, so the library's gate (REQ-NF-021) would no
+    longer be the gate of a standalone distribution.
+    """
+    text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+    assert "[tool.uv.workspace]" not in text, "the library must not be a uv workspace member"
+
+
 def test_both_as_instances_are_users_of_the_platform_library(repo_root: Path) -> None:
     """Both AS instances consume the extracted skeleton (REQ-F-029).
 

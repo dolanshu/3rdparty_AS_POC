@@ -1455,7 +1455,128 @@ stops it silently breaking again.
 have run — the requirements and design records are earlier in this subsection, and the
 implementation record and its gate are this one. The gate's five findings were fixed **inside the
 stage** (`b824f11`, library `aaa453e`, `f7249de`, `07b68e4`) and the stage is **not re-reviewed**
-(§5.2). The acceptance stage is next, and `ACC-P10-001…008` remain to be created there.
+(§5.2). **The tests stage is next** — it is stage 4 of the §5.1 pipeline, and the acceptance
+stage (stage 5) follows it — so `ACC-P10-001…008` remain to be created there.
+
+**P10 tests stage (stage 4) — the tests that carry the extraction, and their review gate
+(2026-09-20).** Under §5.1 the artefact of this stage is **tests**, not documents. The
+implementation stage had already added the two trunk-answer regression tests of judgement 9
+(`tests/integration/test_translation.py`, `b824f11`) and step 7 had given the library its own
+suite (`d627e73`); what this stage added is tests for the requirements that had **no direct test
+at all** before it — the two `REQ-NF-` rows, `REQ-F-029`'s *user* half and `REQ-F-032` — plus the
+two anti-fraud controller overrides that until now were evidenced by **inspection only**.
+
+**A correction, recorded rather than made silently.** The paragraph above used to end "the
+acceptance stage is next, and `ACC-P10-001…008` remain to be created there". That contradicted
+§5.1, where stage 4 is Tests and stage 5 is Acceptance, so at the time it was written the tests
+stage had not run yet. The sentence was corrected to name the tests stage as the next one (this
+commit) and the correction is stated here so the record does not disagree with the pipeline.
+
+**Requirement → test coverage.** Each row names the test that carries the requirement; a
+requirement with no test says so instead of being claimed.
+
+| Requirement | The test that carries it |
+| --- | --- |
+| `REQ-F-029`, user half | application repository `tests/unit/test_repository_baseline.py::test_both_as_instances_are_users_of_the_platform_library` |
+| `REQ-F-030` | library `tests/test_library_independence.py`; application `::test_as_app_does_not_import_the_anti_fraud_as` |
+| `REQ-F-031` | the three layers, the two trunk-answer regression tests, and `tests/unit/test_fraud_call_controller.py`'s four override assertions |
+| `REQ-F-032` | application `::test_the_library_is_consumed_from_the_sibling_checkout` (dependencies, `[tool.uv.sources]` `path`, `editable = true`) |
+| `REQ-NF-019` | library `tests/test_library_standard.py` (the three documents, the application set not copied) plus the workspace rows added here |
+| `REQ-NF-020` | library `tests/test_seams.py` (four tests) |
+| `REQ-NF-021` | library `tests/test_library_standard.py`'s Makefile, CI and `pyproject.toml` assertions |
+| `REQ-F-033` | **no test** — see the honest gaps below |
+
+**Two requirements are deliberately not asserted, and that is stated rather than papered over.**
+`REQ-F-033` — the extraction is done in incremental steps and each step leaves the three layers
+green — is a **process and historical property**, evidenced by the commit sequence and by the
+layer runs, not by an assertion a test can make; inventing one would assert nothing. The other
+half of `REQ-F-029` — *this repository becomes the library's reference implementation* — is a
+**role statement**, not a property of the artefacts, so only its user half is asserted.
+
+**The bounded test classes are limited to the extraction's own edits (`8c0166d`).** ADR-0009
+decision 3's four bounded classes constrain the edits the **extraction** — the implementation
+stage — makes to the existing suite; the Tests stage **adds** tests as its own deliverable, which
+is neither inside those four classes nor in conflict with them. The ADR's closing sentence was
+scoped to say exactly that. The maintainer's ruling also reviewed the one test this stage added
+beyond the agreed list: `test_both_as_instances_are_users_of_the_platform_library` was proposed
+as revertible and was **ruled kept**, because *both instances become users of that library* is a
+clause of `REQ-F-029` itself and therefore an assertable half of it.
+
+**The red signal.** Each assertion was shown to fail for the production change it guards, by
+removing the change, observing the failure and restoring the bytes. The producer's own mutations,
+in a temporary copy or against `cp`-saved bytes: deleting `FraudCallController._peer_status_key`
+made the base default render the internal hop name — `assert 'fraud_sbc_peer' not in
+'fraud_sbc_peer:10.0.0.1:15062'`; deleting `_no_answer_hop_label` lost the address and port —
+`assert '' == '127.0.0.1:15061'`; adding `tlsconfig.py` or `redis_store.py` under
+`src/as_platform/` tripped the seam vocabulary (`a P11-only module is present in P10:
+['tlsconfig.py']`); adding a `[tool.uv.workspace]` table to either `pyproject.toml` or renaming
+the library distribution tripped the workspace rows (`'[tool.uv.workspace]' is contained here`).
+`test_the_peer_status_key_never_renders_the_internal_hop_name` is **not vacuously true** —
+removing the override does fail it, and the name it excludes is the configured pipe name
+`fraud_sbc_peer`, never the rendered value.
+
+**The quality gate of this stage.** Run by an **independent read-only** agent that wrote no part
+of the stage. It asked the §5.2 *Tests* question — **"the tests genuinely fail without the
+change, coverage matches the requirements"** — and returned **PASS-WITH-FINDINGS: 0 blocker, 0
+major, 5 minor**, all fixed **inside the stage** and not re-reviewed (§5.2, "one review per
+stage, no loop"). It reproduced the red signals independently rather than trusting the record:
+it copied both repositories to `/tmp` (excluding `.venv`, with the copy's `src/` overriding the
+editable installs) and ran **18 mutation groups, every one of which turned red**, without
+touching either working tree. It verified the exact scope (`git diff --numstat` — application
+`tests/unit/test_fraud_call_controller.py` `88/0`, `tests/unit/test_repository_baseline.py`
+`52/0`, the ADR `+4/-2`; library `117/0` and `89/0`), **zero deleted tests**, **zero loosened
+existing assertions**, **zero `src/` changes**, that the new unit tests carry the `unit` marker
+(`-m unit` → `209 passed`), that `test_fraud_call_controller.py` constructs its objects without
+opening a socket or reading a clock (§11's unit layer), that **no document enumerates this
+stage's new test sites** — so no document went stale — and that the four gate commands and their
+numbers matched the record verbatim.
+
+**The five findings and their dispositions.**
+
+- **[minor] `REQ-NF-019`'s "not a uv workspace monorepo" clause had no test** — the manifests
+  were asserted to *be* a `path` source but never asserted *not* to be a workspace member. Fixed
+  in the stage: the library asserts its own half in
+  `tests/test_library_standard.py::test_the_library_is_a_standalone_distribution_not_a_workspace_member`
+  (no workspace table, and `[project]` self-reports `as-platform`) and the application asserts its
+  half in `tests/unit/test_repository_baseline.py::test_the_library_is_not_a_uv_workspace_member`
+  (library `0eeef37`, application `b1aef5a`). Neither test reads the other repository's directory,
+  so the check does not couple to a sibling name.
+- **[minor] `tests/test_seams.py`'s module-name check could be bypassed by a non-underscore
+  name** — `stem.split("_")` caught `tls_config.py` but **not** `tlsconfig.py`. Tightened to a
+  lower-cased **substring** match over the stem (library `0eeef37`), with the boundary stated in
+  the test's docstring: it matches **module names**, not module content or class names; the
+  `*Transport` / `*StateStore` class-suffix check is unchanged and stays out of scope for names
+  like `TransportFactory`. Red signal: both `tlsconfig.py` and `redis_store.py` now fail it.
+- **[minor] `test_the_peer_status_key_never_renders_the_internal_hop_name` is a strict subset of
+  `test_the_peer_status_key_is_the_address_and_port`** — **kept** and registered as *redundant but
+  not vacuous*, following the precedent of P9's stage-4 gate (§3), where two same-source
+  assertions were registered and kept. It records an **independent intent** — the configured pipe
+  name `fraud_sbc_peer` never reaches the peer-status counter — and deleting it would drop that
+  intent's explicit guard.
+- **[minor] neither repository's `mypy` covers `tests/`** — pre-existing configuration, not
+  introduced by this stage (both manifests list only their `src/` packages). Recorded as an
+  **accepted limitation** rather than changed here: widening a repository-wide gate is a
+  maintainer decision, outside a test stage's scope. **Escalated to the maintainer** as a
+  gate-scope question (whether `tests/` should be type-checked at all).
+- **[minor] the stage's gate numbers and its two honest no-assertion statements existed only in
+  the commit message** — closed by this record, which is the repository-side home for both.
+
+**The verification this stage leaves behind** (run after all fixes):
+
+- application repository: `uv run ruff format --check .` → `96 files already formatted`;
+  `uv run ruff check .` → `All checks passed!`; `uv run mypy` → `Success: no issues found in 29
+  source files`; `uv run pytest tests -q` → **`255 passed`** (246, then 248 after the
+  implementation stage's blocker fix, then 254 for this stage and 255 after finding 1).
+- library repository: `uv run ruff format --check .` → `33 files already formatted`;
+  `uv run ruff check .` → `All checks passed!`; `uv run mypy` → `Success: no issues found in 15
+  source files`; `uv run pytest -q` → **`84 passed`** (74, then 83 for this stage and 84 after
+  finding 1).
+
+**State after stage 4.** Stages 1–4 of P10's §5.1 pipeline are complete and their review gates
+have run. This stage's gate returned PASS-WITH-FINDINGS and its five findings were fixed **inside
+the stage** (library `0eeef37`, application `b1aef5a`, plus the ADR scoping of `8c0166d`), so the
+stage is **not re-reviewed** (§5.2). The acceptance stage (stage 5) is next, and
+`ACC-P10-001…008` will be created there.
 
 ### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 

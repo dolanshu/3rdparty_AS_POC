@@ -1671,6 +1671,97 @@ run the §16 Definition of Done, update this plan and the `docs/roadmap.md` poin
 `CHANGELOG.md` and `VERSION`, and commit — **no tag and no push** (`AGENT.md` §13 and §15). The
 requirement status rows flip to `done` there, not here.
 
+- **Status: done (2026-09-20), worked on `feat/platform-extraction` (this repository) and `main`
+  (the library repository); merged into `phase2` as the final step of this close (§4 — an item
+  branch merges into `phase2` when the item's own definition of done is met) and `main` is
+  untouched; not tagged.**
+  Stages 1–5 of §5.1 were completed, each with its own read-only review gate (§5.2), and the item
+  close of §5.4 was then performed: the eight SRS rows `REQ-F-029…033` and `REQ-NF-019…021` are
+  `done`; `VERSION` / `pyproject.toml` / `uv.lock` were bumped together to **`0.8.0`** and the
+  CHANGELOG node `[0.8.0] - 2026-09-20` opened; acceptance items **`ACC-P10-001 … ACC-P10-008`**
+  were accepted with evidence in `docs/acceptance/report.md`; and the §16 Definition of Done was
+  run and recorded in that report's new `### Definition of Done` section. The **library repository
+  keeps its `VERSION` at `0.1.0` and opens no new node**: its `[0.1.0]` node already declares that
+  `0.1.0` was never released, tagged or pushed, so it describes the whole extraction, and the
+  close only adds one `Added` bullet for the boundary tests `27fe26e` and `0eeef37` (library
+  commit `801181c`). The `Call-ID` entry under `[Unreleased]` in this repository's `CHANGELOG.md`
+  stays where it is (ruling below). Merging into `main` and tagging remain the maintainer's steps
+  (`AGENT.md` §13/§15).
+
+**One correction, stated rather than made silently.** The `**State after stage 5.**` paragraph
+above lists the remaining close work — run the §16 Definition of Done, update this plan and the
+`docs/roadmap.md` pointer, update `CHANGELOG.md` and `VERSION`, and commit — and does not mention
+merging into `phase2`. Merging into `phase2` is also part of this close under §4 ("item branches
+are cut from `phase2` … and merge into `phase2` when that item's own definition of done is met"),
+and it was performed as the close's final step. This is a correction of that list, not a silent
+edit of the stage-5 text: the paragraph above is left exactly as it was written.
+
+**What was learned (2026-09-20).**
+
+1. **An item that spans two repositories stretched §4.8's evidence model into a new shape.** Kind
+   ③ is unproducible in **both** repositories: the library has no remote and has never been pushed,
+   so its three-job workflow is an **unexecuted definition**, and this repository's five CI jobs
+   each clone a sibling that cannot be cloned while it exists only on a filesystem. P8's and P9's
+   version of the gap was "nothing is pushed"; P10's is "the sibling exists only on disk" — a gap
+   only the maintainer publishing the library can close, and `docs/production-gaps.md` now carries
+   two rows for it (`:131`, `:134`).
+2. **`path` + `editable` makes "staged and green at every step" checkable only by sampling.**
+   Re-running step *n* means materialising **both** repositories at that step's commits, so
+   `REQ-F-033` / `ACC-P10-007` spot-checked only steps 1 and 4 while the other five rest on the
+   commits' own gate records. The per-step green is a property of **the commits**, not of the
+   current working tree, and the record says so instead of implying coverage.
+3. **A structural refactor invalidates statements scattered far from the code it moved, and only
+   an independent read-only gate takes the record back to the tree.** Both of the acceptance
+   gate's major findings were stale facts the **extraction itself** left behind: `criteria.md`'s
+   `ACC-P10-002` still said `src/anti_fraud_as/call_controller.py` imports `as_app.sip_adapter`,
+   and the same sentence had also outdated `criteria.md:83`'s `ACC-P9-001` and `report.md:2796`'s
+   P9 accepted-limitation. The handling was a minimal **P10-era note** on the P9 statements, not a
+   rewrite of history — add the note, do not delete or reword the old claim.
+4. **A new test must be mutation-checked to prove it is not vacuous.** `test_library_standard.py`'s
+   first form used substring matching, so `pytest` was satisfied by `.pytest_cache` and `mypy` by
+   the job step name `- name: mypy`; after tightening it to parse the `Makefile` recipe lines and
+   the CI `run:` lines, the mutations turned red honestly. **An assertion a grep happens to
+   satisfy is not a test.**
+5. **The move took about 3.4k lines out of `src/` (21 files), and the item branch touched 48
+   files in all, with the wire bytes unchanged.** The acceptance evidence for a pure refactor is
+   therefore not a new-feature demo but **unchanged behaviour** — the same Call-ID keyed trace
+   shape and the same `-b2b_1` derivation (`ACC-P10-003`'s §2/§4).
+
+**Entry state for P11.**
+
+- P11 works **in the library repository** per the §4 table, starting from the library's `main`
+  after this close. The library has no branch of its own yet, and creating one needs the
+  maintainer's approval (`AGENT.md` §13) — the §8 blanket grant of 2026-09-19 ("full authority to
+  judge and execute through the end of Phase 2") covers it, but the purpose and the end condition
+  still have to be stated. This repository's working tree is `phase2` after the close.
+- P11's **design stage includes** the sippy TLS-support probe (`AGENT.md` §14 forbids assuming;
+  §7 item 5). The probe belongs to P11's design stage and does not move earlier (§5.1).
+  Certificates are produced by a generation script and **no private key is ever committed**
+  (`AGENT.md` §9); Redis runs as a `docker compose` service and the **in-memory store stays the
+  default**, so `make demo`, the three layers and CI keep running with no external service; the
+  harness **reports constraints only and never publishes a figure** (D10).
+- **P11's first edit** is the library's `tests/test_seams.py` and `tests/test_library_standard.py`:
+  they now **deliberately** forbid a second implementation and any TLS / Redis / harness module
+  (`REQ-NF-020`, `ACC-P10-006`, the report's accepted-limitation entry). P11 rewrites those
+  assertions by design and must also re-examine `REQ-NF-002` (UDP-only) — `REQ-NF-020` already
+  states that the TLS supersession happens in P11.
+- `path` + `editable` means a library change reaches this repository **immediately**, so both gates
+  must run (library `make lint` / `make test` and this repository's `make lint` / `make test`), and
+  the `as-platform` entry in `dependencies` carries no version constraint.
+- Neither repository has CI (the library has no remote; this repository's five jobs need the
+  sibling), so **P11 inherits the same kind ③ gap** unless the maintainer publishes the library.
+
+**Two rulings, recorded so a later conversation does not re-derive them.**
+
+- **The `Call-ID` entry stays under `[Unreleased]` and is not folded into `[0.8.0]`.** It belongs to
+  the **Phase 1 `main` fix** (`d8dad31`, `f1b4186`, landed on `main`; §7 item 8 — "its own
+  conversation owned its `CHANGELOG` / `VERSION`"), not to P10. `06f8ed9` deliberately left it at
+  the top of `[Unreleased]` (Keep a Changelog puts `Unreleased` first), and it was never released
+  under any version node, so leaving it as it is stays truthful.
+- **The library keeps `VERSION` `0.1.0` and opens no new node.** Its `[0.1.0]` node states it was
+  never released, tagged or pushed, so the whole extraction is described there; a second node for
+  two test commits would misstate that. Only one `Added` bullet was added (library `801181c`).
+
 ### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 
 - **Goal.** Prove the abstraction was right by adding a **second implementation** of each

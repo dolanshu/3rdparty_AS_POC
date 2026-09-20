@@ -3258,3 +3258,78 @@ Consistent with the stage-4 position, and not hidden:
 - **The `-s` traces carry sippy's mock-teardown traceback noise.** A `TypeError` from the mock's
   UAS ring buffer after the transaction manager is stopped appears at the end of a `-s` run; it is
   teardown noise, not a test failure (see §2), and it is disclosed rather than trimmed.
+
+### Definition of Done (AGENT.md section 16)
+
+This section was added at P10's **item close** (`docs/phase2-plan.md` §5.4 step 1, `AGENT.md` §15
+closing ritual, item 1), **after** the stage-5 read-only review gate had already run over the
+acceptance record — the close is not a §5.1 stage, so it has no review gate of its own (§5.2 sets a
+gate per stage only). It is therefore **not** part of what that gate reviewed: stage 5's `git diff
+--name-only d57c309..225a851` → two files is a statement about those commits and still holds; this
+section post-dates them.
+
+The commands below were **re-run in this working tree on 2026-09-20** and these are this run's
+numbers, not the acceptance-record figures copied forward. §16's checklist, item by item:
+
+| # | §16 item | Result |
+| --- | --- | --- |
+| 1 | Feature works end to end; `make demo` passes from a clean checkout | **Passed, with a recorded caveat** — `make demo` exits `0` and prints `demo result: call answered and released; number translation applied on the wire`. The "from a clean checkout" wording is now "from **two** sibling checkouts": this run was made in this working tree **with the library present at `../as_platform`**, and a checkout without the sibling cannot resolve the `path` dependency. That is the accepted cost of `REQ-F-032` (ADR-0009 decision 8), not a single-clone rehearsal — see the honest declaration below. |
+| 2 | Unit + integration + e2e tests added and green | **Passed** — `210 passed` / `36 passed` / `9 passed` (`255` total). The counts are **above** the pre-extraction baseline because the implementation and tests stages *added* tests; no test was deleted, loosened or reclassified (ACC-P10-003 and the accepted limitations above). |
+| 3 | `ruff format`, `ruff check`, `mypy` clean | **Passed** — `96 files already formatted`, `All checks passed!`, `Success: no issues found in 29 source files`. |
+| 4 | Console reflects the new capability (from M3 onward) | **Not applicable as a new capability** — P10 is a pure refactor, so the console shows nothing new. It stays wired to the same internal API over the library's `internal_api` shell, and `src/console/` is untouched by every P10 commit (`git diff --name-only phase2...HEAD -- src/console/` is empty), which is the point of the item. |
+| 5 | README and the affected documents updated | **Passed** — `AGENT.md` §5/§10, the `README.md` quickstart and the structural documents were updated in the implementation stage (`2848f34`); this close adds the two demo documents (§0 quickstart) and this record. |
+| 6 | Requirement IDs, acceptance items and CHANGELOG updated for the behaviour change | **Passed** — `REQ-F-029…033` / `REQ-NF-019…021` set to `done`; `ACC-P10-001…008` accepted with evidence; the `[0.8.0]` CHANGELOG node opened — all in this close. |
+| 7 | New POC shortcuts registered in `docs/production-gaps.md` | **Passed** — the four P10 rows are present (`Library gate not in this repository's CI` :131, the `REQ-F-023` location delta :132, `Consumption probe's stand-in scope` :133, `CI second checkout (new dependency)` :134), added in `2848f34`. |
+| 8 | `AGENT.md` and `docs/README.md` updated if anything structural changed | **Passed** — the sibling library repository is in `AGENT.md` §5 and in the `docs/README.md` map, and the ADR index range reaches `ADR-0009` (`2848f34`). |
+| 9 | Acceptance items for the milestone carried out with evidence per §4.8 | **Passed** — `ACC-P10-001…008` carry kinds 1, 2 and 4 as evidence or as an explicit honest declaration, and kind 3 is declared **not producible in either repository** (§3). |
+| 10 | Version bumped (the tag is the maintainer's step; agents do not tag) | **Passed** — `VERSION` / `pyproject.toml` / `uv.lock` bumped together to **`0.8.0`** and the editable install re-synced. The **library** keeps `VERSION` `0.1.0` with no new node; the reason is in `docs/phase2-plan.md` §3 P10 (its `[0.1.0]` node already describes the whole extraction, which was never released or tagged). **No tag is created** (`AGENT.md` §13/§15). |
+| 11 | No secrets, certificates or real traffic captures committed | **Passed** — the private-key scan returns no match (exit `1`), `.env` is absent and `git status --porcelain` is empty. |
+
+The raw output of this run:
+
+```text
+$ make lint
+uv sync
+Resolved 51 packages in 1ms
+Checked 50 packages in 0.47ms
+uv run ruff format --check .
+96 files already formatted
+uv run ruff check .
+All checks passed!
+uv run mypy
+Success: no issues found in 29 source files
+
+$ uv run pytest tests/unit -m unit -q
+210 passed in 1.05s
+$ uv run pytest tests/integration -m integration -q
+36 passed in 29.88s
+$ uv run pytest tests/e2e -m e2e -q
+9 passed in 4.27s
+
+$ make demo                       # exit 0; transcript trimmed to its key lines
+scenario    : office-to-mobile
+rule        : R-MOB-CM-40
+translation : called number -> 013800138000
+status      : 200
+released    : True
+demo result: call answered and released; number translation applied on the wire
+
+$ uv run python tools/path_dependency_probe.py ; echo $?
+cases measured : 8
+expectations   : all held
+0
+
+$ git grep -nE "BEGIN (RSA|EC|DSA|OPENSSH|PRIVATE) KEY" -- . ; echo $?
+1
+$ test ! -e .env && echo ".env absent"
+.env absent
+$ git status --porcelain
+                                  # empty
+```
+
+**Honest declaration.** `make demo` was run **in this working tree, with the sibling library
+repository present at `../as_platform`** — it is **not** a single-clean-checkout rehearsal. After
+P10 the §16 item-1 wording "from a clean checkout" is really "from **two** sibling checkouts": the
+`path` dependency cannot resolve without the sibling, so that is the **accepted cost of
+`REQ-F-032`** (an explicit recorded exception, ADR-0009 decision 8), and this record does not
+present it as more than it is. Nothing is pushed and nothing is tagged (`AGENT.md` §13/§15).

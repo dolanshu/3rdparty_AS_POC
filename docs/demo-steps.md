@@ -5,6 +5,9 @@ Quick command checklist; what to say and why is in `docs/demo-script.md`.
 ## Before you start (once)
 
 ```bash
+# Clone both repositories side by side first: the platform library (../as_platform), then this one.
+git clone <library-repo> as_platform        # the platform library (sibling checkout, ../as_platform)
+git clone <repo> && cd 3rdparty_AS_POC      # this repository
 uv sync
 make lint && make test
 ```

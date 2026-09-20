@@ -817,6 +817,14 @@ every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
   the acceptance evidence is in `docs/acceptance/report.md`. Not merged into `main` and not
   tagged.
 
+- **P10 — platform extraction. [Status: Done]** (2026-09-20, on `feat/platform-extraction`,
+  merged into `phase2`; the library itself lives in its own repository and has never been pushed).
+  A pointer only: the plan, status, review-gate findings and the P11 entry state live in
+  `docs/phase2-plan.md` §3 on `phase2`; the acceptance evidence is in `docs/acceptance/report.md`.
+  This item's **deliverable is a second repository** — the `as-platform` library, checked out
+  beside this one at `../as_platform` — and this repository becomes its reference implementation
+  (ADR-0009). Not merged into `main` and not tagged.
+
 ## Conventions
 
 - **Single source of truth:** rules live in `AGENT.md`; live status lives here; evidence

@@ -21,6 +21,82 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   Call-ID for the log/trace correlation key. The message samples and the affected acceptance
   items (ACC-M1-002 / ACC-M1-005 / ACC-M2-005) were re-tested.
 
+## [0.8.0] - 2026-09-20 — P10 platform extraction (Phase 2)
+
+### Added
+
+- The **`as-platform` library**, a new repository checked out beside this one at
+  `../as_platform` (ADR-0009 decision 1). It carries the skeleton both AS instances share: the
+  `observability` package (structured logging, counters and the per-Call-ID trace), the
+  `errors` mechanism (the memberless `ErrorCode` base, `SIP_PHRASES`, `sip_status_for`,
+  `AsError` and the skeleton `AS-CFG-* / AS-PEER-* / AS-INT-*` family), the `sip_adapter`
+  boundary, the `hop` value object, the `bootstrap` plumbing, the `version` chain, the
+  `call_controller` shell (`BaseCallController`, `PolicyDecision`, `BaseCallMap`), the
+  `internal_api` shell and the `main` process shell (`BaseAsStack`).
+- The library's two **pluggable seams, one implementation each**: `Transport` / `UdpTransport`
+  and `StateStore` / `InMemoryStateStore` (`REQ-NF-020`); the second implementation of each is
+  P11's.
+- The library's **own test suite and its own gate** (`ruff` format and lint, `mypy`, `pytest`)
+  and the three **library-standard documents** — API reference, integration guide, compatibility
+  matrix (`REQ-NF-019`, `REQ-NF-021`). The library is a standalone distribution and is **not** a
+  uv workspace monorepo.
+
+### Changed
+
+- This repository becomes the library's **reference implementation**: `src/as_app/` and
+  `src/anti_fraud_as/` are now **users** of `as-platform` (`REQ-F-029`), and the library imports
+  neither use case — the one-way invariant `src/as_app/**` does not import `anti_fraud_as`
+  survives, and the library imports neither (`REQ-F-030`).
+- The library is consumed through a **`path` source** in `pyproject.toml`
+  (`path = "../as_platform"`, `editable = true`, ADR-0009 decision 6), so the `AGENT.md` §10
+  guarantee *"clone → `uv sync` → `make demo`"* becomes *"clone **both** repositories side by
+  side"* (`REQ-F-032`) — an explicit recorded exception, not a silent weakening.
+- The extraction is **staged** (`REQ-F-033`; the §14 rule 3 waiver is recorded in
+  `docs/phase2-plan.md` §8 item 2): the skeleton moved in steps that each left this repository
+  building, linting and passing its three layers. It is a **pure refactor** with no wire-visible
+  change — the same SIP signalling, the same `AS-*` codes and the same per-instance Call-ID keyed
+  trace (`REQ-F-031`).
+
+### Fixed
+
+- **The routing engine's `AsError` no longer escapes to a silent trunk.** The extraction dropped
+  the guard that used to wrap the policy decision, so an `AsError` raised by the routing engine
+  left `decide()` without a final response on two reachable paths — `AS-ROUTE-004` / `500`
+  ("translation produced an empty number", reachable from a schema-valid rules file whose
+  `strip_prefix` consumes the number) and `AS-ROUTE-003` / `480` (an unresolvable hop named by a
+  matched rule). The number-translation `decide()` now turns the engine's raises into a reject
+  `PolicyDecision` (the application owns that conversion — ADR-0009 decision 4), restoring the
+  **byte-for-byte pre-P10 trunk answer**. The application fix and its regression tests are
+  `b824f11` (`src/as_app/call_controller.py`, `tests/integration/test_translation.py`); the
+  library's abstract `decide()` docstring states the contract truthfully in `aaa453e`
+  (`src/as_platform/call_controller.py`).
+
+### Verified
+
+- The P10 acceptance run: **`ACC-P10-001 … ACC-P10-008` accepted** with evidence in
+  `docs/acceptance/report.md`. Local gate on this tree (item close): `ruff format --check .` →
+  96 files, `ruff check .` → clean, `mypy` → no issues in 29 source files, `pytest` → **210 unit
+  / 36 integration / 9 e2e**; `make demo` exits `0`; `tools/path_dependency_probe.py` exits `0`
+  with `cases measured : 8`, `expectations : all held`. Library repository: `make lint` → 33
+  files, clean, no issues in 15 source files; `pytest` → **84 passed**.
+- **No CI run exists for any P10 commit, in either repository.** Kind ③ is not producible: the
+  library has **no remote and has never been pushed**, so its workflow is an unexecuted
+  definition, and this repository's five CI jobs each clone `../as_platform` before
+  `uv sync --frozen`, a clone that cannot succeed while the library exists only on a filesystem
+  (`docs/production-gaps.md` :134 and :131). The gate above is a **local** run, not a CI result
+  (`AGENT.md` §13).
+
+### Notes
+
+- Version node: `0.8.0` — the Phase 2 precedent is `0.6.0` for P8 and `0.7.0` for P9 (P9.5, a
+  read-only probe, opened no node). P10 produces a new repository and a library two AS instances
+  share, a new capability. `VERSION` / `pyproject.toml` / `uv.lock` were updated together and the
+  editable install re-synced, so `as_app.__version__` reports `0.8.0`.
+- Worked on `feat/platform-extraction`, merged into `phase2` as the final step of the item close
+  (`docs/phase2-plan.md` §4: an item branch merges into `phase2` when the item's own definition
+  of done is met). **Not merged into `main` and not tagged** (`AGENT.md` §13/§15); the library
+  repository keeps its own `VERSION` at `0.1.0` with no new node.
+
 ## [0.7.0] - 2026-09-19 — P9 chained AS topology (Phase 2)
 
 ### Added

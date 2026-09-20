@@ -1578,6 +1578,99 @@ the stage** (library `0eeef37`, application `b1aef5a`, plus the ADR scoping of `
 stage is **not re-reviewed** (§5.2). The acceptance stage (stage 5) is next, and
 `ACC-P10-001…008` will be created there.
 
+**P10 acceptance stage (stage 5) — `ACC-P10-001…008`, the §4.8 evidence and its review gate
+(2026-09-20).** Under §5.1 the artefact of this stage is **acceptance**. The eight rows live in
+`docs/acceptance/criteria.md` under `## Phase 2 — P10 platform extraction` (`:89-100`), one row
+per requirement (`REQ-F-029…033`, `REQ-NF-019…021`) with the criterion, a reproducible command,
+the expected result carrying the real numbers, and the requirement; the run record is the P10
+section of `docs/acceptance/report.md` (`:2826-3260`), whose four sections follow `AGENT.md` §4.8
+and whose `Evidence kinds per item` matrix states, per item, which kind is present. The stage
+changed **no** code, test, ADR or architecture file: its range is exactly the two acceptance files
+(`git diff --name-only d57c309..225a851` → two paths, `449 insertions, 0 deletions`).
+
+**What the stage cannot supply, stated rather than substituted.** Kind ③ — the CI result — is
+unavailable in **both** repositories. The library has **no remote and has never been pushed**, so
+its own three-job workflow is an **unexecuted definition** with no run, badge or job conclusion;
+and this repository's five CI jobs each clone the library into `../as_platform` before
+`uv sync --frozen`, a clone that cannot succeed while the library exists nowhere but a filesystem,
+so this repository's CI **cannot be green either** (`docs/production-gaps.md` `:134`, *CI second
+checkout (new dependency)*, and `:131`, *Library gate not in this repository's CI*). There is **no
+pcap**: `docs/specs/message-samples/` is generated and gitignored, so `make capture` produces 14
+text samples plus their `README.md` — a message-sample set, not a capture — and no other capture
+path exists for P10. The consumption probe measures `uv` against a **two-module stand-in**, not
+the real skeleton (`:133`, *Consumption probe's stand-in scope*), and "a clone without the sibling
+cannot resolve `as-platform`" is recorded as `REQ-F-032`'s **accepted cost** rather than asserted,
+because this working tree *has* the sibling. `ACC-P10-007`'s per-step green is a **historical**
+property with no test behind it, and a faithful per-step re-run is awkward rather than impossible:
+the library is a `path` + `editable` dependency, so re-running step *n* means materialising **both**
+repositories at their step-*n* commits — steps 1 and 4 were spot-checked from temporary worktrees
+(`246 passed` each, `94` / `95 files already formatted`) and the other five rest on the commits'
+own gate runs, which the record says instead of implying coverage.
+
+**The requirement rows keep their status in this stage.** The git history decides that, and it does
+not show the acceptance stage flipping them. For P9 the four rows were **added** `planned` in
+`577d258 docs(p9): add chained-demo requirements to the SRS`, and `git show
+f68ed27:docs/requirements/functional-and-nonfunctional.md` still reads `planned` at the acceptance
+commit `f68ed27 docs(p9): add the P9 acceptance items and their evidence`; only
+`06f8ed9 chore(p9): close the item — SRS, demo docs, version 0.7.0 and CHANGELOG`, a descendant of
+both acceptance commits (`f68ed27`, `4d3e924`), set seven rows to `done | P9`. P8 flipped the same
+way — `4d32e80 chore(p8): close the item` does not touch the SRS at all, and `d22324e docs(p8): mark
+the P8 requirements done` (a descendant of the close) set fourteen rows — so status flipping is an
+**item-close (§5.4)** action, not an acceptance-stage one. `REQ-F-029…033` and `REQ-NF-019…021`
+therefore stay `planned` here and are set `done` by the §5.4 closing commit.
+
+**The quality gate of this stage.** Run by an **independent read-only** agent that wrote no part of
+the stage. It asked the §5.2 *Acceptance* question — **"the §4.8 evidence is real, reproducible and
+complete"** — and returned **PASS-WITH-FINDINGS: 0 blocker, 2 major, 0 minor**, both fixed **inside
+the stage** and not re-reviewed (§5.2). It re-ran every command in the record and matched them
+verbatim (`1 passed, 55 deselected` / `2 passed, 54 deselected` / `1 passed, 55 deselected` /
+`210` / `36` / `9`; the probe's `cases measured : 8` with `expectations : all held` and exit `0`;
+the independence grep exiting `1` with no output; the library's `2`, `6` and `4 passed` and its
+`33 files already formatted` + `84 passed`; the CI job list `['lint', 'test', 'type']`; `VERSION`
+`0.1.0`). It materialised step 1 **read-only** (`git archive` of application `f041174` with library
+`4caec3e`, in `/tmp`) and reproduced all four gates there — `94 files already formatted`,
+`All checks passed!`, `28 source files`, `246 passed in 35.37s` — matching the record word for
+word; ran `make capture` (14 samples, no pcap); ran both `-s` e2e files and confirmed §2's quoted
+traces have the shape of a real capture rather than an invented one; checked the four-kind matrix
+item by item for a silently omitted kind; confirmed the stage's range is exactly two files; matched
+`docs/production-gaps.md` `:131-134` row for row; and confirmed the local gate was never presented
+as a CI result.
+
+**The two findings and their dispositions.**
+
+- **[major] the `ACC-P10-002` row asserted a fact the extraction had already invalidated.** The row
+  said `src/anti_fraud_as/call_controller.py` imports `as_app.sip_adapter`, but after P10 that
+  module's line **57** imports `as_platform.sip_adapter` and the package's only remaining `as_app`
+  **import** is the version chain at `src/anti_fraud_as/__init__.py:31` — the correction HLD §10.3
+  and the stage-3 record already carry. Fixed in the stage: the row now states the **current**
+  mechanism (and cites ADR-0009 decision 2 / HLD §10.3) while keeping the conclusion it existed for
+  — only the one-way invariant is assertable, and only it is asserted.
+- **[major] the same stale sentence made two P9 statements outdated, and the P10 record had not
+  registered it.** `ACC-P9-001` in `docs/acceptance/criteria.md:83` and the P9 accepted-limitation
+  bullet in `docs/acceptance/report.md:2796` still describe the P9-era import. Both were **really
+  true when P9 ran**, so neither was rewritten: each now carries a minimal **P10-era note** saying
+  the mechanism changed (the controller imports `as_platform.sip_adapter` directly; the only
+  `as_app` import left in the package is the version chain) and that the one-way invariant the note
+  justifies is unchanged (ADR-0009 decision 2, HLD §10.3). The P10 section and the eight rows were
+  then re-read for the same substance — no other statement carries it.
+
+**The verification this stage leaves behind** (run after both fixes):
+
+- application repository: `uv run ruff format --check .` → `96 files already formatted`;
+  `uv run ruff check .` → `All checks passed!`; `uv run mypy` → `Success: no issues found in 29
+  source files`; `uv run pytest tests -q` → **`255 passed`**; `tools/path_dependency_probe.py`
+  exit `0`.
+- library repository: `uv run ruff format --check .` → `33 files already formatted`;
+  `uv run ruff check .` → `All checks passed!`; `uv run mypy` → `Success: no issues found in 15
+  source files`; `uv run pytest -q` → **`84 passed`**.
+
+**State after stage 5.** Stages 1–5 of P10's §5.1 pipeline are complete and their review gates have
+run; this stage's gate returned PASS-WITH-FINDINGS and its two findings were fixed **inside the
+stage**, so the stage is **not re-reviewed** (§5.2). What remains is P10's **item close of §5.4**:
+run the §16 Definition of Done, update this plan and the `docs/roadmap.md` pointer, update
+`CHANGELOG.md` and `VERSION`, and commit — **no tag and no push** (`AGENT.md` §13 and §15). The
+requirement status rows flip to `done` there, not here.
+
 ### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 
 - **Goal.** Prove the abstraction was right by adding a **second implementation** of each

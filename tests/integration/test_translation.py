@@ -27,9 +27,11 @@ complete-call fixture:
 
 from __future__ import annotations
 
+import contextlib
 import socket
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -39,6 +41,49 @@ from as_app.routing.rules import RuleSetStore, load_rule_set
 from s_sbc_mock.uac import CallScenario
 
 pytestmark = pytest.mark.integration
+
+#: A rules document whose only route rule strips the whole called number, so the engine
+#: raises ``AS-ROUTE-004`` ("translation produced an empty number") before it can decide.
+_EMPTY_TRANSLATION_DOCUMENT = """
+version: 1
+name: empty-translation
+next_hops:
+  - name: hop-a
+    address: 127.0.0.1
+    port: 15061
+rules:
+  - rule_id: R-EMPTY
+    priority: 10
+    match:
+      called_prefixes: ["123"]
+    action:
+      kind: route
+      translate:
+        to_format: national
+        strip_prefix: "123"
+      next_hops: [hop-a]
+"""
+
+#: A rules document with one routable rule; the 480 test drains the hop catalogue after
+#: load, so resolving the matched rule's hop raises ``AS-ROUTE-003`` at runtime.
+_ONE_HOP_DOCUMENT = """
+version: 1
+name: one-hop
+next_hops:
+  - name: hop-a
+    address: 127.0.0.1
+    port: 15061
+rules:
+  - rule_id: R-001
+    priority: 10
+    match:
+      called_prefixes: ["0"]
+    action:
+      kind: route
+      translate:
+        to_format: national
+      next_hops: [hop-a]
+"""
 
 #: A rules document where the primary hop points at an unbound port and the failover hop
 #: is left for the test to rewrite to the mock core port. The primary hop will time out,
@@ -276,8 +321,9 @@ rules:
 def test_translation_to_empty_yields_500(tmp_path: Path) -> None:
     """A translation that strips the entire number and prepends nothing yields 500.
 
-    The routing engine raises ``AS-ROUTE-004`` when the translation result is empty,
-    which the controller turns into a ``500`` on the trunk.
+    The routing engine raises ``AS-ROUTE-004`` with a ``500`` status. That the controller
+    turns the failure into a ``500`` on the trunk is asserted by
+    :func:`test_translation_to_empty_is_answered_500_on_the_trunk`, which drives the stack.
     """
     document = """
 version: 1
@@ -305,3 +351,153 @@ rules:
         decide(rule_set, "123")
     assert excinfo.value.code is AsErrorCode.ROUTE_TRANSLATION_FAILED
     assert excinfo.value.sip_status == 500
+
+
+# ---------------------------------------------------------------------------
+# The engine's raises, driven through the real controller and observed on the wire
+# ---------------------------------------------------------------------------
+
+
+def _start_translation_as(rules_path: Path) -> tuple[Any, int, RuleSetStore]:
+    """Bind a number-translation AS on loopback UDP with the given rules file.
+
+    Args:
+        rules_path: Rules file the AS loads.
+
+    Returns:
+        The started stack, the UDP port it listens on, and the rule set store it holds
+        (so a test can change the active rule set at runtime).
+    """
+    from as_app.bootstrap import AsSettings
+    from as_app.main import AsStack
+    from as_app.observability.tracing import SipMessageRecorder
+
+    as_port = _free_udp_port()
+    store = RuleSetStore(rules_path)
+    settings = AsSettings(
+        _env_file=None,
+        sip_listen_address="127.0.0.1",
+        sip_listen_port=as_port,
+        sbc_peer_address="127.0.0.1",
+        sbc_peer_port=_free_udp_port(),
+        allowed_peers=["127.0.0.1"],
+        rules_file=rules_path,
+        internal_api_address="127.0.0.1",
+        internal_api_port=_free_udp_port(),
+        log_payloads=False,
+    )
+    stack = AsStack(settings, rule_set_store=store, sip_logger=SipMessageRecorder())
+    stack.start()
+    return stack, as_port, store
+
+
+def _final_status_line(responses: list[bytes]) -> str | None:
+    """Return the status line of the first final response collected.
+
+    Args:
+        responses: Raw SIP datagrams received on the trunk side.
+
+    Returns:
+        The status line (status code 200 or above), or ``None`` when none arrived yet.
+    """
+    for data in responses:
+        line = data.decode(errors="replace").split("\r\n", 1)[0]
+        if not line.startswith("SIP/2.0 "):
+            continue
+        try:
+            status = int(line.split(" ", 2)[1])
+        except (IndexError, ValueError):
+            continue
+        if status >= 200:
+            return line
+    return None
+
+
+def _answer_for_invite(as_port: int, call_id: str, called_number: str) -> str:
+    """Place one raw INVITE and return the final response's status line.
+
+    Drives the shared sippy loop until the AS answers with a final response, so the
+    assertion is on the bytes the AS put on the trunk rather than on an intermediate
+    object.
+
+    Args:
+        as_port: UDP port the AS listens on.
+        call_id: Call-ID to put on the INVITE.
+        called_number: User part of the Request-URI, the number the rules match on.
+
+    Returns:
+        The status line of the first final response, or ``""`` when none arrived.
+    """
+    from sippy.Core.EventDispatcher import ED2
+    from sippy.Time.Timeout import Timeout
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+        client.bind(("127.0.0.1", 0))
+        client.setblocking(False)
+        local_port = int(client.getsockname()[1])
+        invite = (
+            f"INVITE sip:{called_number}@127.0.0.1;user=phone SIP/2.0\r\n"
+            f"Via: SIP/2.0/UDP 127.0.0.1:{local_port};branch=z9hG4bK{call_id};rport\r\n"
+            "Max-Forwards: 70\r\n"
+            "From: <sip:+86216180001@127.0.0.1>;tag=translation-reject\r\n"
+            f"To: <sip:{called_number}@127.0.0.1>\r\n"
+            f"Call-ID: {call_id}\r\n"
+            "CSeq: 1 INVITE\r\n"
+            f"Contact: <sip:127.0.0.1:{local_port}>\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n"
+        ).encode()
+        client.sendto(invite, ("127.0.0.1", as_port))
+        responses: list[bytes] = []
+        deadline = time.monotonic() + 5.0
+
+        def poll() -> None:
+            with contextlib.suppress(TimeoutError, BlockingIOError):
+                responses.append(client.recvfrom(65535)[0])
+            if _final_status_line(responses) is not None or time.monotonic() >= deadline:
+                ED2.breakLoop()
+
+        timer = Timeout(poll, 0.02, -1)
+        try:
+            ED2.loop(timeout=5.0)
+        finally:
+            timer.cancel()
+        return _final_status_line(responses) or ""
+
+
+def test_translation_to_empty_is_answered_500_on_the_trunk(tmp_path: Path) -> None:
+    """The engine's ``AS-ROUTE-004`` becomes a ``500`` on the trunk leg.
+
+    The pure raise is asserted by ``test_translation_to_empty_yields_500``; this drives the
+    real controller so the seam that turns the failure into the trunk answer is exercised.
+    The application hook owns that conversion — an ``AsError`` must not escape it
+    (ADR-0009 decision 4) — and the caller still sees the pre-P10 ``500``.
+    """
+    rules_path = tmp_path / "empty_translation_rules.yaml"
+    rules_path.write_text(_EMPTY_TRANSLATION_DOCUMENT, encoding="utf-8")
+    stack, as_port, _store = _start_translation_as(rules_path)
+    try:
+        status_line = _answer_for_invite(as_port, "empty-translation-0001", "123")
+    finally:
+        stack.stop()
+    assert status_line == "SIP/2.0 500 Server Internal Error", status_line
+
+
+def test_unresolvable_hop_is_answered_480_on_the_trunk(tmp_path: Path) -> None:
+    """The engine's ``AS-ROUTE-003`` becomes a ``480`` on the trunk leg.
+
+    The schema rejects an unknown hop reference at load, so the runtime failure is
+    simulated the way ``test_route_decision_with_no_next_hop_yields_480`` does — the
+    catalogue is drained after load — and then driven through the real controller.
+    """
+    rules_path = tmp_path / "one_hop_rules.yaml"
+    rules_path.write_text(_ONE_HOP_DOCUMENT, encoding="utf-8")
+    stack, as_port, store = _start_translation_as(rules_path)
+    try:
+        # Drain the catalogue the controller resolves the matched rule's hop from, so
+        # ``next_hops_for`` raises ``AS-ROUTE-003`` for this call.
+        store.current._next_hops.clear()  # noqa: SLF001 — test-only drained catalogue
+        status_line = _answer_for_invite(as_port, "no-hop-0001", "0")
+    finally:
+        stack.stop()
+    assert status_line == "SIP/2.0 480 Temporarily Unavailable", status_line

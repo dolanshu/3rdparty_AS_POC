@@ -34,7 +34,7 @@ import pytest
 from pydantic import ValidationError
 
 from anti_fraud_as.bootstrap import FraudAsSettings, run_startup_self_check
-from as_app.errors import AsError, AsErrorCode
+from anti_fraud_as.errors import AsError, FraudErrorCode, SkeletonErrorCode
 
 pytestmark = pytest.mark.unit
 
@@ -51,11 +51,13 @@ FRAUD_KNOBS = (
 )
 
 #: Top-level modules the anti-fraud package may import: the standard library it uses, sippy,
-#: the already-pinned configuration/API packages, and the shared ``as_app`` modules.
+#: the already-pinned configuration/API packages, the shared ``as_platform`` modules and
+#: ``as_app`` (only for the repository version it re-exports).
 ALLOWED_IMPORTS = frozenset(
     {
         "anti_fraud_as",
         "as_app",
+        "as_platform",
         "sippy",
         "pydantic",
         "pydantic_settings",
@@ -213,7 +215,7 @@ def test_the_self_check_rejects_a_missing_screening_file(
     with pytest.raises(AsError) as raised:
         run_startup_self_check(settings)
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_UNREADABLE
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_UNREADABLE
 
 
 def test_the_self_check_rejects_an_invalid_screening_file(
@@ -226,7 +228,7 @@ def test_the_self_check_rejects_an_invalid_screening_file(
     with pytest.raises(AsError) as raised:
         run_startup_self_check(settings_for(free_udp_port, broken))
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
 
 
 def test_the_self_check_requires_a_next_hop(free_udp_port: int, screening_file: Path) -> None:
@@ -236,7 +238,7 @@ def test_the_self_check_requires_a_next_hop(free_udp_port: int, screening_file: 
     with pytest.raises(AsError) as raised:
         run_startup_self_check(settings)
 
-    assert raised.value.code is AsErrorCode.CFG_MISSING
+    assert raised.value.code is SkeletonErrorCode.CFG_MISSING
 
 
 def test_the_self_check_requires_at_least_one_allowed_peer(
@@ -248,7 +250,7 @@ def test_the_self_check_requires_at_least_one_allowed_peer(
     with pytest.raises(AsError) as raised:
         run_startup_self_check(settings)
 
-    assert raised.value.code is AsErrorCode.CFG_PEER_INVALID
+    assert raised.value.code is SkeletonErrorCode.CFG_PEER_INVALID
 
 
 def test_the_self_check_fails_fast_when_the_port_is_taken(screening_file: Path) -> None:
@@ -260,7 +262,7 @@ def test_the_self_check_fails_fast_when_the_port_is_taken(screening_file: Path) 
         with pytest.raises(AsError) as raised:
             run_startup_self_check(settings_for(taken_port, screening_file))
 
-    assert raised.value.code is AsErrorCode.CFG_PORT_UNAVAILABLE
+    assert raised.value.code is SkeletonErrorCode.CFG_PORT_UNAVAILABLE
 
 
 # ---------------------------------------------------------------------------
@@ -303,10 +305,22 @@ def test_the_fraud_package_adds_no_third_party_dependency(repo_root: Path) -> No
 
 
 def test_the_runtime_dependency_pin_is_unchanged(repo_root: Path) -> None:
-    """The SIP stack stays the only mandatory runtime dependency (``AGENT.md`` section 6)."""
+    """The sippy pin is unchanged; ``as-platform`` is the only other runtime dependency.
+
+    The SIP stack stays pinned at exactly ``sippy==2.4.2`` (``AGENT.md`` section 6), and it
+    is the only pinned third-party runtime dependency. The sole other mandatory runtime
+    dependency is this project's own platform library ``as-platform``, consumed from the
+    sibling checkout ``../as_platform`` (ADR-0009 decision 6) — not a third-party package
+    and not a version pin.
+    """
     text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert 'dependencies = ["sippy==2.4.2"]' in text
+    runtime = re.search(r"^dependencies = \[(.*?)^\]", text, re.DOTALL | re.MULTILINE)
+    assert runtime is not None, "the runtime dependencies are missing from pyproject.toml"
+    runtime_dependencies = re.findall(r'"([^"]+)"', runtime.group(1))
+    assert "sippy==2.4.2" in runtime_dependencies
+    assert set(runtime_dependencies) - {"sippy==2.4.2"} == {"as-platform"}
+
     # The block ends at a line that is only ``]``: an item like ``uvicorn[standard]``
     # contains a ``]`` of its own, so the delimiter cannot be the first one seen.
     block = re.search(r"^as = \[(.*?)^\]", text, re.DOTALL | re.MULTILINE)

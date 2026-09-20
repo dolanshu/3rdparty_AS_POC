@@ -16,9 +16,11 @@
 
 A **separate process** (D6, ADR-0007): it owns its own ``SipConf`` identity, its own
 ``SipTransactionManager``, its own ``ED2.loop()``, its own screening data and its own
-internal API. The stack is the same three sippy primitives the first AS uses, in its own
-interpreter, so the two AS instances never share a listen port, an event loop or a clock
-(``docs/phase2-plan.md`` section 6).
+internal API. The process skeleton is shared with the number-translation AS and lives in the
+platform library (``as_platform.main.BaseAsStack``); this module keeps the anti-fraud
+identity — its user agent name, its screening data and its reload timer — as a subclass
+(ADR-0009 decision 2), so the two AS instances never share a listen port, an event loop or a
+clock (``docs/phase2-plan.md`` section 6).
 
 **Every timer this process arms is cancelled from** :meth:`FraudAsStack.stop` **before**
 sippy's own ``SipTransactionManager.shutdown()``: that call cancels only its own cache-purge
@@ -35,11 +37,18 @@ import signal
 from pathlib import Path
 from typing import Any
 
-from sippy.Core.EventDispatcher import ED2
-from sippy.SipConf import SipConf
-from sippy.SipLogger import SipLogger
-from sippy.SipTransactionManager import SipTransactionManager
-from sippy.Time.Timeout import Timeout
+from as_platform.bootstrap import ShutdownController, install_signal_handlers
+from as_platform.errors import AsError
+from as_platform.main import BaseAsStack
+from as_platform.observability.logging import (
+    LogDirection,
+    configure_logging,
+    get_logger,
+    log_event,
+)
+from as_platform.observability.metrics import MetricsRegistry
+from as_platform.observability.tracing import TraceRecorder
+from as_platform.transport import UdpTransport
 
 from anti_fraud_as import __version__
 from anti_fraud_as.bootstrap import (
@@ -50,12 +59,6 @@ from anti_fraud_as.call_controller import FraudCallMap
 from anti_fraud_as.caller_state import CallerStateStore
 from anti_fraud_as.internal_api import InternalApiServer
 from anti_fraud_as.screening_data import ScreeningDataStore
-from as_app.bootstrap import ShutdownController, install_signal_handlers
-from as_app.errors import AsError
-from as_app.observability.logging import LogDirection, configure_logging, get_logger, log_event
-from as_app.observability.metrics import MetricsRegistry, get_metrics_registry
-from as_app.observability.tracing import TraceRecorder, get_trace_recorder
-from as_app.sip_adapter import cancel_transaction_timers
 
 __all__ = ["FraudAsStack", "main"]
 
@@ -94,33 +97,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _build_sip_logger(settings: FraudAsSettings, sip_logger: Any | None = None) -> Any:
-    """Build the sippy SIP message logger for the process.
-
-    The structured application log never carries payloads; this is the separate SIP message
-    channel, switched by ``LOG_PAYLOADS`` (``AGENT.md`` section 9).
-
-    Args:
-        settings: The loaded configuration.
-        sip_logger: An explicit logger, used by the tooling; ``None`` builds the default.
-
-    Returns:
-        An object with the ``write()`` interface sippy expects.
-    """
-    if sip_logger is not None:
-        return sip_logger
-    logger = SipLogger("anti-fraud-as")
-    if not settings.log_payloads:
-        logger.write = logger.donoting
-    return logger
-
-
-class FraudAsStack:
+class FraudAsStack(BaseAsStack[FraudAsSettings]):
     """The sippy signalling stack of the anti-fraud AS process.
 
-    One instance owns the transaction manager, the process-level caller state, the trunk
-    call map and the internal API server. It can run the blocking sippy loop
-    (:meth:`run`) or be driven step by step, which is how tests would use it.
+    The sippy process skeleton — the transaction manager, the trunk call map, the internal
+    API server and the graceful shutdown of the loop — is inherited from
+    :class:`as_platform.main.BaseAsStack`; this subclass supplies the anti-fraud identity,
+    the process-level caller state and the screening data the call controller needs
+    (ADR-0009 decision 2). It can run the blocking sippy loop or be driven step by step.
 
     Attributes:
         settings: The loaded configuration.
@@ -133,6 +117,12 @@ class FraudAsStack:
         metrics: Counter registry.
         tracer: Per-Call-ID trace recorder.
     """
+
+    sip_user_agent_name = SIP_USER_AGENT_NAME
+    sip_logger_name = "anti-fraud-as"
+    bound_log_message = "anti-fraud signalling stack bound"
+    shutdown_poll_seconds = SHUTDOWN_POLL_SECONDS
+    reload_poll_seconds = SCREENING_RELOAD_POLL_SECONDS
 
     def __init__(
         self,
@@ -156,142 +146,68 @@ class FraudAsStack:
             tracer: Trace recorder; the process-wide one is used when omitted.
             sip_logger: Explicit sippy SIP message logger, used by the tooling.
         """
-        self.settings = settings
         self.screening_data = screening_data or ScreeningDataStore(settings.fraud_screening_file)
         self.caller_state = caller_state or CallerStateStore(self.screening_data.current.policy)
-        self.metrics = metrics or get_metrics_registry()
-        self.tracer = tracer or get_trace_recorder()
-        self.internal_api: InternalApiServer | None = None
-        self._sip_logger = _build_sip_logger(settings, sip_logger)
-        self._shutdown_timer: Any = None
-        self._reload_timer: Any = None
-        self.transaction_manager: Any = None
-        self.global_config: dict[str, Any] = {}
-        self.call_map: FraudCallMap | None = None
+        super().__init__(
+            settings,
+            transport=UdpTransport(
+                settings.fraud_sip_listen_address, settings.fraud_sip_listen_port
+            ),
+            peer_address=settings.fraud_sbc_peer_address,
+            peer_port=settings.fraud_sbc_peer_port,
+            allowed_peers=tuple(settings.fraud_allowed_peers),
+            api_address=settings.fraud_internal_api_address,
+            api_port=settings.fraud_internal_api_port,
+            metrics=metrics,
+            tracer=tracer,
+            sip_logger=sip_logger,
+        )
 
-    def start(self) -> None:
-        """Bind the trunk socket, the transaction manager and the call map.
+    def _create_call_map(self, global_config: dict[str, Any]) -> FraudCallMap:
+        """Create the anti-fraud trunk call map.
 
-        Raises:
-            AsError: Propagated from sippy when the signalling port cannot be bound.
+        Args:
+            global_config: sippy global configuration; ``nh_addr`` carries the next hop.
+
+        Returns:
+            The trunk call map wired to this AS's screening data and caller state.
         """
-        settings = self.settings
-        SipConf.my_uaname = SIP_USER_AGENT_NAME
-        SipConf.my_address = settings.fraud_sip_listen_address
-        SipConf.my_port = settings.fraud_sip_listen_port
-        self.global_config = {
-            "nh_addr": (settings.fraud_sbc_peer_address, settings.fraud_sbc_peer_port),
-            "_sip_address": settings.fraud_sip_listen_address,
-            "_sip_port": settings.fraud_sip_listen_port,
-            "_sip_uaname": SIP_USER_AGENT_NAME,
-            "_sip_logger": self._sip_logger,
-        }
-        self.call_map = FraudCallMap(
-            self.global_config,
+        return FraudCallMap(
+            global_config,
             self.screening_data,
             self.caller_state,
-            allowed_peers=tuple(settings.fraud_allowed_peers),
+            allowed_peers=tuple(self.settings.fraud_allowed_peers),
             metrics=self.metrics,
             tracer=self.tracer,
         )
-        self.transaction_manager = SipTransactionManager(
-            self.global_config, self.call_map.recv_request
-        )
-        self.global_config["_sip_tm"] = self.transaction_manager
-        log_event(
-            _LOGGER,
-            logging.INFO,
-            "anti-fraud signalling stack bound",
-            direction=LogDirection.INTERNAL,
-            listen=f"{settings.fraud_sip_listen_address}:{settings.fraud_sip_listen_port}",
-            next_hop=f"{settings.fraud_sbc_peer_address}:{settings.fraud_sbc_peer_port}",
-            allowed_peers=",".join(settings.fraud_allowed_peers),
-        )
 
-    def start_internal_api(self) -> InternalApiServer:
-        """Start the health and counters endpoint on its own thread.
+    def _create_internal_api_server(self, address: str, port: int) -> InternalApiServer:
+        """Create the anti-fraud internal API server.
+
+        Args:
+            address: Local address the server binds.
+            port: Local TCP port the server binds.
 
         Returns:
-            The running internal API server.
+            The internal API server bound to this AS's screening data.
         """
-        server = InternalApiServer(
-            self.settings.fraud_internal_api_address,
-            self.settings.fraud_internal_api_port,
+        return InternalApiServer(
+            address,
+            port,
             version=__version__,
             screening_data_store=self.screening_data,
             metrics=self.metrics,
             tracer=self.tracer,
         )
-        server.start()
-        self.internal_api = server
-        log_event(
-            _LOGGER,
-            logging.INFO,
-            "internal api listening",
-            direction=LogDirection.INTERNAL,
-            address=(
-                f"{self.settings.fraud_internal_api_address}:"
-                f"{self.settings.fraud_internal_api_port}"
-            ),
-        )
-        return server
 
-    def run(self, shutdown: ShutdownController) -> None:
-        """Run the blocking sippy event loop until a shutdown is requested.
+    def _poll_reload(self) -> None:
+        """Run the loop-owned screening-data reload.
 
-        Signal handlers only set the flag; the timers below are owned by the loop, which is
-        the only place allowed to stop it (ADR-0002, ``AGENT.md`` section 6). The second
-        loop-owned timer polls the screening-data file for hot reload: the reload is
-        pull-based because the sippy thread must not be blocked by file I/O.
-
-        Args:
-            shutdown: Shutdown state written by the signal handlers.
+        The base schedules this hook as the reload timer; the callback keeps its historical
+        name, :meth:`_poll_screening_reload`, because the integration tests drive it
+        directly (``tests/integration/test_fraud_screening_path.py``).
         """
-        self._shutdown_timer = Timeout(self._poll_shutdown, SHUTDOWN_POLL_SECONDS, -1, shutdown)
-        self._reload_timer = Timeout(self._poll_screening_reload, SCREENING_RELOAD_POLL_SECONDS, -1)
-        log_event(
-            _LOGGER,
-            logging.INFO,
-            "sippy event loop running",
-            direction=LogDirection.INTERNAL,
-            screening_file=str(self.settings.fraud_screening_file),
-            reload_poll_seconds=str(SCREENING_RELOAD_POLL_SECONDS),
-        )
-        ED2.loop()
-
-    def stop(self) -> None:
-        """Release the trunk socket, the loop timers and the internal API port.
-
-        Everything the stack armed is cancelled before sippy's own
-        ``SipTransactionManager.shutdown()`` runs: that call only cancels its own cache-purge
-        timer and releases the sockets, so a timer armed here would fire into a torn-down
-        stack (the P8a lesson, see :func:`as_app.sip_adapter.cancel_transaction_timers`).
-        """
-        if self._shutdown_timer is not None:
-            self._shutdown_timer.cancel()
-            self._shutdown_timer = None
-        if self._reload_timer is not None:
-            self._reload_timer.cancel()
-            self._reload_timer = None
-        if self.call_map is not None:
-            self.call_map.dispose()
-        if self.transaction_manager is not None:
-            cancel_transaction_timers(self.transaction_manager)
-            self.transaction_manager.shutdown()
-            self.transaction_manager = None
-        if self.internal_api is not None:
-            self.internal_api.stop()
-            self.internal_api = None
-
-    @staticmethod
-    def _poll_shutdown(shutdown: ShutdownController) -> None:
-        """Stop the sippy loop when a shutdown has been requested.
-
-        Args:
-            shutdown: Shutdown state written by the signal handlers.
-        """
-        if shutdown.requested:
-            ED2.breakLoop()
+        self._poll_screening_reload()
 
     def _poll_screening_reload(self) -> None:
         """Reload the screening data when the file changed on disk.
@@ -330,6 +246,14 @@ class FraudAsStack:
                 direction=LogDirection.INTERNAL,
                 **fields,
             )
+
+    def _reload_log_fields(self) -> dict[str, str]:
+        """Return the reload-source log field for the event loop start line.
+
+        Returns:
+            The screening-file field naming the reloaded file.
+        """
+        return {"screening_file": str(self.settings.fraud_screening_file)}
 
 
 def main(argv: list[str] | None = None) -> int:

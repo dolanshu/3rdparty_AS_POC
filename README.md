@@ -42,10 +42,12 @@ engagement for this repository.
 ## Quickstart
 
 ```bash
-git clone https://github.com/dolanshu/3rdparty_AS_POC.git
+# Clone both repositories side by side: the platform library first, then this one.
+git clone https://github.com/dolanshu/as_platform.git        # the platform library (sibling checkout)
+git clone https://github.com/dolanshu/3rdparty_AS_POC.git    # this repository
 cd 3rdparty_AS_POC
 pip install uv          # uv 0.12.15 is what the toolchain was verified with
-uv sync                 # creates .venv from the committed uv.lock
+uv sync                 # creates .venv from the committed uv.lock and links ../as_platform
 
 make lint               # ruff format --check + ruff check + mypy
 make test               # unit + integration + e2e
@@ -54,9 +56,14 @@ make demo-fraud         # screens two real calls: one allowed, one answered 608 
 make demo-chained       # chains both AS instances: SBC -> anti-fraud -> translation -> core
 ```
 
+`uv sync` resolves the `as-platform` dependency from `../as_platform` (a `path` source with
+`editable = true`, ADR-0009 decision 6), so the two directories must be siblings; a checkout
+of this repository alone does not resolve it.
+
 Fallback without `uv` (maintainer-approved): `python3 -m venv .venv`, activate it, then
-`pip install sippy==2.4.2 pydantic pydantic-settings pyyaml pytest ruff mypy fastapi
-uvicorn`.
+`pip install -e ../as_platform` (the sibling library that `uv` links through the `path`
+source) followed by `pip install sippy==2.4.2 pydantic pydantic-settings pyyaml pytest ruff
+mypy fastapi uvicorn`.
 
 ### Slow or blocked network (China mirrors)
 
@@ -231,23 +238,27 @@ AGENT.md                 rules of engagement, delivery standards, milestones
 config/                  routing rules and screening data (data, hot reloaded)
 deploy/                  docker-compose.yml + one Dockerfile per service
 docs/                    documentation set (see the index below)
+../as_platform/          the platform library (separate repository, checked out beside this one)
+  src/as_platform/       the shared skeleton both AS instances build on: observability,
+                         sip_adapter, hop, error mechanism, bootstrap plumbing, internal-API
+                         shell, controller base, seams (ADR-0009)
 src/as_app/              the third-party AS (sippy application)
-  main.py                entry point: settings, self-check, sippy event loop
-  bootstrap.py           AsSettings, startup self-check, graceful shutdown
-  call_controller.py     Call Control Logic — the business hook
-  sip_adapter.py         thin wrapper around sippy primitives
-  errors.py              AS-* error model mapped to SIP status codes
+  main.py                entry point: AsStack over the library's BaseAsStack
+  bootstrap.py           AsSettings, startup self-check; plumbing re-exported from the library
+  call_controller.py     Call Control Logic — the business hook (decide() over the library base)
+  sip_adapter.py         re-export facade over the library's sippy adapter
+  errors.py              the AS-RULE-* / AS-ROUTE-* family over the library's error mechanism
   routing/rules.py       YAML rule model, loading, reload detection
   routing/engine.py      pure translation and routing decisions
-  observability/         structured logging, counters, per-Call-ID tracing
-  internal_api.py        payloads for the console API
+  observability/         re-export facades over the library's logging, counters and tracing
+  internal_api.py        routes and payloads over the library's internal-API shell
 src/anti_fraud_as/       the second AS: caller screening, 608 Rejected (ADR-0007)
-  main.py                entry point: its own SipConf + manager + sippy event loop
+  main.py                entry point: FraudAsStack over the library's BaseAsStack
   call_controller.py     the verdict seam, allow relay, UAS-only 608 reject
   screening.py           pure verdict function (no sockets, no clock)
   caller_state.py        process-level call-rate window and reputation decay
   screening_data.py      screening data model, validation, reload
-  internal_api.py        payloads for the console API
+  internal_api.py        routes and payloads over the library's internal-API shell
 src/console/             FastAPI + plain HTML/CSS/JS, separate process
 src/s_sbc_mock/          mock S-SBC: UAC (S-CSCF trigger) + UAS (core network)
 tests/{unit,integration,e2e}/
@@ -255,11 +266,11 @@ tools/                   sippy probe, 608 probe, rule viewer, capture helper, de
 ```
 
 Rules of the layout: `src/as_app` never imports from `src/s_sbc_mock`; routing decisions
-live in `routing/engine.py` as pure functions; sippy interaction is confined to
-`sip_adapter.py` and `call_controller.py`. The two AS packages are independent
-applications: `src/anti_fraud_as` reuses the use-case-agnostic modules of `as_app` (error
-model, logging, counters, tracing, generic sip plumbing) and nothing else — it is a second
-concrete AS, not a framework (ADR-0007).
+live in `routing/engine.py` as pure functions; sippy interaction is confined to the sip
+adapter and the call controllers. The shared skeleton of the two AS packages now lives in
+the **platform library** (`../as_platform`, ADR-0009): both `src/as_app` and
+`src/anti_fraud_as` build on it, and the library never imports either — they are two
+concrete AS instances, not a framework (ADR-0007).
 
 ## Non-goals
 
@@ -281,7 +292,8 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 | `docs/requirements/functional-and-nonfunctional.md` | `REQ-F-*` / `REQ-NF-*` capability list |
 | `docs/architecture/hld.md` | context, deployment and interface views, message flows |
 | `docs/architecture/lld.md` | modules, data structures, state machines, error codes, log fields |
-| `docs/architecture/adr/` | ADR-0001 … ADR-0008 (0007 covers the anti-fraud AS, `608 Rejected` and cross-call state; 0008 covers the chained topology and the per-leg `Call-ID`) |
+| `docs/architecture/adr/` | ADR-0001 … ADR-0009 (0007 covers the anti-fraud AS, `608 Rejected` and cross-call state; 0008 covers the chained topology and the per-leg `Call-ID`; 0009 covers the platform library extraction and the `path` consumption) |
+| `../as_platform/` (the platform library) | the shared skeleton both AS instances build on, in its own repository checked out beside this one, with its own gate and its library-standard documents (API reference, integration guide, compatibility matrix) |
 | `docs/specs/index.md`, `docs/specs/message-samples/` | normative references and real message samples; the generated samples are gitignored, only the folder `README.md` is tracked |
 | `docs/operations/deployment.md` | topology, port matrix, health checks |
 | `docs/operations/runbook.md` | start, stop, reload rules and screening data, inspect state |

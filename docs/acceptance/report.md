@@ -2796,8 +2796,13 @@ Consistent with the stage-4 position, and not hidden:
   `src/anti_fraud_as/call_controller.py` imports `as_app.sip_adapter` **by design** (ADR-0007
   decision 9); only the forbidden direction (`src/as_app` ↛ `anti_fraud_as`) is assertable and is
   what `test_as_app_does_not_import_the_anti_fraud_as` asserts. ACC-P9-001 claims only that
-  one-way independence. The wording question is escalated as `docs/phase2-plan.md` §7 item 10,
-  not settled here (`AGENT.md` §14 rule 2).
+  one-way independence. **P10-era note (added by the P10 acceptance stage, 2026-09-20): the two
+  sentences above are the P9 record and stay as such — the mechanism changed in P10, where
+  `src/anti_fraud_as/call_controller.py:57` imports `as_platform.sip_adapter` directly and the
+  package's only remaining `as_app` import is the version chain,
+  `src/anti_fraud_as/__init__.py:31`; the one-way invariant this note justifies is unchanged
+  (ADR-0009 decision 2, HLD §10.3).** The wording question is escalated as
+  `docs/phase2-plan.md` §7 item 10, not settled here (`AGENT.md` §14 rule 2).
 - **`REQ-F-025`'s literal call sequence includes `ACK`, but no P9 test asserts it.** The e2e test
   asserts `INVITE`, `180`, `200` and `BYE` in each instance's trace; the emitted AS-1 trace
   contains **no `ACK` row** (the mock's UAC does not record `ACK` in the trace), so the criterion
@@ -2817,3 +2822,514 @@ Consistent with the stage-4 position, and not hidden:
   boundary. `SipConf` and `ED2` are process-wide singletons, so each stack is given its own
   `TraceRecorder` / `MetricsRegistry` (ADR-0008, *Verified facts*).
 - **No capture of the chained flows** — see §4; recorded as missing rather than manufactured.
+
+## Phase 2 — P10 platform extraction (2026-09-20)
+
+Worked on `feat/platform-extraction` (item **P10** in `docs/phase2-plan.md` §3), cut from `phase2`.
+Acceptance items **ACC-P10-001 … ACC-P10-008** in `docs/acceptance/criteria.md`; their
+requirements are `REQ-F-029 … REQ-F-033` and `REQ-NF-019 … REQ-NF-021`. Design rationale is
+**ADR-0009** (with HLD §10 and LLD §11); the stage-by-stage record — the requirement → test
+coverage table, the two honest no-assertion statements, the red signals and the review gates —
+lives in `docs/phase2-plan.md` §3 stages 1–4 and is **cited here, not rewritten**.
+
+What was verified: the skeleton the two AS instances share now lives in a library in a **new
+repository** (checked out beside this one at `../as_platform`, branch `main`, distribution
+`as-platform`, import package `as_platform`, `VERSION` `0.1.0`), and both instances —
+`src/as_app/` and `src/anti_fraud_as/` — are **users** of it; the library imports neither use
+case; the two instances stay independent processes whose externally observable behaviour is
+**unchanged** (the extraction is a pure refactor, so the same signalling, the same `AS-*` codes
+and the same per-instance Call-ID keyed trace); this repository consumes the library through a
+**`path` dependency** (`editable = true`), which is why the `AGENT.md` §10 guarantee *"clone →
+`uv sync` → `make demo`"* widens to *"clone **both** repositories side by side"*; the library is a
+standalone distribution with the three library-standard documents, its own gate and **no** uv
+workspace membership; the two pluggable dimensions P11 verifies are **enabled by, but not built
+in, P10** (one `Transport`, one `StateStore`, no TLS, no Redis, no capacity harness); and the
+extraction ran as an incremental commit sequence that left the three layers green.
+
+Result: **accepted**, with the limitations recorded under *Accepted limitations and open items*.
+
+Environment of this run: Linux x86-64, loopback only; Python 3.10.12; sippy 2.4.2; `uv` 0.12.15;
+application repository `VERSION` = 0.7.0 and library repository `VERSION` = 0.1.0.
+
+### 1. Command and output
+
+Every command below was run from the application repository root on 2026-09-20 unless it says
+otherwise; the outputs are pasted verbatim (ports, temp-dir names and Call-IDs are ephemeral and
+vary per run).
+
+**The gate (`AGENT.md` §13: local, before the commit — not a CI result, see §3).**
+
+```text
+$ make lint
+uv sync
+Resolved 51 packages in 1ms
+Checked 50 packages in 0.49ms
+uv run ruff format --check .
+96 files already formatted
+uv run ruff check .
+All checks passed!
+uv run mypy
+Success: no issues found in 29 source files
+```
+
+```text
+$ make unit
+210 passed in 1.11s
+$ make integration
+36 passed in 30.16s
+$ make e2e
+9 passed in 4.29s
+```
+
+**ACC-P10-001** — the library repository exists with the extracted skeleton and both instances are
+its users (REQ-F-029):
+
+```text
+$ git -C ../as_platform log --oneline
+0eeef37 test(p10): pin the library's standalone manifest and close the module-name hole
+27fe26e test(p10): assert the library's seam, document and gate boundaries
+aaa453e fix(p10): answer the trunk when the routing engine raises
+d627e73 test(p10): give the library its own suite, gate and documents
+d5e4561 refactor(p10): add the transport and state-store seams
+734d82c refactor(p10): move the AS stack shell into the as-platform library
+f82a819 refactor(p10): move and generalise the internal API shell into the as-platform library
+060ef71 refactor(p10): move the controller shell into the as-platform library
+7c1355b refactor: move the version chain and the bootstrap plumbing
+ee02653 build: add the library's ruff, mypy and pytest tooling
+9eebe66 refactor: move the leaf modules into the as-platform library
+4caec3e chore: create the as-platform library repository skeleton
+
+$ cat ../as_platform/VERSION
+0.1.0
+
+$ uv sync --frozen
+Checked 50 packages in 0.41ms   # resolves the library through ../as_platform
+
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k users_of_the_platform_library
+1 passed, 55 deselected in 0.02s
+```
+
+The library manifest self-reports the distribution at `pyproject.toml`'s first two lines —
+`name = "as-platform"` / `version = "0.1.0"` — and its own `uv sync --frozen` is
+`Checked 45 packages in 0.38ms`. The half of the requirement that says this repository is *the
+library's reference implementation* is a role statement with no assertion (below).
+
+**ACC-P10-002** — the library is independent of both use cases (REQ-F-030):
+
+```text
+$ grep -rnE 'as_app|anti_fraud_as' ../as_platform/src/ ; echo $?
+1
+
+$ uv run pytest ../as_platform/tests/test_library_independence.py -q
+2 passed in 0.02s
+
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k import_the_anti_fraud
+1 passed, 55 deselected in 0.02s
+```
+
+The grep prints no line and exits `1` (no match). The library-side file is the suite's own
+assertion; the application-side test is `test_as_app_does_not_import_the_anti_fraud_as`.
+
+**ACC-P10-003** — unchanged behaviour across the three layers (REQ-F-031): the gate block above is
+the evidence — `210` / `36` / `9` across unit, integration and e2e, with the same lint and type
+results. The counts are **above** the pre-extraction baseline (255 total, against 246 before the
+extraction) because the implementation and tests stages added tests; the stage-4 record states the
+same fact from the other side (no test deleted, no assertion loosened, no `src/` change of the
+observable behaviour).
+
+**ACC-P10-004** — the `path` dependency and `uv`'s real behaviour behind it (REQ-F-032):
+
+```text
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k "sibling_checkout or workspace"
+2 passed, 54 deselected in 0.02s
+
+$ uv run python tools/path_dependency_probe.py ; echo $?
+P10 path-dependency probe - reproducing the ADR-0009 *Verified facts*
+layout     : a throwaway library plus one consumer variant per case, in a temp dir
+scope      : this repository is never read or written; the temp dir is removed
+requirement: uv 0.12.x and hatchling/mypy resolvable from the local cache or an index
+
+(a) a dependency key alone does not resolve                    : OK
+    exit 1;   cause: Because as-platform was not found in the package registry and your project depends on as-platform, we can conclude that your project's requirements are unsatisfiable.
+(b) default install is a copy; --reinstall-package refreshes it : OK
+    direct_url editable=False, copy in site-packages=True, edit invisible before re-sync=True, visible after --reinstall-package=True
+(b) editable = true links the checkout; the edit is visible at once : OK
+    direct_url editable=True, _editable_impl pth=True, edit visible with no re-sync=True
+(c) a version constraint is silently ignored                   : OK
+    exit 0, installed '0.4.0' (pin was '>=99.0')
+(g) the key may be spelled as_platform or as-platform          : OK
+    exit 0, installed '0.4.0' from the underscore spelling
+(f) a nested consumer does not find a sibling library          : OK
+    exit 1; error: Distribution not found at: file:///tmp/p10-path-dependency-<ephemeral>/nested/a/lib
+(d) --locked refuses a stale lock; --frozen accepts the skew   : OK
+    --locked exit 1 (refused), --frozen exit 0 installed '0.5.0', lock still records 0.4.0=True
+(e) py.typed is required or mypy refuses the import            : OK
+    mypy with py.typed exit 0, without py.typed exit 1 (import-untyped=True)
+
+--- verdict --------------------------------------------------------
+cases measured : 8
+expectations   : all held
+0
+```
+
+The two unit tests are `test_the_library_is_consumed_from_the_sibling_checkout` (the
+`[project].dependencies` entry, the `[tool.uv.sources]` `path` and `editable = true`) and
+`test_the_library_is_not_a_uv_workspace_member`. The probe measures `uv` against a **two-module
+stand-in** library, not the real skeleton, and it never reads this repository
+(`docs/production-gaps.md`, row *Consumption probe's stand-in scope*).
+
+**ACC-P10-005** — library standard, not the application set, and no workspace membership
+(REQ-NF-019):
+
+```text
+$ ls ../as_platform/docs/
+api-reference.md
+compatibility-matrix.md
+integration-guide.md
+
+$ uv run pytest ../as_platform/tests/test_library_standard.py -q
+6 passed in 0.02s
+
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k workspace
+1 passed, 55 deselected in 0.02s
+```
+
+The library-side file carries the three-document checks, the "the application document set is not
+copied" check, the `Makefile` / CI / `pyproject.toml` assertions and
+`test_the_library_is_a_standalone_distribution_not_a_workspace_member` (no `[tool.uv.workspace]`
+table **and** `[project]` self-reports `as-platform`). Nothing under `../as_platform/docs/` is one
+of this repository's documents.
+
+**ACC-P10-006** — the seams exist, the second implementations do not (REQ-NF-020):
+
+```text
+$ uv run pytest ../as_platform/tests/test_seams.py -q
+4 passed in 0.02s
+```
+
+`test_the_library_ships_no_tls_no_redis_and_no_capacity_harness` is a lower-cased **substring**
+match over each module's stem (the earlier `stem.split("_")` form missed `tlsconfig.py`; both
+`tlsconfig.py` and `redis_store.py` now turn it red — the mutation is recorded in the stage-4
+record) and `test_the_library_defines_no_second_transport_and_no_second_state_store` is the
+`*Transport` / `*StateStore` class-suffix check. The boundary is honest: **module names**, not
+module content or class names.
+
+**ACC-P10-007** — the seven-step sequence and the per-step green (REQ-F-033):
+
+```text
+$ git log --oneline f041174~1..0b12db2
+0b12db2 refactor(p10): bind the stack and the caller state to the new seams
+8ab507d refactor(p10): derive both AS stacks from the library BaseAsStack
+f341aff refactor(p10): turn both internal API modules into facades over the library
+0319c8d refactor(p10): rewire both controllers onto the shared shell
+9a59756 refactor(p10): drop the version helper the extraction orphaned
+efa4386 refactor(p10): move the version chain and the bootstrap plumbing
+ac929a9 refactor(p10): move the leaf modules into the as-platform library
+65aa3c8 docs(p10): correct the ADR's attribution of the single-checkout failure
+f041174 build(p10): consume the as-platform library from the sibling checkout
+```
+
+The library's `main` landed the same moves in order: `9eebe66`, `ee02653`, `7c1355b`, `060ef71`,
+`f82a819`, `734d82c`, `d5e4561`, `d627e73`, `aaa453e`. The per-step green is a **historical**
+property; two steps were re-run here from temporary worktrees (the application checkout detached
+at the step's commit, the library checkout detached at the commit of the same step beside it), and
+both temporary worktrees were removed afterwards — `git worktree list` in both repositories then
+showed only the two main trees, both `git status --short` empty:
+
+```text
+# step 1: application f041174 + library 4caec3e
+94 files already formatted
+All checks passed!
+Success: no issues found in 28 source files
+246 passed in 35.28s
+
+# step 4: application 0319c8d + library 060ef71
+95 files already formatted
+All checks passed!
+Success: no issues found in 29 source files
+246 passed in 35.16s
+```
+
+**No step but these two was re-run**, and no test asserts this property at all.
+
+**ACC-P10-008** — the library's own gate, and the honest CI position (REQ-NF-021):
+
+```text
+$ make lint                       # run in ../as_platform
+uv run ruff format --check .
+33 files already formatted
+uv run ruff check .
+All checks passed!
+uv run mypy
+Success: no issues found in 15 source files
+
+$ uv run pytest -q                # run in ../as_platform
+84 passed in 0.34s
+
+$ uv run python -c "import yaml,pathlib;print(sorted(yaml.safe_load(pathlib.Path('../as_platform/.github/workflows/ci.yml').read_text())['jobs']))"
+['lint', 'test', 'type']
+```
+
+### 2. Log excerpt
+
+The excerpts are **Call-ID keyed traces of real runs** (`pytest -q -s`), one per flow the
+requirements speak about. The values are ephemeral per run and none is normalised.
+
+The **number-translation** call (`tests/e2e/test_call_flows.py -q -s`), keyed on
+`3e75b0d1850d2b1eb53fe78d8347f189` — a complete call through one B2BUA:
+
+```text
+call-id 3e75b0d1850d2b1eb53fe78d8347f189
+  2026-09-20T02:46:12.407+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-20T02:46:12.408+00:00  internal -        decision route: China Mobile subscribers, E.164 in and national format out
+  2026-09-20T02:46:12.408+00:00  out      next_hop INVITE  invite originated towards the next hop
+  2026-09-20T02:46:12.410+00:00  in       next_hop 100     100 Trying on the next-hop leg
+  2026-09-20T02:46:12.410+00:00  out      trunk    100     100 Trying relayed to the trunk leg
+  2026-09-20T02:46:12.613+00:00  in       next_hop 180     180 Ringing on the next-hop leg
+  2026-09-20T02:46:12.614+00:00  out      trunk    180     180 Ringing relayed to the trunk leg
+  2026-09-20T02:46:12.813+00:00  in       next_hop 200     200 OK on the next-hop leg
+  2026-09-20T02:46:12.814+00:00  out      trunk    200     200 OK relayed to the trunk leg
+  2026-09-20T02:46:13.012+00:00  in       next_hop BYE     call released on the next-hop leg
+```
+
+The **anti-fraud** allow and reject paths of one run (`tests/e2e/test_fraud_call_flows.py -q -s`),
+keyed on `ca5fa6017dfadb6c82cf067f5c298cf5` and `999bec4f4a20f6802b3198aadc309168`:
+
+```text
+call-id ca5fa6017dfadb6c82cf067f5c298cf5
+  2026-09-20T02:46:46.935+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-20T02:46:46.936+00:00  internal trunk    verdict allow: no screening signal rejected the call
+  2026-09-20T02:46:46.936+00:00  out      next_hop INVITE  invite relayed towards the next hop
+  2026-09-20T02:46:46.938+00:00  in       next_hop 100     100 Trying on the next-hop leg
+  2026-09-20T02:46:46.938+00:00  out      trunk    100     100 Trying relayed to the trunk leg
+  2026-09-20T02:46:47.141+00:00  in       next_hop 180     180 Ringing on the next-hop leg
+  2026-09-20T02:46:47.141+00:00  out      trunk    180     180 Ringing relayed to the trunk leg
+  2026-09-20T02:46:47.342+00:00  in       next_hop 200     200 OK on the next-hop leg
+  2026-09-20T02:46:47.342+00:00  out      trunk    200     200 OK relayed to the trunk leg
+  2026-09-20T02:46:47.540+00:00  in       next_hop BYE     call released on the next-hop leg
+call-id 999bec4f4a20f6802b3198aadc309168
+  2026-09-20T02:46:47.707+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-20T02:46:47.707+00:00  internal trunk    verdict reject: calling party is on the block list
+  2026-09-20T02:46:47.707+00:00  out      trunk    608     608 Rejected answered on the trunk leg
+```
+
+These are the same traces the P8 and P9 runs produced (the extraction changed the code's *home*,
+not its behaviour), which is the observable half of `REQ-F-031`. One honest note on the `-s`
+output: the sippy mock's UAS raises a teardown traceback after the transaction manager is stopped
+(`TypeError: 'NoneType' object is not subscriptable`, from the mock's UAS ring buffer), which is
+noise at the end of the mock's lifetime — the tests themselves pass (`5 passed` / `2 passed`) and
+the traces above are complete.
+
+### 3. CI
+
+**No CI run exists for any P10 commit in either repository, and none can be produced from this
+environment.**
+
+- **Application repository.** `.github/workflows/ci.yml` triggers on `push` / `pull_request`
+  targeting `main` (plus `workflow_dispatch`, which a maintainer would have to start by hand and
+  which no agent may start). P10 is worked on `feat/platform-extraction`, and nothing here is
+  pushed, so no run exists for these commits. On top of that, every CI job now clones the library
+  into `../as_platform` before `uv sync --frozen`, and that clone needs the library **published at
+  a real remote** — the library has **no remote configured yet and has never been pushed**, so CI
+  is not green until it is. That is a registered row: `docs/production-gaps.md` line **134**,
+  *CI second checkout (new dependency)*. A second row, line **131**, records that the library's own
+  gate does **not** run in this repository's CI (*Library gate not in this repository's CI*).
+- **Library repository.** It has its own workflow (`.github/workflows/ci.yml`, three jobs
+  `lint` → `type` → `test`, each `uv sync --frozen`) — but the repository has no remote and has
+  never been pushed, so the workflow is an **unexecuted definition**: no run, no badge, no job
+  conclusion exists for any of its commits.
+
+`AGENT.md` §13 is explicit that the local pre-commit gate is **not** CI and must never be
+presented as a CI result, so the gate in §1 is recorded as a **local** run, not as kind-3
+evidence. This is the one `AGENT.md` §4.8 evidence kind P10 cannot supply from this environment;
+the P8 and P9 sections above record the same position, and nothing here claims a CI result.
+
+### 4. Capture
+
+`docs/specs/message-samples/` was regenerated on 2026-09-20 by `make capture`
+(`tools/capture_call.py`) — 14 sample files plus `README.md`, following
+`NN-direction-method[-qualifier].txt`. The directory is **generated and gitignored** (only its
+`README.md` is tracked), so the evidence is reproduced with `make capture`, not read from the
+repository, and `git status --short docs/specs/` stays clean.
+
+Key files of the run (Call-IDs are ephemeral):
+
+```text
+01-in-invite-trunk.txt
+  INVITE sip:+8613800138000@127.0.0.1:47594 SIP/2.0
+  Call-ID: a04c3c9728bbfc98f09cf1ee277a1692
+  P-Asserted-Identity: <sip:+86216180001@ims.example.invalid>
+
+03-out-invite-core.txt
+  INVITE sip:013800138000@127.0.0.1:46743 SIP/2.0
+  Call-ID: a04c3c9728bbfc98f09cf1ee277a1692-b2b_1
+```
+
+The outbound leg carries the inbound Call-ID plus the AS suffix `-b2b_1` and the translated
+number, i.e. the extraction left the wire bytes exactly as `ACC-M1-005` / `ACC-M2-005` recorded
+them. There is **no pcap** anywhere in the repository and none is produced: `AGENT.md` §13 forbids
+committing captures, and the samples above are the message-level reference.
+
+### Item results
+
+| ID | Result |
+| --- | --- |
+| ACC-P10-001 | **accepted** — the library repository exists at `../as_platform` with the extraction commits and `VERSION` `0.1.0`; `uv sync --frozen` resolves it; `1 passed, 55 deselected`. The "reference implementation" half is unasserted (below) |
+| ACC-P10-002 | **accepted** — library independence grep exits `1` with no match; `2 passed`; `1 passed, 55 deselected` for the application's one-way invariant |
+| ACC-P10-003 | **accepted** — `210` / `36` / `9` with the same lint and type results; the counts are above the pre-extraction baseline because tests were added, and no assertion was loosened |
+| ACC-P10-004 | **accepted** — `2 passed, 54 deselected`; the probe measured 8 cases, all expectations held, exit `0`. Its stand-in scope is a registered limitation |
+| ACC-P10-005 | **accepted** — the three library documents exist; `6 passed`; `1 passed, 55 deselected` for the workspace half |
+| ACC-P10-006 | **accepted** — `4 passed`; the module-name vocabulary check trips on `tlsconfig.py` and `redis_store.py`. P11 rewrites these assertions by design |
+| ACC-P10-007 | **accepted** — the nine-commit sequence in order; two of the seven steps re-run green (`246 passed` each) from temporary worktrees, both removed and both trees left clean. **No test asserts this**, and only two steps were re-run (below) |
+| ACC-P10-008 | **accepted** — library gate `33` / `All checks passed!` / `15 source files` / `84 passed`; the workflow declares `['lint', 'test', 'type']`. Kind 3 is not producible (below) |
+
+### Evidence kinds per item
+
+| Item | Kind 1 (command + output) | Kind 2 (Call-ID log) | Kind 3 (CI) | Kind 4 (capture) |
+| --- | --- | --- | --- | --- |
+| ACC-P10-001 | yes — §1 (`1 passed, 55 deselected`; library log, `VERSION`, sync) | **n/a** — a repository-shape check emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-002 | yes — §1 (grep exit `1`; `2 passed`; `1 passed`) | **n/a** — an import check emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-003 | yes — §1 (the gate block: `210` / `36` / `9`) | yes — **§2**: three keyed traces of real runs, the same shape P8/P9 recorded | **not producible** — §3 | yes — **§4**: `make capture`, 14 samples; `01` and `03` quoted (generated and gitignored) |
+| ACC-P10-004 | yes — §1 (`2 passed, 54 deselected`; probe 8 cases, exit `0`) | **n/a** — `uv` resolution emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-005 | yes — §1 (`ls`; `6 passed`; `1 passed`) | **n/a** — a manifest/document check emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-006 | yes — §1 (`4 passed`) | **n/a** — a module-name check emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-007 | yes — §1 (the commit sequence and the two worktree gates) | **n/a** — a commit-graph and per-step gate check emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-008 | yes — §1 (library gate `33` / `15` / `84 passed`; job list) | **n/a** — a gate check emits no call | **not producible** — §3: the library has no remote and has never been pushed | **n/a** — no wire artefact |
+
+Kind 3 is the one kind P10 cannot supply for **any** item, for the two reasons in §3 — it is
+recorded honestly rather than substituted, and the maintainer's post-merge `main` run replaces it
+once the library is published. Kind 2 belongs to the behaviour item (ACC-P10-003): the extraction
+is a pure refactor, so the Call-ID keyed traces are its observable evidence; the other items are
+structural checks that emit no call, and each says so instead of borrowing ACC-P10-003's trace.
+
+### Accepted limitations and open items
+
+Consistent with the stage-4 position, and not hidden:
+
+- **`REQ-F-033` has no test.** "The extraction is staged and every step leaves the layers green"
+  is a **process and historical property**, not a property of the artefacts; the stage-4 record
+  states this and ACC-P10-007 verifies the sequence and two re-run steps instead. The other five
+  steps' green is **asserted by the commit messages, not re-measured here**.
+- **`REQ-F-029`'s "reference implementation" half has no assertion.** It is a role statement about
+  this repository's relationship to the library, not a property a test can check; only the *user*
+  half is asserted (`test_both_as_instances_are_users_of_the_platform_library`, ruled kept by the
+  maintainer).
+- **`ACC-P10-003`'s counts are not the pre-extraction counts.** `255` total today against `246`
+  before the extraction; the increase is added tests (the trunk-answer regression, the
+  fraud-controller overrides, the sibling-checkout and workspace rows). No test was deleted,
+  loosened or reclassified — independently checked at the stage-4 gate — but the criterion must
+  not be read as "the same numbers as before".
+- **The consumption probe measures a stand-in, not the real skeleton.** `uv`'s resolution and
+  install behaviour is measured against a two-module throwaway library
+  (`docs/production-gaps.md` line **133**, *Consumption probe's stand-in scope*); it says nothing
+  about the extracted code's runtime, which is instead covered by the three layers. The
+  **single-checkout failure** ("clone without the sibling → resolution fails") cannot be a test in
+  a tree that *has* the sibling, so it stays the recorded cost of `REQ-F-032`.
+- **The library's gate does not run in this repository's CI** (`docs/production-gaps.md` line
+  **131**, ADR-0009 decision 8): a library change can pass here while failing the library's own
+  gate. Recorded, not fixed in P10.
+- **No CI at all, in either repository** (`docs/production-gaps.md` line **134**): the library has
+  no remote and has never been pushed, so its workflow has never run and this repository's jobs
+  could not clone it. Kind 3 is therefore absent for every P10 item — see §3.
+- **`ACC-P10-006`'s seam assertions are a deliberate tripwire that P11 rewrites.** P11 adds TLS and
+  Redis behind the seams, which is exactly what those two tests forbid today; the rewrite is
+  planned work, not a defect, and the library's seam tests are named as P11's first edit.
+- **Neither repository's `mypy` covers `tests/`.** Pre-existing configuration (both manifests list
+  only their `src/` packages), not introduced by P10; recorded at the stage-4 gate and **escalated
+  to the maintainer** as a gate-scope question — widening a repository-wide gate is not a stage's
+  decision.
+- **One stage-4 test is "redundant but not vacuous".**
+  `test_the_peer_status_key_never_renders_the_internal_hop_name` is a strict subset of
+  `test_the_peer_status_key_is_the_address_and_port`; it was **kept** (the maintainer's ruling and
+  the P9 stage-4 precedent) because it records an independent intent, and removing the override
+  does fail it.
+- **The requirements' status rows were deliberately left at `planned`.** The git history decides
+  this, and it does not show the acceptance stage flipping them: for P9, `REQ-F-025…028` were still
+  `planned` in `f68ed27 docs(p9): add the P9 acceptance items and their evidence` and were flipped
+  to `done` only in `06f8ed9 chore(p9): close the item — SRS, demo docs, version 0.7.0 and
+  CHANGELOG`, which is a descendant of both acceptance commits (`f68ed27`, `4d3e924`) and performs
+  the item close of `docs/phase2-plan.md` §5.4. `REQ-NF-016…018` flipped in the same commit. So
+  `REQ-F-029…033` and `REQ-NF-019…021` are **not** flipped here; they flip at the item close, and
+  the decision to do so is the parent's.
+- **The requirements' text is frozen and one delta is carried instead.** `REQ-F-023` still names
+  `src/as_app/errors.py`; after the extraction the mechanism is the library's and the family lives
+  in `src/anti_fraud_as/errors.py` — recorded in the SRS traceability note, not reworded
+  (`docs/production-gaps.md` line **132**). P10 added no new requirement text.
+- **The `-s` traces carry sippy's mock-teardown traceback noise.** A `TypeError` from the mock's
+  UAS ring buffer after the transaction manager is stopped appears at the end of a `-s` run; it is
+  teardown noise, not a test failure (see §2), and it is disclosed rather than trimmed.
+
+### Definition of Done (AGENT.md section 16)
+
+This section was added at P10's **item close** (`docs/phase2-plan.md` §5.4 step 1, `AGENT.md` §15
+closing ritual, item 1), **after** the stage-5 read-only review gate had already run over the
+acceptance record — the close is not a §5.1 stage, so it has no review gate of its own (§5.2 sets a
+gate per stage only). It is therefore **not** part of what that gate reviewed: stage 5's `git diff
+--name-only d57c309..225a851` → two files is a statement about those commits and still holds; this
+section post-dates them.
+
+The commands below were **re-run in this working tree on 2026-09-20** and these are this run's
+numbers, not the acceptance-record figures copied forward. §16's checklist, item by item:
+
+| # | §16 item | Result |
+| --- | --- | --- |
+| 1 | Feature works end to end; `make demo` passes from a clean checkout | **Passed, with a recorded caveat** — `make demo` exits `0` and prints `demo result: call answered and released; number translation applied on the wire`. The "from a clean checkout" wording is now "from **two** sibling checkouts": this run was made in this working tree **with the library present at `../as_platform`**, and a checkout without the sibling cannot resolve the `path` dependency. That is the accepted cost of `REQ-F-032` (ADR-0009 decision 8), not a single-clone rehearsal — see the honest declaration below. |
+| 2 | Unit + integration + e2e tests added and green | **Passed** — `210 passed` / `36 passed` / `9 passed` (`255` total). The counts are **above** the pre-extraction baseline because the implementation and tests stages *added* tests; no test was deleted, loosened or reclassified (ACC-P10-003 and the accepted limitations above). |
+| 3 | `ruff format`, `ruff check`, `mypy` clean | **Passed** — `96 files already formatted`, `All checks passed!`, `Success: no issues found in 29 source files`. |
+| 4 | Console reflects the new capability (from M3 onward) | **Not applicable as a new capability** — P10 is a pure refactor, so the console shows nothing new. It stays wired to the same internal API over the library's `internal_api` shell, and `src/console/` is untouched by every P10 commit (`git diff --name-only phase2...HEAD -- src/console/` is empty), which is the point of the item. |
+| 5 | README and the affected documents updated | **Passed** — `AGENT.md` §5/§10, the `README.md` quickstart and the structural documents were updated in the implementation stage (`2848f34`); this close adds the two demo documents (§0 quickstart) and this record. |
+| 6 | Requirement IDs, acceptance items and CHANGELOG updated for the behaviour change | **Passed** — `REQ-F-029…033` / `REQ-NF-019…021` set to `done`; `ACC-P10-001…008` accepted with evidence; the `[0.8.0]` CHANGELOG node opened — all in this close. |
+| 7 | New POC shortcuts registered in `docs/production-gaps.md` | **Passed** — the four P10 rows are present (`Library gate not in this repository's CI` :131, the `REQ-F-023` location delta :132, `Consumption probe's stand-in scope` :133, `CI second checkout (new dependency)` :134), added in `2848f34`. |
+| 8 | `AGENT.md` and `docs/README.md` updated if anything structural changed | **Passed** — the sibling library repository is in `AGENT.md` §5 and in the `docs/README.md` map, and the ADR index range reaches `ADR-0009` (`2848f34`). |
+| 9 | Acceptance items for the milestone carried out with evidence per §4.8 | **Passed** — `ACC-P10-001…008` carry kinds 1, 2 and 4 as evidence or as an explicit honest declaration, and kind 3 is declared **not producible in either repository** (§3). |
+| 10 | Version bumped (the tag is the maintainer's step; agents do not tag) | **Passed** — `VERSION` / `pyproject.toml` / `uv.lock` bumped together to **`0.8.0`** and the editable install re-synced. The **library** keeps `VERSION` `0.1.0` with no new node; the reason is in `docs/phase2-plan.md` §3 P10 (its `[0.1.0]` node already describes the whole extraction, which was never released or tagged). **No tag is created** (`AGENT.md` §13/§15). |
+| 11 | No secrets, certificates or real traffic captures committed | **Passed** — the private-key scan returns no match (exit `1`), `.env` is absent and `git status --porcelain` is empty. |
+
+The raw output of this run:
+
+```text
+$ make lint
+uv sync
+Resolved 51 packages in 1ms
+Checked 50 packages in 0.47ms
+uv run ruff format --check .
+96 files already formatted
+uv run ruff check .
+All checks passed!
+uv run mypy
+Success: no issues found in 29 source files
+
+$ uv run pytest tests/unit -m unit -q
+210 passed in 1.05s
+$ uv run pytest tests/integration -m integration -q
+36 passed in 29.88s
+$ uv run pytest tests/e2e -m e2e -q
+9 passed in 4.27s
+
+$ make demo                       # exit 0; transcript trimmed to its key lines
+scenario    : office-to-mobile
+rule        : R-MOB-CM-40
+translation : called number -> 013800138000
+status      : 200
+released    : True
+demo result: call answered and released; number translation applied on the wire
+
+$ uv run python tools/path_dependency_probe.py ; echo $?
+cases measured : 8
+expectations   : all held
+0
+
+$ git grep -nE "BEGIN (RSA|EC|DSA|OPENSSH|PRIVATE) KEY" -- . ; echo $?
+1
+$ test ! -e .env && echo ".env absent"
+.env absent
+$ git status --porcelain
+                                  # empty
+```
+
+**Honest declaration.** `make demo` was run **in this working tree, with the sibling library
+repository present at `../as_platform`** — it is **not** a single-clean-checkout rehearsal. After
+P10 the §16 item-1 wording "from a clean checkout" is really "from **two** sibling checkouts": the
+`path` dependency cannot resolve without the sibling, so that is the **accepted cost of
+`REQ-F-032`** (an explicit recorded exception, ADR-0009 decision 8), and this record does not
+present it as more than it is. Nothing is pushed and nothing is tagged (`AGENT.md` §13/§15).

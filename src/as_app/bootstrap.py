@@ -12,32 +12,42 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Startup self-check, configuration model and graceful shutdown.
+"""Startup self-check and configuration model of the number-translation AS.
 
 The AS fails fast: an invalid configuration aborts startup instead of failing later at
 runtime (``AGENT.md`` section 4.3). This module owns the configuration schema
-(``AGENT.md`` section 8) because parsing and validation are startup concerns.
+(``AGENT.md`` section 8) because parsing and validation are startup concerns and the field
+names are this instance's identity.
 
-Signal handling has to cooperate with sippy's blocking event loop: ``ED2.loop()`` cannot
-be interrupted from a handler, so the handlers only request shutdown and the loop is
-stopped from a timer owned by the loop (ADR-0002, and ``AGENT.md`` section 6).
+The **process plumbing** — the port probe, the cooperative shutdown controller and the
+signal handlers — is use-case-agnostic and lives in :mod:`as_platform.bootstrap`
+(ADR-0009 decision 2). It is re-exported here so that ``as_app.bootstrap`` keeps the surface
+its callers reference by path; the re-export is permanent, not a migration shim.
 """
 
 from __future__ import annotations
 
-import signal
-import socket
 from pathlib import Path
-from types import FrameType
 from typing import Annotated, Any
 
+from as_platform.bootstrap import (
+    ShutdownController,
+    check_port_available,
+    install_signal_handlers,
+)
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from as_app.errors import AsError, AsErrorCode
+from as_app.errors import AsError, AsErrorCode, SkeletonErrorCode
 from as_app.routing.rules import load_rule_set
 
-__all__ = ["AsSettings", "ShutdownController", "install_signal_handlers", "run_startup_self_check"]
+__all__ = [
+    "AsSettings",
+    "ShutdownController",
+    "check_port_available",
+    "install_signal_handlers",
+    "run_startup_self_check",
+]
 
 #: Environment file read by pydantic-settings. Only the example is committed
 #: (``AGENT.md`` section 9).
@@ -123,31 +133,6 @@ class AsSettings(BaseSettings):
         return value.upper()
 
 
-def check_port_available(address: str, port: int, *, family: int = socket.AF_INET) -> None:
-    """Check that a UDP port can be bound before the service starts.
-
-    Args:
-        address: Local address to bind.
-        port: UDP port to bind.
-        family: Socket family used for the check.
-
-    Raises:
-        AsError: ``AS-CFG-003`` when the port cannot be bound.
-    """
-    probe = socket.socket(family, socket.SOCK_DGRAM)
-    try:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        probe.bind((address, port))
-    except OSError as exc:
-        raise AsError(
-            AsErrorCode.CFG_PORT_UNAVAILABLE,
-            f"cannot bind UDP {address}:{port}: {exc}",
-            context={"address": address, "port": str(port)},
-        ) from exc
-    finally:
-        probe.close()
-
-
 def run_startup_self_check(settings: AsSettings) -> None:
     """Validate configuration, parse the rules file and check the signalling port.
 
@@ -160,12 +145,12 @@ def run_startup_self_check(settings: AsSettings) -> None:
     """
     if not settings.sbc_peer_address.strip():
         raise AsError(
-            AsErrorCode.CFG_MISSING,
+            SkeletonErrorCode.CFG_MISSING,
             "SBC_PEER_ADDRESS is required: the AS must know its next hop",
         )
     if not settings.allowed_peers:
         raise AsError(
-            AsErrorCode.CFG_PEER_INVALID,
+            SkeletonErrorCode.CFG_PEER_INVALID,
             "ALLOWED_PEERS must list at least one trunk peer address",
         )
     rules_path = Path(settings.rules_file)
@@ -177,48 +162,3 @@ def run_startup_self_check(settings: AsSettings) -> None:
         )
     load_rule_set(rules_path)
     check_port_available(settings.sip_listen_address, settings.sip_listen_port)
-
-
-class ShutdownController:
-    """Cooperative shutdown state shared between signal handlers and the event loop."""
-
-    def __init__(self) -> None:
-        """Create a controller in the running state."""
-        self._requested = False
-        self._reason: str | None = None
-
-    @property
-    def requested(self) -> bool:
-        """Whether a shutdown has been requested."""
-        return self._requested
-
-    @property
-    def reason(self) -> str | None:
-        """Why the shutdown was requested, for example ``SIGTERM``."""
-        return self._reason
-
-    def request(self, reason: str) -> None:
-        """Request a graceful shutdown.
-
-        Args:
-            reason: Short description of the trigger.
-        """
-        self._requested = True
-        self._reason = reason
-
-
-def install_signal_handlers(controller: ShutdownController) -> None:
-    """Install ``SIGTERM`` and ``SIGINT`` handlers that only request shutdown.
-
-    The handlers must not stop the sippy event loop themselves; a handler runs between
-    bytecodes and the loop owns the sockets.
-
-    Args:
-        controller: Shutdown state the handlers write to.
-    """
-
-    def _handler(signum: int, _frame: FrameType | None) -> None:
-        controller.request(f"signal {signal.Signals(signum).name}")
-
-    for signum in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(signum, _handler)

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
+from as_platform.hop import NextHop
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from as_app.errors import AsError, AsErrorCode
@@ -60,28 +61,6 @@ class NumberFormat(str, Enum):
     NATIONAL = "national"
     SHORT_CODE = "short_code"
     INTERNATIONAL = "international"
-
-
-class NextHop(BaseModel):
-    """A next hop the AS may originate the outbound INVITE towards.
-
-    Attributes:
-        name: Configuration key referenced by routing rules.
-        address: IP address or FQDN of the peer.
-        port: UDP port of the peer.
-        transport: Transport; only ``udp`` exists in this POC (ADR-0003).
-        priority: Selection order, lower wins. Equal priorities keep file order.
-        description: What this peer is, for the console.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    address: str
-    port: int = Field(default=5060, ge=1, le=65535)
-    transport: Literal["udp"] = "udp"
-    priority: int = Field(default=1, ge=1)
-    description: str = ""
 
 
 class NumberTranslation(BaseModel):

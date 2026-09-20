@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Observability surface of the AS: structured log, counters and per-Call-ID trace.
+"""Re-export facade for the platform library's observability surface.
 
-Note on import style: this package contains a module named ``logging``. It shadows the
-standard library module only for relative or sys.path-relative imports, so every import
-in this repository is package-absolute (``import logging`` inside a module resolves to
-the standard library because Python 3 uses absolute imports by default). See
-``docs/architecture/lld.md`` and the M0 open items.
+The implementation moved to :mod:`as_platform.observability` (ADR-0009 decision 2). This
+package stays a thin re-export so the by-path references in ``tools/``, ``tests/`` and the
+frozen ADRs and LLD keep resolving. It adds no behaviour and no state, and it is a
+permanent part of the design, not a migration shim.
 """
+
+from __future__ import annotations

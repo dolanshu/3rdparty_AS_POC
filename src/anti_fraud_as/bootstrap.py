@@ -31,12 +31,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any
 
+from as_platform.bootstrap import check_port_available
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from anti_fraud_as.errors import AsError, FraudErrorCode, SkeletonErrorCode
 from anti_fraud_as.screening_data import load_screening_data
-from as_app.bootstrap import check_port_available
-from as_app.errors import AsError, AsErrorCode
 
 __all__ = ["DEFAULT_ENV_FILE", "FraudAsSettings", "run_startup_self_check"]
 
@@ -138,18 +138,18 @@ def run_startup_self_check(settings: FraudAsSettings) -> None:
     """
     if not settings.fraud_sbc_peer_address.strip():
         raise AsError(
-            AsErrorCode.CFG_MISSING,
+            SkeletonErrorCode.CFG_MISSING,
             "FRAUD_SBC_PEER_ADDRESS is required: the AS must know its next hop",
         )
     if not settings.fraud_allowed_peers:
         raise AsError(
-            AsErrorCode.CFG_PEER_INVALID,
+            SkeletonErrorCode.CFG_PEER_INVALID,
             "FRAUD_ALLOWED_PEERS must list at least one trunk peer address",
         )
     screening_path = Path(settings.fraud_screening_file)
     if not screening_path.is_file():
         raise AsError(
-            AsErrorCode.FRAUD_DATA_UNREADABLE,
+            FraudErrorCode.FRAUD_DATA_UNREADABLE,
             f"screening data file does not exist: {screening_path}",
             context={"screening_file": str(screening_path)},
         )

@@ -40,6 +40,11 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-F-026 | The two AS instances are chained by **configuration only**: AS-1's next hop is set to AS-2's SIP listen address and AS-2's routing catalogue selects the core. No iFC emulation is added to the mock, and neither AS imports the other — they stay independent processes (D6, `AGENT.md` section 5). | done | P9 | ACC-P9-001 |
 | REQ-F-027 | A **reject** at AS-1 (`608`, REQ-F-019) short-circuits the chain: AS-2 and the core never receive the call, because the reject path originates no second leg (REQ-F-021). | done | P9 | ACC-P9-002 |
 | REQ-F-028 | The chained call is observable per instance: each AS writes its own Call-ID keyed trace and console feed, and the demo makes the two Call-IDs the two B2BUAs in series produce visible rather than hiding them. | done | P9 | ACC-P9-003 |
+| REQ-F-029 | The skeleton shared by the two AS instances is **extracted into a library in a new repository** (checked out beside this one at `../as_platform`); both instances — `src/as_app/` (number translation) and `src/anti_fraud_as/` (anti-fraud) — become **users** of that library, and this repository becomes the library's **reference implementation** (D8). This is a structural refactor performed under an explicit plan: the `AGENT.md` section 14 rule 3 ("no unconfirmed refactors") waiver for P10 is recorded as approved in `docs/phase2-plan.md` section 8 item 2, and the plan is still written and reviewed **before any code moves**. | done | P10 | ACC-P10-001 |
+| REQ-F-030 | The library is **independent of both use cases**: it imports neither `as_app` nor `anti_fraud_as`, so it carries the skeleton, not either use case. That independence is asserted by the library's own suite (`REQ-NF-021`). The one-way invariant that already holds is preserved and stays assertable — `src/as_app/**` does not import `anti_fraud_as` (`REQ-F-026`) — verified by `tests/unit/test_repository_baseline.py::test_as_app_does_not_import_the_anti_fraud_as`. | done | P10 | ACC-P10-002 |
+| REQ-F-031 | The two AS instances remain **independent processes** and their externally observable behaviour is **unchanged** by the extraction: the same SIP signalling on the trunk, the same `AS-*` error codes and the same per-instance Call-ID keyed console feed. The extraction is a pure refactor with no wire-visible change, so the existing unit, integration and e2e layers stay green (the anti-regression requirement). | done | P10 | ACC-P10-003 |
+| REQ-F-032 | This repository consumes the library through a **`path` dependency in `pyproject.toml`** (the library repository checked out beside it), so the `AGENT.md` section 10 guarantee *"clone → `uv sync` → `make demo`"* becomes *"clone **both** repositories side by side"*. This is a known and accepted cost of the extraction, recorded as an explicit exception rather than silently weakening the guarantee. | done | P10 | ACC-P10-004 |
+| REQ-F-033 | The extraction is **staged, not all-or-nothing**: the skeleton moves into the library in a sequence of steps that each leave this repository building, linting and passing its three test layers, so `main` stays demonstrable at every step (D7, `AGENT.md` §10). A step that would leave the repository broken is not a valid step. | done | P10 | ACC-P10-007 |
 
 ## 2. Non-functional requirements
 
@@ -63,6 +68,9 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-NF-016 | Cross-AS Call-ID correlation is **not solved**: two B2BUAs in series produce two different Call-IDs, because a B2BUA regenerates the dialog `Call-ID` for its second leg (`Call-ID` is not in the pass-through set), so a chained call appears as two independent per-instance traces. This is a registered POC gap, made visible rather than hidden (D6, plan section 3 P9 known issue). | done | P9 | ACC-P9-003 |
 | REQ-NF-017 | The chained topology is demonstrated by a **first-class, documented run command** runnable from a clean checkout, mirroring `make demo` / `make demo-fraud`. Chaining reuses the existing peer/listen knobs, so it adds **no new environment variable and no new port** (D6, `AGENT.md` section 8). | done | P9 | ACC-P9-004 |
 | REQ-NF-018 | The friction the chained demo surfaces — what in the shared skeleton turned out to be number-translation specific — is **recorded**, as the primary input to P10 (plan section 3 P9 deliberate output). | done | P9 | ACC-P9-005 |
+| REQ-NF-019 | The new repository is a **library, not a running service**, so it follows the **library documentation standard** of D8 — an **API reference**, an **integration guide** and a **compatibility matrix** — and does **not** copy this repository's application document set (the ~24 documents of `docs/`, including the operations set `deployment` / `runbook` / `troubleshooting`, which does not apply to a library). It is **not** a uv workspace monorepo (D8). | done | P10 | ACC-P10-005 |
+| REQ-NF-020 | The two pluggable dimensions P11 verifies (**transport**: UDP/TLS; **state store**: in-memory/Redis) and P11's **capacity harness** (D10) are **enabled by, but not built in, P10**: the extraction leaves those boundaries pluggable and adds no second transport, no external store and no load harness. The in-memory cross-call state (`REQ-NF-012`) remains the only implementation until P11 (D9). | done | P10 | ACC-P10-006 |
+| REQ-NF-021 | The new repository carries **its own test suite and its own gate** (`ruff` format and lint, `mypy`, `pytest`), so a change to the library is verifiable **where the library lives** rather than only through this repository's suite. Its suite covers the pure helpers and the sippy adapter boundary, plus the library-level independence assertion of `REQ-F-030`. The three layers of `AGENT.md` §11 are the **application's** layers (AS and mock S-SBC on UDP, a full call) and do not transfer to a library, which is why this row states a library-shaped suite instead of restating them (D8: the new repository follows the library standard, not the application standard). | done | P10 | ACC-P10-008 |
 
 ## 3. Traceability notes
 
@@ -126,6 +134,66 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
   input and is recorded at the item's close (plan section 5.4). The HLD/LLD deltas and any
   probe are the next pipeline stage (plan section 5.1) and are not written here; the
   `ACC-P9-*` items are created in the acceptance stage, as `ACC-P8-*` were.
+- **P10 platform extraction — requirements stage (2026-09-19).** `REQ-F-029 … REQ-F-032` and
+  `REQ-NF-019 … REQ-NF-020` are P10's own rows; **no Phase 1, P8 or P9 requirement is
+  changed**. The extraction is a structural refactor of `src/as_app/` and `src/anti_fraud_as/`
+  into a library in a new repository (`../as_platform`); three drivers are already on record
+  and are not re-litigated here — the pluggable state store (D9), the skeleton friction the
+  chained demo surfaced (`REQ-NF-018`, plan section 3 P9), and the capacity/back-pressure
+  constraints (D10). The `AGENT.md` section 14 rule 3 approval and the D8 library standard are
+  cited in `REQ-F-029` and `REQ-NF-019` respectively; the plan itself is written first and
+  reviewed before any code moves (plan section 8 item 2). Three rows are the non-obvious ones.
+  **Behaviour unchanged (`REQ-F-031`) is the most important row.** The whole point of the
+  extraction is that nothing observable moves: both AS instances stay independent processes,
+  the SIP signalling, the `AS-*` error codes and the per-instance console feed are identical,
+  and the existing three-layer suite (the layer counts are on record in
+  `docs/acceptance/report.md`) stays green. If that suite has to change to accommodate the
+  extraction, the extraction is wrong, not the tests — with one bounded exception, recorded in
+  ADR-0009 decision 3: a unit test that reads, iterates or annotates a **genuinely moved** enum
+  member may be repointed at the family enum that now owns it. No assertion's expected value
+  changes, and the single uniqueness/status-coverage test is strengthened in scope. The
+  extraction may not change what a test asserts.
+  **The one-way independence (`REQ-F-030`) has a direction.** `src/anti_fraud_as/**` imports
+  `as_app` in several places by design (ADR-0007 decision 9) — the reuse of the
+  use-case-agnostic skeleton — so the invariant that is assertable, and the one the library
+  must preserve, is `src/as_app/**` ↛ `anti_fraud_as`; the library itself imports neither use
+  case. `REQ-F-026` already carries the `neither AS imports the other` wording and its
+  assertable direction is registered as plan section 7 item 10; this row states the direction
+  explicitly for the library rather than re-opening that frozen requirement. **The `path`
+  dependency (`REQ-F-032`) is a deliberate, accepted exception.** Consuming the library through
+  `pyproject.toml` means this repository no longer satisfies `AGENT.md` section 10's *"clone →
+  `uv sync` → `make demo`"* on its own; the guarantee is restated as *"clone both repositories
+  side by side"*. It is recorded as an exception so a later reader does not read the weaker
+  guarantee as a defect, and the exact `pyproject.toml` mechanism belongs to P10's
+  implementation stage, not here. `REQ-NF-019` keeps the new repository on the library standard
+  of D8 (API reference / integration guide / compatibility matrix) instead of copying this
+  repository's application document set; `REQ-NF-020` scopes P10 so it **enables** P11's
+  pluggable transport, pluggable state store and capacity harness without **building** any of
+  them. The HLD/LLD deltas, the ADR and any probe are the next pipeline stage (plan section
+  5.1) and are not written here; the `ACC-P10-*` items are created in the acceptance stage, as
+  `ACC-P8-*` and `ACC-P9-*` were. **Requirements-stage review gate (plan section 5.2).** Two
+  of the rows above came out of that gate's read-only review of this stage and were fixed
+  inside the stage: `REQ-F-033` (the extraction is staged, so this repository stays
+  demonstrable at every step — D7, `AGENT.md` §10) and `REQ-NF-021` (the new repository carries
+  its own test suite and its own gate, so a change to the library is verifiable where the
+  library lives). The same gate found that `REQ-F-030`'s library-level independence claim
+  carried no named verification, so that row was amended to cite the library's own suite. These
+  were findings of the section 5.2 review gate, fixed inside the stage; the gate's verdict is
+  recorded in `docs/phase2-plan.md`, not here.
+- **P10 platform extraction — design stage (2026-09-19), the `REQ-F-023` delta.** `REQ-F-023`'s
+  text is **unchanged**: it was true when written (P8 added the `AS-FRAUD-*` codes to the
+  then-single authoritative model), and a stage may not reword a frozen requirement (plan
+  section 5.2). After P10 the authoritative *model* is the **library's mechanism** — the
+  memberless `ErrorCode` base, `SIP_PHRASES`, `sip_status_for` and `AsError` in
+  `as_platform.errors` — while the `AS-FRAUD-*` family lives in `src/anti_fraud_as/errors.py`
+  and the translation families (`AS-RULE-*`, `AS-ROUTE-*`) stay in `src/as_app/errors.py`
+  (ADR-0009 decision 3). Every code, SIP status and log message is **unchanged**, so the row's
+  intent — one model, no second error vocabulary, codes mapped to SIP status and log message —
+  holds; only the location the row names has moved. This is the same way P8a records the
+  `REQ-F-011` delta: the requirement text is unchanged and the note carries the change.
+  `AGENT.md` section 4.3 is a structural document, not a frozen requirement, and is updated in
+  P10's implementation commit to name the library mechanism and the three families (`AGENT.md`
+  section 13).
 - Milestones M0–M3 are delivered, so no requirement above is left `planned` or `partial`
   for want of a milestone. The `docker compose` stack (both AS instances, two mocks and the
   console) is validated with `docker compose config`; its SIP path still carries the

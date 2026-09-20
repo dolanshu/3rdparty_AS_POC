@@ -14,7 +14,9 @@ instances in series, rehearsed for P9. The runs that recorded the evidence are i
 ## 0. Setup (before the audience arrives)
 
 ```bash
-git clone <repo> && cd 3rdparty_AS_POC
+# Clone both repositories side by side: the platform library first, then this repository.
+git clone <library-repo> as_platform        # the platform library (sibling checkout, ../as_platform)
+git clone <repo> && cd 3rdparty_AS_POC      # this repository
 pip install uv
 uv sync
 make lint && make test

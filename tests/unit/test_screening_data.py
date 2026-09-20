@@ -28,12 +28,12 @@ from pathlib import Path
 
 import pytest
 
+from anti_fraud_as.errors import AsError, FraudErrorCode
 from anti_fraud_as.screening_data import (
     ScreeningDataStore,
     ScreeningDocument,
     load_screening_data,
 )
-from as_app.errors import AsError, AsErrorCode
 
 pytestmark = pytest.mark.unit
 
@@ -195,7 +195,7 @@ def test_a_missing_file_is_as_fraud_004(tmp_path: Path) -> None:
     with pytest.raises(AsError) as raised:
         load_screening_data(tmp_path / "absent.yaml")
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_UNREADABLE
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_UNREADABLE
     assert raised.value.sip_status == 500
 
 
@@ -207,7 +207,7 @@ def test_invalid_yaml_is_as_fraud_005(tmp_path: Path) -> None:
     with pytest.raises(AsError) as raised:
         load_screening_data(path)
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
 
 
 def test_an_entry_with_both_number_and_prefix_is_rejected(tmp_path: Path) -> None:
@@ -222,7 +222,7 @@ def test_an_entry_with_both_number_and_prefix_is_rejected(tmp_path: Path) -> Non
     with pytest.raises(AsError) as raised:
         load_screening_data(path)
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
     assert "number or prefix" in raised.value.detail
 
 
@@ -236,7 +236,7 @@ def test_an_entry_with_neither_number_nor_prefix_is_rejected(tmp_path: Path) -> 
     with pytest.raises(AsError) as raised:
         load_screening_data(path)
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
 
 
 def test_a_duplicate_entry_inside_a_list_is_rejected(tmp_path: Path) -> None:
@@ -252,7 +252,7 @@ def test_a_duplicate_entry_inside_a_list_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(AsError) as raised:
         load_screening_data(path)
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
     assert "duplicate" in raised.value.detail
 
 
@@ -267,7 +267,7 @@ def test_a_value_in_both_lists_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(AsError) as raised:
         load_screening_data(path)
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
     assert "both block_list and allow_list" in raised.value.detail
 
 
@@ -291,7 +291,7 @@ def test_unusable_window_and_reputation_values_are_rejected(
     with pytest.raises(AsError) as raised:
         load_screening_data(path)
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
 
 
 def test_an_unknown_field_is_rejected(tmp_path: Path) -> None:
@@ -302,7 +302,7 @@ def test_an_unknown_field_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(AsError) as raised:
         load_screening_data(path)
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
 
 
 def test_an_unsupported_version_is_rejected(tmp_path: Path) -> None:
@@ -313,7 +313,7 @@ def test_an_unsupported_version_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(AsError) as raised:
         load_screening_data(path)
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +366,7 @@ def test_a_broken_edit_keeps_the_previous_document(tmp_path: Path) -> None:
     with pytest.raises(AsError) as raised:
         store.maybe_reload()
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_SCHEMA_ERROR
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_SCHEMA_ERROR
     assert store.current is before
     assert store.current.match("+8613400000001").blocked_by is not None
 
@@ -382,5 +382,5 @@ def test_a_deleted_file_keeps_the_previous_document(tmp_path: Path) -> None:
     with pytest.raises(AsError) as raised:
         store.maybe_reload()
 
-    assert raised.value.code is AsErrorCode.FRAUD_DATA_UNREADABLE
+    assert raised.value.code is FraudErrorCode.FRAUD_DATA_UNREADABLE
     assert store.current is before

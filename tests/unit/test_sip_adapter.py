@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from as_app.errors import AsError, AsErrorCode
+from as_app.errors import AsError, SkeletonErrorCode
 from as_app.routing.rules import NextHop
 from as_app.sip_adapter import (
     build_request_uri,
@@ -68,7 +68,7 @@ def test_missing_user_part_is_rejected() -> None:
     """A Request-URI without a user part reports AS-PEER-003."""
     with pytest.raises(AsError) as excinfo:
         extract_called_number("sip:10.0.0.1")
-    assert excinfo.value.code is AsErrorCode.PEER_MALFORMED_REQUEST
+    assert excinfo.value.code is SkeletonErrorCode.PEER_MALFORMED_REQUEST
 
 
 def test_outbound_request_uri_carries_host_port_and_transport() -> None:

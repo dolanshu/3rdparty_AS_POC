@@ -999,6 +999,769 @@ Two points were **recorded rather than fixed**:
   must not be done incidentally. The new repository follows a library standard, not this
   repository's application standard (D8).
 
+**P10 requirements-stage review gate — run, PASS-WITH-FINDINGS, all four findings fixed inside
+the stage (§5.2).**
+The read-only review of the requirements stage ran against commit `dab30f0`, asked the §5.2
+*Requirements* question ("completeness, testability, consistency with decisions D1–D10") and
+returned **PASS-WITH-FINDINGS — no blocker**: one major and three minor findings. The gate
+verified the diff independently — `1 file changed, 39 insertions(+)`, `0` deletions — so the
+note's claim that no Phase 1, P8 or P9 requirement is changed holds. It also confirmed:
+`REQ-F-029`'s citation of the §14 rule 3 waiver matches §8 item 2, which is "APPROVED
+2026-09-19" and does say the plan is written first and reviewed before code moves; `REQ-NF-020`
+is correctly scoped to *enable* rather than *build* P11's pluggable transport, pluggable state
+store and harness, so it does not contradict the still-`done` `REQ-NF-002` (UDP-only) — TLS
+supersession belongs to P11 (D10); the test named in `REQ-F-030`
+(`tests/unit/test_repository_baseline.py::test_as_app_does_not_import_the_anti_fraud_as`) exists
+with that exact name and asserts the stated direction; and all six new rows use the `planned`
+status vocabulary, with their `ACC-P10-001…006` references unique and correctly deferred to the
+acceptance stage.
+
+One major and three minor findings were raised. **All four were fixed inside the stage** (commit
+`91c737d`, so the stage is **not** re-reviewed — §5.2 "one review per stage, no loop"):
+
+- **(major) No requirement covered the new library's own test suite.** `REQ-F-031` only states
+  that this repository's three layers stay green; a brand-new repository has no stated testing
+  standard or gate. Fixed: `REQ-NF-021` added — the library carries its own suite and its own
+  gate (`ruff` format and lint, `mypy`, `pytest`), covering the pure helpers, the sippy adapter
+  boundary and the library-level independence assertion of `REQ-F-030`.
+- **(minor) The requirement set was silent on whether the move is staged.** Nothing said the
+  ~8000-line skeleton move is staged rather than all-or-nothing, nor what keeps the repository
+  demonstrable mid-move. Fixed: `REQ-F-033` added — the skeleton moves in steps that each leave
+  this repository building, linting and passing its three layers (D7, `AGENT.md` §10).
+- **(minor) The traceability note carried a test count that was not established verbatim
+  anywhere in the repository.** The note said "(246 tests at the time of writing)", a figure
+  only derivable by summing the `203` / `34` / `9` layer counts recorded in
+  `docs/acceptance/report.md`. Fixed: replaced with a pointer to where the counts are on record.
+- **(minor) `REQ-F-030`'s library-independence claim had no named verification.** The row asserts
+  the library imports neither `as_app` nor `anti_fraud_as`, but only the preserved one-way
+  invariant had a named test. Fixed: the row was amended to cite the library's own suite
+  (`REQ-NF-021`).
+
+`ACC-P10-007` and `ACC-P10-008` are the two new acceptance references (from `REQ-F-033` and
+`REQ-NF-021`), to be created in P10's acceptance stage like `ACC-P10-001…006`. No code has moved:
+P10's design stage has not started, and §8 item 2 requires the plan to be written and reviewed
+before any code moves.
+
+**P10 design stage (stage 2) — the ADR and the consumption probe (2026-09-19).** The stage
+produced **`docs/architecture/adr/0009-platform-library-extraction.md`** and a scratch probe of
+the `uv` consumption mechanism. **No code moved:** the commit is the new ADR plus this plan
+edit, with nothing under `src/` or `tests/`, so §8 item 2's "the plan is written and reviewed
+before any code moves" is still the operative gate and the implementation stage has not started.
+The ADR is the design answer to `REQ-F-029 … REQ-F-033` and `REQ-NF-019 … REQ-NF-021`; it does
+not restate them.
+
+The ADR settles eight decisions, in its own words:
+
+1. **The library's identity and standard.** Repository `as_platform` (sibling `../as_platform`),
+   distribution `as-platform`, import package `as_platform`; the **D8 library standard** — API
+   reference, integration guide, compatibility matrix (REQ-NF-019) — not this repository's
+   `AGENT.md` §4.1 application layout; `py.typed` and the pinned sippy travel with it.
+2. **The module split.** `observability/`, `sip_adapter`, the `errors` mechanism, the `bootstrap`
+   plumbing, the version chain, the `internal_api` shell, the controller shell (`Base*`) and the
+   stack shell move; `routing/`, `screening.py`, `caller_state.py`, `screening_data.py`, the
+   config and the entry points stay; `as_app.sip_adapter` and `as_app.observability.*` stay as
+   thin **re-export facades** so the by-path references in `tools/`, `tests/`, the ADRs and the
+   LLD keep resolving and the three layers remain the unchanged anti-regression guard. The
+   `NextHop` **value object** moves too, into its own library module (`as_platform/hop.py`), with
+   `as_app.routing.rules` **re-exporting** it — a third facade — because the base controller and
+   `sip_adapter.build_request_uri` are typed on it and leaving it in `routing/` would make the
+   library import `as_app.routing.rules`, breaking `REQ-F-030`. The catalogue that *produces* the
+   hop list (`routing/rules.py`'s document, schema, `RuleSet` and `RuleSetStore`, and
+   `routing/engine.py`) stays use-case-specific in this repository.
+3. **The error model: one mechanism, per-family code sets, and the `REQ-F-023` delta.** Python
+   forbids extending an `Enum` that has members, so the library owns a **memberless `ErrorCode`
+   base** with `SIP_PHRASES`, `sip_status_for` and `AsError`; the skeleton codes
+   (`AS-CFG-*`, `AS-PEER-*`, `AS-INT-*`) become `SkeletonErrorCode`, the translation codes stay
+   in `src/as_app/errors.py`, and the anti-fraud gains `FraudErrorCode` in its own package.
+   Every code, status and message is byte-identical (REQ-F-031), but `REQ-F-023` and `AGENT.md`
+   §4.3 name a **location** (`src/as_app/errors.py`) that the split moves — a wording delta,
+   escalated the way §7 item 10 was rather than reworded by a stage (§5.2). The split forces one
+   **bounded test edit**, stated precisely rather than as "an import line": the permitted class
+   of test change is *"repoint a read, an iteration or a type annotation of a moved enum member
+   at the family enum that now owns it"*. No assertion's expected value changes; no test is
+   deleted, weakened or added; the one uniqueness/status-coverage test is **strengthened** in
+   scope to cover all three families. The five affected sites are enumerated in ADR-0009
+   decision 3 and the implementation stage reports the complete list in its acceptance evidence.
+4. **The controller seam and `PolicyDecision`.** `BaseCallController.apply_call_policy()` keeps
+   the LLD's "single seam" name and calls one application hook, `decide(event) ->
+   PolicyDecision`; `PolicyDecision` is plain data (`action`, `outbound_event`, `next_hops`,
+   `error`, `disposition`, `attributes`, plus the reject trace/log strings `reject_trace_summary`
+   / `reject_log_message` / `reject_log_fields` and the relay `relay_log_message` /
+   `relay_log_fields`), so the base applies a decision without knowing either use case's
+   vocabulary. The base owns the failover form of `_relay_from_next_hop`; the
+   anti-fraud's one-element hop list reproduces its no-failover behaviour exactly. The one-leg
+   relaxation of LLD §9.6 becomes a stated base invariant, not an anti-fraud special case.
+   **The seam reproduces both reject and allow paths byte for byte:** the per-application trace
+   summary and log messages travel as **data**, because branching on "which application am I" is
+   forbidden; the peer-status key is an **overridable point** on the base (default
+   `name:address:port`; the anti-fraud overrides to `address:port` with a `"-"` fallback, and its
+   hop name `fraud_sbc_peer` is never rendered); and the base stores the serving hop as a
+   `NextHop` while `uaO` still receives the `(address, port)` tuple.
+5. **The two pluggable seams are interfaces only** (REQ-NF-020): `Transport` / `UdpTransport` and
+   `StateStore` / `InMemoryStateStore`, one implementation each. No second transport, no external
+   store, no load harness; the state-store seam sits **under** `CallerStateStore`, which stays
+   process-level and out of the per-call controller (D9, LLD §9.2). The capacity harness is a
+   P11 capability and is not a seam.
+6. **Consumption: `[project].dependencies` plus `[tool.uv.sources] as-platform = { path =
+   "../as_platform", editable = true }`.** `editable = true` is required by the staged extraction
+   (a step edits the library and runs this gate against it). Four measured properties shape it,
+   below.
+7. **The staged extraction: seven steps, each leaving `make lint` clean and all three layers
+   green** (REQ-F-033, D7, `AGENT.md` §10) — (1) create the library and add the path dependency,
+   no code moves; (2) move the leaf modules with the facades; (3) move the version chain and
+   bootstrap plumbing; (4) move the controller shell and rewire both controllers to `decide()`;
+   (5) move and generalise `internal_api`; (6) add the two seams; (7) give the library its own
+   suite, gate, independence assertion and documents. The order is by dependency; step 4 is the
+   only step that can change behaviour and is guarded by the three layers plus
+   `tools/chained_as_probe.py`.
+8. **`AGENT.md` §10 is restated, not weakened:** "clone **both** repositories side by side →
+   `uv sync` → `make demo`", recorded as an explicit exception (REQ-F-032); the library carries
+   its **own** gate (REQ-NF-021), which does not replace this repository's three layers.
+
+**The consumption probe (design instrument, run and recorded in this stage).** A scratch probe
+under `/tmp/p10probe` — a throwaway `as_platform` (`VERSION` 0.4.0) and seven consumer variants
+(six top-level, one nested), each varying one `pyproject.toml` key — settled the mechanism of
+ADR-0009 decision 6. The scratch form is not committed, but its **reproducible form is
+`tools/path_dependency_probe.py`** (registered in `tools/README.md`), which rebuilds the layout
+in a temporary directory, re-measures every fact and exits non-zero when any expectation does
+not hold — the `tools/capacity_probe.py` (P9.5) guard is the precedent. Tool versions
+`uv 0.12.15`, CPython `3.10.12`. Four facts are **not** what a reader would assume, and each is
+now a stated property of the decision rather than a surprise in the implementation stage:
+
+- **The source is mandatory.** A dependency key alone does not resolve — `uv sync` fails with
+  *"Because as-platform was not found in the package registry … your project's requirements are
+  unsatisfiable"*.
+- **The default is a copy, not a link.** A `path` source with no `editable` key installs a
+  non-editable copy (`direct_url.json` → `{"dir_info":{"editable":false}}`); `editable = false`
+  is the explicit spelling of the same thing; only `editable = true` produces the
+  `_editable_impl_as_platform.pth` link.
+- **The version pin is ignored.** `dependencies = ["as-platform>=99.0"]` with a `path` source
+  installed the checkout's `0.4.0` and exited `0`, so the pin is not a guard.
+- **The lock is not a version guard either.** With the library bumped `0.4.0` → `0.5.0`,
+  `uv sync --locked` refused (*"The lockfile at `uv.lock` needs to be updated, but `--locked`
+  was provided"*) while `uv sync --frozen` accepted the skew, installed `0.5.0` silently and
+  left the lock recording `0.4.0`. A `path` dependency has no version to resolve against, so
+  neither the pin nor the lock constrains the library; what catches a skew is a **gate** — the
+  library's own gate plus this repository's gates against the sibling checkout — and CI's
+  `uv sync --frozen` lock comment is true for **registry** dependencies and **not** for this
+  path dependency, so **every CI job needs a second checkout** of the library repository.
+
+`py.typed` is a hard requirement of the same gate: without it `mypy` reports `Skipping analyzing
+"as_platform": … missing library stubs or py.typed marker [import-untyped]` and `make lint`
+fails. The `path` is resolved relative to the consuming `pyproject.toml`, so `../as_platform`
+means a sibling of this repository's root and a deeper nesting does not find it — which is what
+makes REQ-F-032's "side by side" exact.
+
+**Obligations this design places on the implementation commit** (all stated in ADR-0009, none
+performed here): `AGENT.md` §10 (the restated clean-checkout sentence) and §4.3 (the error model's
+location — **§4.3 is updated in the implementation commit**, because it is a structural document
+and `AGENT.md` §13 requires structural changes to update it), `README.md` and `docs/README.md` (the second
+checkout and the **ADR index range**, which both read "ADR-0001 … ADR-0008" today), the
+`docs/production-gaps.md` rows the ADR's *Gaps accepted* lists (no versioned consumption; the
+interface induced from two instances; no second transport / store / harness; no mock or console
+in the library; the naming debt; the library gate not in this repository's CI; the `REQ-F-023`
+location delta; the probe's stand-in scope), and `ACC-P10-*` in the acceptance stage.
+
+**Unsettled at the time of this record, and recorded rather than hidden.**
+
+- **The HLD/LLD deltas that §5.1 also assigns to the design stage are not written.** The ADR
+  states what they must contain (a new LLD section naming the library boundary; the HLD deployment
+  view showing two repositories), but neither file is edited in this stage. They are the next
+  artefact before any code moves; the reason they are small is that the extraction changes no
+  observable behaviour (REQ-F-031) and LLD §9.1 already states the shared/use-case-specific
+  boundary.
+- **The error-model split forces one bounded test edit** (ADR-0009 decision 3). The permitted
+  class of test change is *"repoint a read, an iteration or a type annotation of a moved enum
+  member at the family enum that now owns it"*. No assertion's expected value changes; no test
+  is deleted, weakened or added; the one uniqueness/status-coverage test is **strengthened** in
+  scope to cover all three families. The five affected sites are enumerated in ADR-0009
+  decision 3. This is the one place where the traceability note's literal *"If that suite has to
+  change to accommodate the extraction, the extraction is wrong, not the tests"* meets the
+  split; the note is **qualified in place** so it keeps its force — the extraction may not
+  change what a test asserts — while naming this bounded exception.
+- **`REQ-F-023` and `AGENT.md` §4.3 name a location the split moves**, and a stage may not reword
+  a frozen requirement (§5.2). Escalated to the maintainer, like §7 item 10.
+
+**P10 design stage (stage 2) — the HLD/LLD deltas and the three rulings (2026-09-19).** The
+stage's design artefact is completed by the two deltas §5.1 also assigns to it: a new
+**`## 10. The platform library (P10)`** in `docs/architecture/hld.md` and a new
+**`## 11. The platform library (P10)`** in `docs/architecture/lld.md`. Both mirror the P8/P9
+section shape and cite ADR-0009 rather than re-arguing it: the HLD section states the library is
+a build-time dependency (no new process, port or listener), the two-repository checkout
+(REQ-F-032) and that nothing observable moves (REQ-F-031); the LLD section gives the module
+split and its inverse, the `PolicyDecision` seam, the error families, the two seams, the
+consumption mechanism and the seven-step order (11.1–11.7). Nothing under `src/` or `tests/` is
+touched, so §8 item 2's "the plan is written and reviewed before any code moves" is still the
+operative gate and the implementation stage has not started.
+
+The three points the ADR had escalated to the maintainer were **ruled on, and the rulings are
+recorded in the ADR** (each with its reasoning kept visible), and the SRS traceability note
+carries the `REQ-F-023` delta:
+
+- **`REQ-F-023` is not reworded.** The row's text was true when written and a stage may not
+  reword a frozen requirement (§5.2); the delta goes in the SRS **traceability note**, the
+  repository's established precedent (P8a records the `REQ-F-011` delta the same way).
+  `AGENT.md` §4.3 is a structural document, not a frozen requirement, so `AGENT.md` §13 requires
+  it to be updated **in the implementation commit** to name the library mechanism and the three
+  families.
+- **The bounded test edit is accepted and recorded, stated precisely.** The permitted class of
+  test change is *"repoint a read, an iteration or a type annotation of a moved enum member at
+  the family enum that now owns it"*; no assertion's expected value changes, and the one
+  uniqueness/status-coverage test is **strengthened** in scope to cover all three families.
+  `REQ-F-031` promises the three layers **stay green**, not that no test file's read, iteration
+  or annotation ever changes — this is the only class of test change the extraction is allowed
+  to make, and the five sites are enumerated in ADR-0009 decision 3.
+- **`TrunkMessage` is deleted with the move, not carried into the library.** It is provably dead
+  (two references, both inside its own module: `src/as_app/sip_adapter.py:41` and `:122`), and
+  carrying known-dead code into a brand-new artefact is the wrong default; the deletion is
+  behaviour-neutral and is performed as part of the move, with its `__all__` entry. LLD §9.1's
+  friction note now records that P10 removed it rather than inherited it.
+
+**P10 design stage (stage 2) — the design-stage review gate and its findings (2026-09-19).** The
+gate §5.2 requires ran against `dc1ab18` and returned **FAIL: one blocker, three major and four
+minor findings**. Per §5.2 the findings are fixed **inside the stage** and the stage is **not
+re-reviewed**. All eight are closed in this commit; **no code moved** — nothing under `src/` or
+`tests/` changes, and the only added file is the design instrument `tools/path_dependency_probe.py`
+(§8 item 2's "no code moves before the plan is reviewed" still holds, and the implementation stage
+has not started). Each finding, and the one-line fix:
+
+- **Finding 1 [blocker] — `NextHop` had no home, so the library would have imported `as_app.routing.rules`, breaking `REQ-F-030`.** `NextHop` now moves into the library in its own module (`as_platform/hop.py`) and `src/as_app/routing/rules.py` **re-exports** it (a third facade), with the reasoning — why the hop value object is skeleton while the catalogue that produces the list stays use-case-specific — recorded in ADR-0009 decision 2, LLD §11.1 and the plan's item 2.
+- **Finding 2 [major] — the permitted test change was understated as "only an import line".** It is now stated precisely as *"repoint a read, an iteration or a type annotation of a moved enum member at the family enum that now owns it"*, with the five affected test sites enumerated in ADR-0009 decision 3, the uniqueness/status-coverage test marked **strengthened** in scope, and the SRS traceability note's *"the extraction is wrong, not the tests"* sentence **qualified in place** (ADR-0009 decision 3, LLD §11.3, SRS note, plan items 3 and the two stage records).
+- **Finding 3 [major] — the seam could not reproduce the two applications' reject/allow paths.** `PolicyDecision` now carries the reject trace summary, the reject log message, the reject extra trace/log fields and the allow-path originate log message plus extra log fields; the peer-status key is an **overridable** point (default `name:address:port`, anti-fraud overrides to `address:port` with a `"-"` fallback and never renders `fraud_sbc_peer`); the base stores the serving hop as a `NextHop` while `uaO` still receives the `(address, port)` tuple; and the per-application **strings vs forbidden branching** trade-off is stated honestly (ADR-0009 decision 4, LLD §11.2, plan item 4).
+- **Finding 4 [major] — the lockfile guard was claimed to catch a library move; the design said otherwise.** ADR-0009 decision 6 now states the honest position: with a `path` source the lockfile **cannot constrain** the library's version, so the lock does **not** catch a move; `.github/workflows/ci.yml`'s lock comment is true for **registry** dependencies and **not** for the path dependency; **every CI job needs a second checkout**; what catches a skew is a **gate**; and the residual is an accepted gap for `docs/production-gaps.md` in the implementation commit (ADR-0009 decision 6, LLD §11.5 and §11.6, plan item 6).
+- **Finding 5 [minor] — the "separate repository, not a uv workspace" fact was implicit.** It is now stated explicitly in ADR-0009 decision 1 and LLD §11.1.
+- **Finding 6 [minor] — `docs/architecture/lld.md:12` listed `TrunkMessage` in the `sip_adapter.py` row.** `TrunkMessage` is removed from that row (it is deleted with the move, ADR-0009 decision 2).
+- **Finding 7 [minor] — the plan record said `AGENT.md` §4.3 is updated "only if the maintainer rules that way".** Reconciled: §4.3 **is** updated in the implementation commit, because it is a structural document and `AGENT.md` §13 requires it (ADR-0009 decision 3, LLD §11.6, plan's obligations paragraph).
+- **Finding 8 [minor] — the probe was a scratch directory that a reader could not re-run.** Its **reproducible form `tools/path_dependency_probe.py`** is added and registered in `tools/README.md`, cited in ADR-0009 as the reproducible form of its *Verified facts*, and it exits non-zero when any measured expectation does not hold (its recorded output is in ADR-0009 *Verified facts*). It is a design instrument, not a test: pytest does not collect it and it is not in `make test` or CI.
+
+The gate record above is the stage's close. The HLD/LLD deltas the earlier records listed as
+"not written" are now written (HLD §10, LLD §11), and the stage's own documents are internally
+consistent (ADR-0009 vs HLD §10 and LLD §11 re-read).
+
+**P10 implementation stage (stage 3) — the seven-step extraction, its nine judgements and its
+review gate (2026-09-19).** The stage ran on `feat/platform-extraction`, cut from `phase2`,
+across **two repositories**: this one, the application/reference implementation, and the new
+library repository **`/home/shudong/project/as_platform`** (branch `main`, distribution
+`as-platform`, package `as_platform`, `VERSION` `0.1.0`). The library has **no remote and has
+never been pushed**, which bounds what the stage can claim about CI (below). The move is
+ADR-0009 decision 7's seven steps, each its own commit, each leaving `make lint` clean and all
+three layers green (REQ-F-033, D7, `AGENT.md` §10):
+
+| Step | Commit | What it did |
+| --- | --- | --- |
+| 1 | `f041174` | `build(p10)`: add the `as-platform` path dependency (`editable = true`) and regenerate `uv.lock`. No code moves. |
+| — | `65aa3c8` | `docs(p10)`: correct the ADR's attribution of the single-checkout failure (judgement 2). |
+| 2 | `ac929a9` | `refactor(p10)`: move the leaf modules (`observability/`, the `errors` mechanism + `SkeletonErrorCode`, `sip_adapter`, `hop`) with the `as_app` facades; `TrunkMessage` deleted. |
+| 3 | `efa4386` | `refactor(p10)`: move the version chain and the bootstrap plumbing; the anti-fraud now imports the shared modules from `as_platform` directly rather than through the `as_app` facades. |
+| — | `9a59756` | `refactor(p10)`: drop the version helper the extraction orphaned. |
+| 4 | `0319c8d` | `refactor(p10)`: rewire both controllers onto the shared shell (`BaseCallController` + `decide()` + `PolicyDecision`); −1404 lines here, the largest step. |
+| 5 | `f341aff` | `refactor(p10)`: turn both `internal_api` modules into facades over the library shell. |
+| 5 | `8ab507d` | `refactor(p10)`: derive both AS stacks from the library `BaseAsStack`. |
+| 6 | `0b12db2` | `refactor(p10)`: bind the stack and the caller state to the new seams (transport, state store). |
+| — | `2848f34` | `docs(p10)`: record the platform library in the structural documents and CI (`AGENT.md` §4.3/§5/§10, `README.md`, `docs/README.md`, `docs/production-gaps.md`; all five CI jobs gained the second checkout). |
+| — | `042acdc` | `docs(p10)`: correct the ADR's `sip_adapter` carry list and the step-5 scope (judgements 4 and 5). |
+| — | `b824f11` | `fix(p10)`: the gate's blocker — answer the trunk when the routing engine raises (judgement 9). |
+| — | `f7249de` | `docs(p10)`: correct the documents the extraction left asserting the old sharing (the gate's major 3 and minor 4). |
+| — | `07b68e4` | `docs(p10)`: correct the stale `SIP_PHRASES` 608 clause in the LLD. |
+
+The library repository landed the same steps on its `main`, in order: `9eebe66` (leaf modules),
+`ee02653` (the library's own `ruff`/`mypy`/`pytest` tooling), `7c1355b` (version chain +
+bootstrap plumbing), `060ef71` (controller shell), `f82a819` (internal-API shell), `734d82c`
+(AS stack shell), `d5e4561` (the transport and state-store seams), `d627e73` (step 7: the
+library's own 11 test files, `docs/api-reference.md`, `docs/integration-guide.md`,
+`docs/compatibility-matrix.md`, `Makefile`, `.github/workflows/ci.yml`, and the updated
+`CHANGELOG.md` / `README.md` / `pyproject.toml`) and `aaa453e` (the blocker fix's library-side
+docstring).
+
+**Judgement 1 — the sixth test-change site, in the second bounded class.** Step 1's mandatory
+`as-platform` entry in `[project].dependencies` collided with
+`tests/unit/test_fraud_configuration.py::test_the_runtime_dependency_pin_is_unchanged`, which
+asserted the literal substring `dependencies = ["sippy==2.4.2"]` and so could not survive a
+second entry — `[project].dependencies` is one TOML array, and the design stage's enumeration
+had missed this site. The assertion is now structural (`tests/unit/test_fraud_configuration.py`
+`:321-322`): `sippy==2.4.2` is still asserted present, and the **exact set** of runtime
+dependencies is now pinned (`set(runtime_dependencies) - {"sippy==2.4.2"} == {"as-platform"}`)
+rather than left open, so the change can only strengthen. This is ADR-0009 decision 3's **second
+bounded class**.
+
+**Judgement 2 — the ADR's mis-attribution of the single-checkout failure (`65aa3c8`).** The ADR
+had attributed *"a checkout with only this repository does not resolve `as-platform`"* to
+*Verified facts* (a), the missing-source error. That is wrong: a single-repository clone already
+carries `[tool.uv.sources]`, so it takes the `path` branch and fails with `Failed to generate
+package metadata for as-platform==0.1.0 @ editable+../as_platform` / *cause: Distribution not
+found at: file:///…* — the failure *Verified facts* (f) describes. Corrected to cite decision 6
+and (f).
+
+**Judgement 3 — the library gained three runtime dependencies.** `pydantic` (the moved
+`hop.NextHop` is a pydantic model, as in the reference implementation), and `fastapi` +
+`uvicorn[standard]` (the moved `internal_api` shell serves the console surface as a FastAPI
+application on a daemon uvicorn thread, per ADR-0002, at the versions this repository pins). The
+pinned `sippy==2.4.2` / Python 3.10 stack is unchanged — one sippy (ADR-0009 decision 1).
+
+**Judgement 4 — the `sip_adapter` carry list was incomplete (`042acdc`).** ADR-0009 decision 2's
+row and LLD §11.1's row named only seven of the **nine** public names the library actually
+exports; `TRANSACTION_TIMER_NAMES` and `build_request_uri` were missing. Verified as an error and
+not a deliberate exclusion: the pre-move file (`git show ac929a9^:src/as_app/sip_adapter.py`) had
+a **ten**-entry `__all__` including both, and the only entry the move dropped is `TrunkMessage`
+(deleted). Both rows now carry all nine.
+
+**Judgement 5 — the `BaseAsStack` step-5 ruling (`042acdc`).** Step 5 of the staged sequence
+named only `internal_api`, although ADR-0009 decision 2's module table lists `main` (shell) →
+`BaseAsStack` as moving, and decision 7's own prose says "the stack depends on the controller and
+`internal_api`". The commit sequence confirms where it actually went: library `f82a819`
+(internal-API shell) → `734d82c` (AS stack shell) → `d5e4561` (the two seams), i.e. the stack
+shell moved as the **second half of step 5**. **The ruling: the move belongs to step 5.**
+`BaseAsStack` consumes both the controller shell (step 4) and `internal_api` (step 5) so it
+cannot precede step 5, and giving it a step of its own would make the order eight steps and
+contradict the "seven steps" both documents state. Both step-5 rows (ADR-0009 decision 7 and LLD
+§11.7) now name the stack shell, and the sequence stays seven steps.
+
+**Judgement 6 — the fraud reload callback keeps its historical name.** `FraudAsStack._poll_reload`
+(`src/anti_fraud_as/main.py:203`) delegates to `_poll_screening_reload` (`:212`), keeping the
+older name, because the integration tests drive `_poll_screening_reload` **directly**
+(`tests/integration/test_fraud_screening_path.py`). The base's hook is `_poll_reload`; the
+subclass method is the retained historical one, with the reason stated in its docstring.
+
+**Judgement 7 — the logger name changed to `as_platform.main`, and the observable consequence is
+nil.** After the stack shell moved, the library's `src/as_platform/main.py` logger is
+`get_logger(__name__)` = `as_platform.main` (previously `as_app.main`), and the moved
+controller's is `as_platform.call_controller`. The stage checked rather than assumed what that
+costs, and four checks — each against the code — put it at **no observable difference on any
+surface this repository renders**: (i) `StructuredFormatter` emits `record.module`, which CPython
+derives from the **basename of the emitting file**, not from the dotted logger name — verified
+directly by formatting a record with `name="as_platform.main"` and
+`pathname=…/as_platform/main.py`, which renders `"module": "main"`, and both files are `main.py`
+/ `call_controller.py` before and after the move, so the field stays `main` /
+`call_controller`; (ii) `name` is in the formatter's explicit **excluded** tuple
+(`as_platform/src/as_platform/observability/logging.py:100`), so it is never rendered into the
+payload — verified: the payload's keys are exactly `LOG_FIELDS` and `"name"` is absent; (iii)
+`configure_logging` installs its handler and its level on the **root** logger alone
+(`logging.py:183-193`) and neither repository sets a per-logger level, handler or filter (no
+`addFilter`; the sole `%(name)s` format string in either repository is the untouched standalone
+SBC mock's own `logging.basicConfig`, `src/s_sbc_mock/main.py:274`), so nothing keys on the name;
+(iv) no test or tool reads `record.name` (no `caplog`, no `assertLogs`). The live
+`uv run python -m as_app.main --self-check-only` reproduces the pre-P10 bytes —
+`{"…", "module": "main", …}` with exactly the field set of `docs/acceptance/report.md:1125` and
+no `name` key. Recorded here as a judgement and deliberately **not** in
+`docs/production-gaps.md`: the rename is internal identity only.
+
+**Judgement 8 — `tests/unit/test_caller_state.py` was repointed (`0b12db2`).** Two boundedness
+tests (`test_a_callers_window_is_bounded`, `test_the_store_is_bounded_across_callers`) asserted
+the window's bound by reading the **private** deque (`store._window`, `bounded._window._events`),
+which the state-store seam removed. They now assert the same property through the public
+`store.observe(caller).calls_in_window` count. Registered as the **third** bounded class in
+ADR-0009 decision 3 during the gate.
+
+**Judgement 9 — the gate's blocker, and the guard the move silently dropped (`b824f11` + library
+`aaa453e`).** Pre-P10, `CallController._originate_outbound_leg` wrapped the policy call in
+`try:` / `except AsError as reject_error: self._reject_on_trunk(reject_error)` (see
+`git show ac929a9^:src/as_app/call_controller.py`), and pre-P10 `apply_call_policy` **raised**
+`AsError` for a non-routable decision. Post-P10 the seam became errors-as-data (`decide(event) ->
+PolicyDecision`), the base calls `apply_call_policy` with **no** guard, and the
+number-translation `decide()` called `route_call` with no guard either — so an `AsError` from the
+routing engine escaped `decide()` → `_originate_outbound_leg` → the sippy event callback and the
+caller saw **no final response** instead of the trunk answer. Two reachable paths: `AS-ROUTE-004`
+/ `500` ("translation produced an empty number", `src/as_app/routing/engine.py`, when a rule's
+`strip_prefix` consumes the whole number) and `AS-ROUTE-003` / `480` (a hop a matched rule names
+that cannot be resolved at runtime, `RuleSet.next_hops_for`). The existing test stopped at the
+engine (`test_translation_to_empty_yields_500` asserted the raise, never driving the controller),
+which is exactly why all three layers stayed green while `REQ-F-031` was broken on this path.
+**The fix**: the application owns the conversion (ADR-0009 decision 4 — the base applies data and
+is forbidden to branch on "which application am I", so it cannot build the application's reject
+vocabulary); `CallController.decide()` now catches `AsError` and returns a reject
+`PolicyDecision` sharing one `_reject_decision` construction with the existing non-ROUTE branch
+(`src/as_app/call_controller.py:137-149`, `:310`), reproducing the pre-P10 trunk answer: the
+error's own status and phrase, disposition `REJECTED`, trace `rule_id=None` with `"rule_id": ""`
+beside `leg` and `error_code`, summary `"<status> <phrase> relayed to the trunk leg"`, and the
+WARNING `"call rejected by routing policy"` with `error.as_log_fields()`. The library's abstract
+`decide()` docstring now states the contract (the application returns a reject decision for a
+failure it cannot relay and does not let `AsError` escape; a `RELAY` decision always names at
+least one hop), and the same contract was added to ADR-0009 decision 4 and LLD §11.2. Two
+regression tests were added to `tests/integration/test_translation.py` driving the **real stack**
+and asserting the status line on the trunk (`:468`
+`test_translation_to_empty_is_answered_500_on_the_trunk`, `:486`
+`test_unresolvable_hop_is_answered_480_on_the_trunk`); the other test's docstring, which claimed
+the controller turned the failure into a `500` on the trunk without asserting it, was corrected
+to point at the new test.
+
+**The implementation-stage review gate.** Run by an **independent read-only** agent (it edited
+nothing, and wrote no part of the stage). It asked the §5.2 *Implementation* question —
+**"matches the design, stays in scope, no shortcuts taken silently"** — and returned
+**PASS-WITH-FINDINGS — one blocker, two major and two minor findings**, all of which were
+**fixed inside the stage** and the stage is **not re-reviewed** (§5.2, "one review per stage, no
+loop"). The five findings and their fixes:
+
+- **[blocker] `AS-ROUTE-004` no longer reached the trunk** — the dropped guard and its fix,
+  judgement 9 above (fixed in `b824f11` + library `aaa453e`).
+- **[major] `tests/unit/test_caller_state.py` was a third class of test change, and it was
+  unrecorded** — recorded as the third bounded class in ADR-0009 decision 3 (judgement 8;
+  `f7249de`).
+- **[major] `docs/architecture/hld.md` had not been touched by any P10 commit, and its §10.3
+  contradicted the implementation** — three corrections: the §10.1 mermaid edge asserting the
+  anti-fraud "imports as_app's skeleton surface (ADR-0007 decision 9)" is now the version chain
+  only (`from as_app import __version__`, the sole remaining `as_app` import in that package);
+  the §10.3 sippy-adapter row gained the two missing names (matching `042acdc`); and the §10.3
+  one-way-direction paragraph now states that the anti-fraud imports the **library** directly,
+  so the extraction replaced ADR-0007 decision 9's *mechanism* while that decision's *substance*
+  ("a second process, not a framework") still holds, with `src/as_app/**` ↛ `anti_fraud_as`
+  (REQ-F-026, REQ-F-030) unchanged (`f7249de`).
+- **[minor] `docs/architecture/lld.md` §4 and §9.1 still asserted the pre-extraction structure**
+  — §4's `AS-FRAUD-*` note now records the split by family over one shared mechanism (pointing
+  at §11.3) and drops a stale present-tense clause about `SIP_PHRASES` having no `608` entry;
+  §9.1's sharing table is now sourced from the library and its `internal_api` row records that
+  P10 collapsed the deliberate duplication into facades. A fourth, same-class stale clause in
+  §9.5 (the identical `608` claim) was found during the fix and corrected in `07b68e4`, so the
+  document does not contradict itself (`f7249de`, `07b68e4`).
+- **[minor] `tests/unit/test_fraud_configuration.py`'s `ALLOWED_IMPORTS` allowlist was widened
+  without being registered** — the allowlist necessarily gains the library when the import
+  target moves; registered as the **fourth** bounded class in ADR-0009 decision 3 (`f7249de`),
+  with the bound that keeps it honest recorded (the fixture still enumerates its set exactly and
+  still fails on any module outside it).
+
+The gate verified, and did not merely take on trust: the library imports **neither** `as_app` nor
+`anti_fraud_as` (REQ-F-030); the five facades are pure re-exports with no behaviour or state and
+every by-path reference still resolves; the seam reproduces both applications' allow and reject
+paths with **no** branch on "which application am I" (the peer-status-key override and the one-leg
+relaxation are as designed); the error split is **byte-identical** in every code, SIP status and
+log message (checked against `git show ac929a9^:src/as_app/errors.py`); `TrunkMessage` is gone;
+the two seams have exactly one implementation each and no TLS, no Redis and no capacity harness
+were built (that is P11's, REQ-NF-020); and the structural documents and all five CI jobs were
+updated with the honest position about the lock not guarding a `path` dependency. It noted that
+ADRs `0001`–`0008` are frozen historical records and deliberately not updated.
+
+**The verification the stage leaves behind** (independently re-run after all fixes):
+
+- application repository: `uv run ruff format --check .` → `95 files already formatted`;
+  `uv run ruff check .` → `All checks passed!`; `uv run mypy` → `Success: no issues found in 29
+  source files`; `uv run pytest tests -q` → **`248 passed`** (246 before the two regression
+  tests).
+- library repository: `uv run ruff format --check .` → `31 files already formatted`;
+  `uv run ruff check .` → `All checks passed!`; `uv run mypy` → `Success: no issues found in 15
+  source files`; `uv run pytest -q` → **`74 passed`**.
+- the library-independence grep over `as_platform/src/` for `as_app|anti_fraud_as` returns **no
+  matches**.
+- **CI cannot be run, and the record says so honestly**: the library has no remote and has never
+  been pushed, so the `git clone https://github.com/${{ github.repository_owner }}/as_platform.git`
+  URL in every CI job is an **assumption**, and CI is not green until the library is published —
+  already a row in `docs/production-gaps.md`.
+
+**The blocker's independent confirmation.** When the fix was temporarily removed, both new tests
+failed with an empty status line (`assert '' == 'SIP/2.0 500 Server Internal Error'` / `…
+'SIP/2.0 480 Temporarily Unavailable'`, `2 failed`), which is the evidence that the tests
+genuinely fail without the change. The fix restores the pre-P10 bytes, and the new tests are what
+stops it silently breaking again.
+
+**State after stage 3.** Stages 1–3 of P10's §5.1 pipeline are complete and their review gates
+have run — the requirements and design records are earlier in this subsection, and the
+implementation record and its gate are this one. The gate's five findings were fixed **inside the
+stage** (`b824f11`, library `aaa453e`, `f7249de`, `07b68e4`) and the stage is **not re-reviewed**
+(§5.2). **The tests stage is next** — it is stage 4 of the §5.1 pipeline, and the acceptance
+stage (stage 5) follows it — so `ACC-P10-001…008` remain to be created there.
+
+**P10 tests stage (stage 4) — the tests that carry the extraction, and their review gate
+(2026-09-20).** Under §5.1 the artefact of this stage is **tests**, not documents. The
+implementation stage had already added the two trunk-answer regression tests of judgement 9
+(`tests/integration/test_translation.py`, `b824f11`) and step 7 had given the library its own
+suite (`d627e73`); what this stage added is tests for the requirements that had **no direct test
+at all** before it — the two `REQ-NF-` rows, `REQ-F-029`'s *user* half and `REQ-F-032` — plus the
+two anti-fraud controller overrides that until now were evidenced by **inspection only**.
+
+**A correction, recorded rather than made silently.** The paragraph above used to end "the
+acceptance stage is next, and `ACC-P10-001…008` remain to be created there". That contradicted
+§5.1, where stage 4 is Tests and stage 5 is Acceptance, so at the time it was written the tests
+stage had not run yet. The sentence was corrected to name the tests stage as the next one (this
+commit) and the correction is stated here so the record does not disagree with the pipeline.
+
+**Requirement → test coverage.** Each row names the test that carries the requirement; a
+requirement with no test says so instead of being claimed.
+
+| Requirement | The test that carries it |
+| --- | --- |
+| `REQ-F-029`, user half | application repository `tests/unit/test_repository_baseline.py::test_both_as_instances_are_users_of_the_platform_library` |
+| `REQ-F-030` | library `tests/test_library_independence.py`; application `::test_as_app_does_not_import_the_anti_fraud_as` |
+| `REQ-F-031` | the three layers, the two trunk-answer regression tests, and `tests/unit/test_fraud_call_controller.py`'s four override assertions |
+| `REQ-F-032` | application `::test_the_library_is_consumed_from_the_sibling_checkout` (dependencies, `[tool.uv.sources]` `path`, `editable = true`) |
+| `REQ-NF-019` | library `tests/test_library_standard.py` (the three documents, the application set not copied) plus the workspace rows added here |
+| `REQ-NF-020` | library `tests/test_seams.py` (four tests) |
+| `REQ-NF-021` | library `tests/test_library_standard.py`'s Makefile, CI and `pyproject.toml` assertions |
+| `REQ-F-033` | **no test** — see the honest gaps below |
+
+**Two requirements are deliberately not asserted, and that is stated rather than papered over.**
+`REQ-F-033` — the extraction is done in incremental steps and each step leaves the three layers
+green — is a **process and historical property**, evidenced by the commit sequence and by the
+layer runs, not by an assertion a test can make; inventing one would assert nothing. The other
+half of `REQ-F-029` — *this repository becomes the library's reference implementation* — is a
+**role statement**, not a property of the artefacts, so only its user half is asserted.
+
+**The bounded test classes are limited to the extraction's own edits (`8c0166d`).** ADR-0009
+decision 3's four bounded classes constrain the edits the **extraction** — the implementation
+stage — makes to the existing suite; the Tests stage **adds** tests as its own deliverable, which
+is neither inside those four classes nor in conflict with them. The ADR's closing sentence was
+scoped to say exactly that. The maintainer's ruling also reviewed the one test this stage added
+beyond the agreed list: `test_both_as_instances_are_users_of_the_platform_library` was proposed
+as revertible and was **ruled kept**, because *both instances become users of that library* is a
+clause of `REQ-F-029` itself and therefore an assertable half of it.
+
+**The red signal.** Each assertion was shown to fail for the production change it guards, by
+removing the change, observing the failure and restoring the bytes. The producer's own mutations,
+in a temporary copy or against `cp`-saved bytes: deleting `FraudCallController._peer_status_key`
+made the base default render the internal hop name — `assert 'fraud_sbc_peer' not in
+'fraud_sbc_peer:10.0.0.1:15062'`; deleting `_no_answer_hop_label` lost the address and port —
+`assert '' == '127.0.0.1:15061'`; adding `tlsconfig.py` or `redis_store.py` under
+`src/as_platform/` tripped the seam vocabulary (`a P11-only module is present in P10:
+['tlsconfig.py']`); adding a `[tool.uv.workspace]` table to either `pyproject.toml` or renaming
+the library distribution tripped the workspace rows (`'[tool.uv.workspace]' is contained here`).
+`test_the_peer_status_key_never_renders_the_internal_hop_name` is **not vacuously true** —
+removing the override does fail it, and the name it excludes is the configured pipe name
+`fraud_sbc_peer`, never the rendered value.
+
+**The quality gate of this stage.** Run by an **independent read-only** agent that wrote no part
+of the stage. It asked the §5.2 *Tests* question — **"the tests genuinely fail without the
+change, coverage matches the requirements"** — and returned **PASS-WITH-FINDINGS: 0 blocker, 0
+major, 5 minor**, all fixed **inside the stage** and not re-reviewed (§5.2, "one review per
+stage, no loop"). It reproduced the red signals independently rather than trusting the record:
+it copied both repositories to `/tmp` (excluding `.venv`, with the copy's `src/` overriding the
+editable installs) and ran **18 mutation groups, every one of which turned red**, without
+touching either working tree. It verified the exact scope (`git diff --numstat` — application
+`tests/unit/test_fraud_call_controller.py` `88/0`, `tests/unit/test_repository_baseline.py`
+`52/0`, the ADR `+4/-2`; library `117/0` and `89/0`), **zero deleted tests**, **zero loosened
+existing assertions**, **zero `src/` changes**, that the new unit tests carry the `unit` marker
+(`-m unit` → `209 passed`), that `test_fraud_call_controller.py` constructs its objects without
+opening a socket or reading a clock (§11's unit layer), that **no document enumerates this
+stage's new test sites** — so no document went stale — and that the four gate commands and their
+numbers matched the record verbatim.
+
+**The five findings and their dispositions.**
+
+- **[minor] `REQ-NF-019`'s "not a uv workspace monorepo" clause had no test** — the manifests
+  were asserted to *be* a `path` source but never asserted *not* to be a workspace member. Fixed
+  in the stage: the library asserts its own half in
+  `tests/test_library_standard.py::test_the_library_is_a_standalone_distribution_not_a_workspace_member`
+  (no workspace table, and `[project]` self-reports `as-platform`) and the application asserts its
+  half in `tests/unit/test_repository_baseline.py::test_the_library_is_not_a_uv_workspace_member`
+  (library `0eeef37`, application `b1aef5a`). Neither test reads the other repository's directory,
+  so the check does not couple to a sibling name.
+- **[minor] `tests/test_seams.py`'s module-name check could be bypassed by a non-underscore
+  name** — `stem.split("_")` caught `tls_config.py` but **not** `tlsconfig.py`. Tightened to a
+  lower-cased **substring** match over the stem (library `0eeef37`), with the boundary stated in
+  the test's docstring: it matches **module names**, not module content or class names; the
+  `*Transport` / `*StateStore` class-suffix check is unchanged and stays out of scope for names
+  like `TransportFactory`. Red signal: both `tlsconfig.py` and `redis_store.py` now fail it.
+- **[minor] `test_the_peer_status_key_never_renders_the_internal_hop_name` is a strict subset of
+  `test_the_peer_status_key_is_the_address_and_port`** — **kept** and registered as *redundant but
+  not vacuous*, following the precedent of P9's stage-4 gate (§3), where two same-source
+  assertions were registered and kept. It records an **independent intent** — the configured pipe
+  name `fraud_sbc_peer` never reaches the peer-status counter — and deleting it would drop that
+  intent's explicit guard.
+- **[minor] neither repository's `mypy` covers `tests/`** — pre-existing configuration, not
+  introduced by this stage (both manifests list only their `src/` packages). Recorded as an
+  **accepted limitation** rather than changed here: widening a repository-wide gate is a
+  maintainer decision, outside a test stage's scope. **Escalated to the maintainer** as a
+  gate-scope question (whether `tests/` should be type-checked at all).
+- **[minor] the stage's gate numbers and its two honest no-assertion statements existed only in
+  the commit message** — closed by this record, which is the repository-side home for both.
+
+**The verification this stage leaves behind** (run after all fixes):
+
+- application repository: `uv run ruff format --check .` → `96 files already formatted`;
+  `uv run ruff check .` → `All checks passed!`; `uv run mypy` → `Success: no issues found in 29
+  source files`; `uv run pytest tests -q` → **`255 passed`** (246, then 248 after the
+  implementation stage's blocker fix, then 254 for this stage and 255 after finding 1).
+- library repository: `uv run ruff format --check .` → `33 files already formatted`;
+  `uv run ruff check .` → `All checks passed!`; `uv run mypy` → `Success: no issues found in 15
+  source files`; `uv run pytest -q` → **`84 passed`** (74, then 83 for this stage and 84 after
+  finding 1).
+
+**State after stage 4.** Stages 1–4 of P10's §5.1 pipeline are complete and their review gates
+have run. This stage's gate returned PASS-WITH-FINDINGS and its five findings were fixed **inside
+the stage** (library `0eeef37`, application `b1aef5a`, plus the ADR scoping of `8c0166d`), so the
+stage is **not re-reviewed** (§5.2). The acceptance stage (stage 5) is next, and
+`ACC-P10-001…008` will be created there.
+
+**P10 acceptance stage (stage 5) — `ACC-P10-001…008`, the §4.8 evidence and its review gate
+(2026-09-20).** Under §5.1 the artefact of this stage is **acceptance**. The eight rows live in
+`docs/acceptance/criteria.md` under `## Phase 2 — P10 platform extraction` (`:89-100`), one row
+per requirement (`REQ-F-029…033`, `REQ-NF-019…021`) with the criterion, a reproducible command,
+the expected result carrying the real numbers, and the requirement; the run record is the P10
+section of `docs/acceptance/report.md` (`:2826-3260`), whose four sections follow `AGENT.md` §4.8
+and whose `Evidence kinds per item` matrix states, per item, which kind is present. The stage
+changed **no** code, test, ADR or architecture file: its range is exactly the two acceptance files
+(`git diff --name-only d57c309..225a851` → two paths, `449 insertions, 0 deletions`).
+
+**What the stage cannot supply, stated rather than substituted.** Kind ③ — the CI result — is
+unavailable in **both** repositories. The library has **no remote and has never been pushed**, so
+its own three-job workflow is an **unexecuted definition** with no run, badge or job conclusion;
+and this repository's five CI jobs each clone the library into `../as_platform` before
+`uv sync --frozen`, a clone that cannot succeed while the library exists nowhere but a filesystem,
+so this repository's CI **cannot be green either** (`docs/production-gaps.md` `:134`, *CI second
+checkout (new dependency)*, and `:131`, *Library gate not in this repository's CI*). There is **no
+pcap**: `docs/specs/message-samples/` is generated and gitignored, so `make capture` produces 14
+text samples plus their `README.md` — a message-sample set, not a capture — and no other capture
+path exists for P10. The consumption probe measures `uv` against a **two-module stand-in**, not
+the real skeleton (`:133`, *Consumption probe's stand-in scope*), and "a clone without the sibling
+cannot resolve `as-platform`" is recorded as `REQ-F-032`'s **accepted cost** rather than asserted,
+because this working tree *has* the sibling. `ACC-P10-007`'s per-step green is a **historical**
+property with no test behind it, and a faithful per-step re-run is awkward rather than impossible:
+the library is a `path` + `editable` dependency, so re-running step *n* means materialising **both**
+repositories at their step-*n* commits — steps 1 and 4 were spot-checked from temporary worktrees
+(`246 passed` each, `94` / `95 files already formatted`) and the other five rest on the commits'
+own gate runs, which the record says instead of implying coverage.
+
+**The requirement rows keep their status in this stage.** The git history decides that, and it does
+not show the acceptance stage flipping them. For P9 the four rows were **added** `planned` in
+`577d258 docs(p9): add chained-demo requirements to the SRS`, and `git show
+f68ed27:docs/requirements/functional-and-nonfunctional.md` still reads `planned` at the acceptance
+commit `f68ed27 docs(p9): add the P9 acceptance items and their evidence`; only
+`06f8ed9 chore(p9): close the item — SRS, demo docs, version 0.7.0 and CHANGELOG`, a descendant of
+both acceptance commits (`f68ed27`, `4d3e924`), set seven rows to `done | P9`. P8 flipped the same
+way — `4d32e80 chore(p8): close the item` does not touch the SRS at all, and `d22324e docs(p8): mark
+the P8 requirements done` (a descendant of the close) set fourteen rows — so status flipping is an
+**item-close (§5.4)** action, not an acceptance-stage one. `REQ-F-029…033` and `REQ-NF-019…021`
+therefore stay `planned` here and are set `done` by the §5.4 closing commit.
+
+**The quality gate of this stage.** Run by an **independent read-only** agent that wrote no part of
+the stage. It asked the §5.2 *Acceptance* question — **"the §4.8 evidence is real, reproducible and
+complete"** — and returned **PASS-WITH-FINDINGS: 0 blocker, 2 major, 0 minor**, both fixed **inside
+the stage** and not re-reviewed (§5.2). It re-ran every command in the record and matched them
+verbatim (`1 passed, 55 deselected` / `2 passed, 54 deselected` / `1 passed, 55 deselected` /
+`210` / `36` / `9`; the probe's `cases measured : 8` with `expectations : all held` and exit `0`;
+the independence grep exiting `1` with no output; the library's `2`, `6` and `4 passed` and its
+`33 files already formatted` + `84 passed`; the CI job list `['lint', 'test', 'type']`; `VERSION`
+`0.1.0`). It materialised step 1 **read-only** (`git archive` of application `f041174` with library
+`4caec3e`, in `/tmp`) and reproduced all four gates there — `94 files already formatted`,
+`All checks passed!`, `28 source files`, `246 passed in 35.37s` — matching the record word for
+word; ran `make capture` (14 samples, no pcap); ran both `-s` e2e files and confirmed §2's quoted
+traces have the shape of a real capture rather than an invented one; checked the four-kind matrix
+item by item for a silently omitted kind; confirmed the stage's range is exactly two files; matched
+`docs/production-gaps.md` `:131-134` row for row; and confirmed the local gate was never presented
+as a CI result.
+
+**The two findings and their dispositions.**
+
+- **[major] the `ACC-P10-002` row asserted a fact the extraction had already invalidated.** The row
+  said `src/anti_fraud_as/call_controller.py` imports `as_app.sip_adapter`, but after P10 that
+  module's line **57** imports `as_platform.sip_adapter` and the package's only remaining `as_app`
+  **import** is the version chain at `src/anti_fraud_as/__init__.py:31` — the correction HLD §10.3
+  and the stage-3 record already carry. Fixed in the stage: the row now states the **current**
+  mechanism (and cites ADR-0009 decision 2 / HLD §10.3) while keeping the conclusion it existed for
+  — only the one-way invariant is assertable, and only it is asserted.
+- **[major] the same stale sentence made two P9 statements outdated, and the P10 record had not
+  registered it.** `ACC-P9-001` in `docs/acceptance/criteria.md:83` and the P9 accepted-limitation
+  bullet in `docs/acceptance/report.md:2796` still describe the P9-era import. Both were **really
+  true when P9 ran**, so neither was rewritten: each now carries a minimal **P10-era note** saying
+  the mechanism changed (the controller imports `as_platform.sip_adapter` directly; the only
+  `as_app` import left in the package is the version chain) and that the one-way invariant the note
+  justifies is unchanged (ADR-0009 decision 2, HLD §10.3). The P10 section and the eight rows were
+  then re-read for the same substance — no other statement carries it.
+
+**The verification this stage leaves behind** (run after both fixes):
+
+- application repository: `uv run ruff format --check .` → `96 files already formatted`;
+  `uv run ruff check .` → `All checks passed!`; `uv run mypy` → `Success: no issues found in 29
+  source files`; `uv run pytest tests -q` → **`255 passed`**; `tools/path_dependency_probe.py`
+  exit `0`.
+- library repository: `uv run ruff format --check .` → `33 files already formatted`;
+  `uv run ruff check .` → `All checks passed!`; `uv run mypy` → `Success: no issues found in 15
+  source files`; `uv run pytest -q` → **`84 passed`**.
+
+**State after stage 5.** Stages 1–5 of P10's §5.1 pipeline are complete and their review gates have
+run; this stage's gate returned PASS-WITH-FINDINGS and its two findings were fixed **inside the
+stage**, so the stage is **not re-reviewed** (§5.2). What remains is P10's **item close of §5.4**:
+run the §16 Definition of Done, update this plan and the `docs/roadmap.md` pointer, update
+`CHANGELOG.md` and `VERSION`, and commit — **no tag and no push** (`AGENT.md` §13 and §15). The
+requirement status rows flip to `done` there, not here.
+
+- **Status: done (2026-09-20), worked on `feat/platform-extraction` (this repository) and `main`
+  (the library repository); merged into `phase2` as the final step of this close (§4 — an item
+  branch merges into `phase2` when the item's own definition of done is met) and `main` is
+  untouched; not tagged.**
+  Stages 1–5 of §5.1 were completed, each with its own read-only review gate (§5.2), and the item
+  close of §5.4 was then performed: the eight SRS rows `REQ-F-029…033` and `REQ-NF-019…021` are
+  `done`; `VERSION` / `pyproject.toml` / `uv.lock` were bumped together to **`0.8.0`** and the
+  CHANGELOG node `[0.8.0] - 2026-09-20` opened; acceptance items **`ACC-P10-001 … ACC-P10-008`**
+  were accepted with evidence in `docs/acceptance/report.md`; and the §16 Definition of Done was
+  run and recorded in that report's new `### Definition of Done` section. The **library repository
+  keeps its `VERSION` at `0.1.0` and opens no new node**: its `[0.1.0]` node already declares that
+  `0.1.0` was never released, tagged or pushed, so it describes the whole extraction, and the
+  close only adds one `Added` bullet for the boundary tests `27fe26e` and `0eeef37` (library
+  commit `801181c`). The `Call-ID` entry under `[Unreleased]` in this repository's `CHANGELOG.md`
+  stays where it is (ruling below). Merging into `main` and tagging remain the maintainer's steps
+  (`AGENT.md` §13/§15).
+
+**One correction, stated rather than made silently.** The `**State after stage 5.**` paragraph
+above lists the remaining close work — run the §16 Definition of Done, update this plan and the
+`docs/roadmap.md` pointer, update `CHANGELOG.md` and `VERSION`, and commit — and does not mention
+merging into `phase2`. Merging into `phase2` is also part of this close under §4 ("item branches
+are cut from `phase2` … and merge into `phase2` when that item's own definition of done is met"),
+and it was performed as the close's final step. This is a correction of that list, not a silent
+edit of the stage-5 text: the paragraph above is left exactly as it was written.
+
+**What was learned (2026-09-20).**
+
+1. **An item that spans two repositories stretched §4.8's evidence model into a new shape.** Kind
+   ③ is unproducible in **both** repositories: the library has no remote and has never been pushed,
+   so its three-job workflow is an **unexecuted definition**, and this repository's five CI jobs
+   each clone a sibling that cannot be cloned while it exists only on a filesystem. P8's and P9's
+   version of the gap was "nothing is pushed"; P10's is "the sibling exists only on disk" — a gap
+   only the maintainer publishing the library can close, and `docs/production-gaps.md` now carries
+   two rows for it (`:131`, `:134`).
+2. **`path` + `editable` makes "staged and green at every step" checkable only by sampling.**
+   Re-running step *n* means materialising **both** repositories at that step's commits, so
+   `REQ-F-033` / `ACC-P10-007` spot-checked only steps 1 and 4 while the other five rest on the
+   commits' own gate records. The per-step green is a property of **the commits**, not of the
+   current working tree, and the record says so instead of implying coverage.
+3. **A structural refactor invalidates statements scattered far from the code it moved, and only
+   an independent read-only gate takes the record back to the tree.** Both of the acceptance
+   gate's major findings were stale facts the **extraction itself** left behind: `criteria.md`'s
+   `ACC-P10-002` still said `src/anti_fraud_as/call_controller.py` imports `as_app.sip_adapter`,
+   and the same sentence had also outdated `criteria.md:83`'s `ACC-P9-001` and `report.md:2796`'s
+   P9 accepted-limitation. The handling was a minimal **P10-era note** on the P9 statements, not a
+   rewrite of history — add the note, do not delete or reword the old claim.
+4. **A new test must be mutation-checked to prove it is not vacuous.** `test_library_standard.py`'s
+   first form used substring matching, so `pytest` was satisfied by `.pytest_cache` and `mypy` by
+   the job step name `- name: mypy`; after tightening it to parse the `Makefile` recipe lines and
+   the CI `run:` lines, the mutations turned red honestly. **An assertion a grep happens to
+   satisfy is not a test.**
+5. **The move took about 3.4k lines out of `src/` (21 files), and the item branch touched 48
+   files in all, with the wire bytes unchanged.** The acceptance evidence for a pure refactor is
+   therefore not a new-feature demo but **unchanged behaviour** — the same Call-ID keyed trace
+   shape and the same `-b2b_1` derivation (`ACC-P10-003`'s §2/§4).
+
+**Entry state for P11.**
+
+- P11 works **in the library repository** per the §4 table, starting from the library's `main`
+  after this close. The library has no branch of its own yet, and creating one needs the
+  maintainer's approval (`AGENT.md` §13) — the §8 blanket grant of 2026-09-19 ("full authority to
+  judge and execute through the end of Phase 2") covers it, but the purpose and the end condition
+  still have to be stated. This repository's working tree is `phase2` after the close.
+- P11's **design stage includes** the sippy TLS-support probe (`AGENT.md` §14 forbids assuming;
+  §7 item 5). The probe belongs to P11's design stage and does not move earlier (§5.1).
+  Certificates are produced by a generation script and **no private key is ever committed**
+  (`AGENT.md` §9); Redis runs as a `docker compose` service and the **in-memory store stays the
+  default**, so `make demo`, the three layers and CI keep running with no external service; the
+  harness **reports constraints only and never publishes a figure** (D10).
+- **P11's first edit** is the library's `tests/test_seams.py` and `tests/test_library_standard.py`:
+  they now **deliberately** forbid a second implementation and any TLS / Redis / harness module
+  (`REQ-NF-020`, `ACC-P10-006`, the report's accepted-limitation entry). P11 rewrites those
+  assertions by design and must also re-examine `REQ-NF-002` (UDP-only) — `REQ-NF-020` already
+  states that the TLS supersession happens in P11.
+- `path` + `editable` means a library change reaches this repository **immediately**, so both gates
+  must run (library `make lint` / `make test` and this repository's `make lint` / `make test`), and
+  the `as-platform` entry in `dependencies` carries no version constraint.
+- Neither repository has CI (the library has no remote; this repository's five jobs need the
+  sibling), so **P11 inherits the same kind ③ gap** unless the maintainer publishes the library.
+
+**Two rulings, recorded so a later conversation does not re-derive them.**
+
+- **The `Call-ID` entry stays under `[Unreleased]` and is not folded into `[0.8.0]`.** It belongs to
+  the **Phase 1 `main` fix** (`d8dad31`, `f1b4186`, landed on `main`; §7 item 8 — "its own
+  conversation owned its `CHANGELOG` / `VERSION`"), not to P10. `06f8ed9` deliberately left it at
+  the top of `[Unreleased]` (Keep a Changelog puts `Unreleased` first), and it was never released
+  under any version node, so leaving it as it is stays truthful.
+- **The library keeps `VERSION` `0.1.0` and opens no new node.** Its `[0.1.0]` node states it was
+  never released, tagged or pushed, so the whole extraction is described there; a second node for
+  two test commits would misstate that. Only one `Added` bullet was added (library `801181c`).
+
 ### P11 — Platform verification: pluggable transport, pluggable state store, capacity harness
 
 - **Goal.** Prove the abstraction was right by adding a **second implementation** of each

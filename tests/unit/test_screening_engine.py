@@ -29,6 +29,7 @@ from dataclasses import replace
 
 import pytest
 
+from anti_fraud_as.errors import FraudErrorCode
 from anti_fraud_as.screening import (
     ScreeningDecision,
     ScreeningPolicy,
@@ -37,7 +38,6 @@ from anti_fraud_as.screening import (
     ScreeningVerdict,
     screen,
 )
-from as_app.errors import AsErrorCode
 
 pytestmark = pytest.mark.unit
 
@@ -83,7 +83,7 @@ def test_a_block_listed_caller_is_rejected_with_the_entry_identifier() -> None:
     assert decision.verdict is ScreeningVerdict.REJECT
     assert decision.source is ScreeningSource.BLOCK_LIST
     assert decision.list_entry == "BL-0001"
-    assert decision.error_code == AsErrorCode.FRAUD_CALLER_BLOCKED.code
+    assert decision.error_code == FraudErrorCode.FRAUD_CALLER_BLOCKED.code
     assert decision.reason == "calling party is on the block list"
 
 
@@ -122,7 +122,7 @@ def test_the_block_list_wins_over_the_window_and_reputation() -> None:
     )
 
     assert decision.source is ScreeningSource.BLOCK_LIST
-    assert decision.error_code == AsErrorCode.FRAUD_CALLER_BLOCKED.code
+    assert decision.error_code == FraudErrorCode.FRAUD_CALLER_BLOCKED.code
 
 
 def test_the_window_wins_over_reputation() -> None:
@@ -130,7 +130,7 @@ def test_the_window_wins_over_reputation() -> None:
     decision = screen(signals(calls_in_window=4, effective_reputation=0.0), POLICY)
 
     assert decision.source is ScreeningSource.RATE_WINDOW
-    assert decision.error_code == AsErrorCode.FRAUD_RATE_EXCEEDED.code
+    assert decision.error_code == FraudErrorCode.FRAUD_RATE_EXCEEDED.code
 
 
 @pytest.mark.parametrize("calls", [1, 3])
@@ -149,7 +149,7 @@ def test_calls_above_the_threshold_are_rejected(calls: int) -> None:
     assert decision.verdict is ScreeningVerdict.REJECT
     assert decision.source is ScreeningSource.RATE_WINDOW
     assert decision.reason == "calling party exceeded the call-rate window"
-    assert decision.error_code == AsErrorCode.FRAUD_RATE_EXCEEDED.code
+    assert decision.error_code == FraudErrorCode.FRAUD_RATE_EXCEEDED.code
 
 
 @pytest.mark.parametrize("score", [0.0, 30.0, 49.9])
@@ -160,7 +160,7 @@ def test_a_score_below_the_threshold_is_rejected(score: float) -> None:
     assert decision.verdict is ScreeningVerdict.REJECT
     assert decision.source is ScreeningSource.REPUTATION
     assert decision.reason == "calling party reputation is below the threshold"
-    assert decision.error_code == AsErrorCode.FRAUD_REPUTATION_LOW.code
+    assert decision.error_code == FraudErrorCode.FRAUD_REPUTATION_LOW.code
 
 
 @pytest.mark.parametrize("score", [50.0, 80.0, 100.0])

@@ -296,3 +296,67 @@ def test_chaining_added_no_new_configuration_knob(repo_root: Path) -> None:
     }
     chaining_keys = sorted(key for key in declared if "chain" in key.lower())
     assert not chaining_keys, f"chaining introduced new configuration keys: {chaining_keys}"
+
+
+#: The library distribution, its import package and the sibling checkout it is consumed from
+#: (REQ-F-029, REQ-F-032, ADR-0009 decisions 1 and 6).
+LIBRARY_DISTRIBUTION = "as-platform"
+LIBRARY_MODULE = "as_platform"
+LIBRARY_SOURCE_PATH = "../as_platform"
+
+#: The two application packages that consume the library and stay its reference implementation.
+APPLICATION_PACKAGES = ("as_app", "anti_fraud_as")
+
+
+def test_the_library_is_consumed_from_the_sibling_checkout(repo_root: Path) -> None:
+    """``as-platform`` is an editable ``path`` dependency on ``../as_platform`` (REQ-F-032).
+
+    The library is a separate repository checked out beside this one and consumed through the
+    ``path`` source of ADR-0009 decision 6 — never a registry dependency, so a
+    single-repository checkout cannot resolve it. ``editable = true`` is load-bearing rather
+    than cosmetic: it links the sibling checkout instead of installing a copy, which is what
+    lets the staged extraction edit the library and immediately run this repository's gate
+    against the edit.
+    """
+    text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+
+    runtime = re.search(r"^dependencies = \[(.*?)^\]", text, re.DOTALL | re.MULTILINE)
+    assert runtime is not None, "the runtime dependencies are missing from pyproject.toml"
+    assert LIBRARY_DISTRIBUTION in re.findall(r'"([^"]+)"', runtime.group(1))
+
+    sources = re.search(r"^\[tool\.uv\.sources\]\n(.*?)(?=^\[|\Z)", text, re.DOTALL | re.MULTILINE)
+    assert sources is not None, "[tool.uv.sources] is missing from pyproject.toml"
+    entry = re.search(
+        rf"^{re.escape(LIBRARY_DISTRIBUTION)}\s*=\s*\{{(.*)\}}", sources.group(1), re.MULTILINE
+    )
+    assert entry is not None, "as-platform has no path source (ADR-0009 decision 6)"
+    source = entry.group(1)
+    assert re.search(rf'path\s*=\s*"{re.escape(LIBRARY_SOURCE_PATH)}"', source), source
+    assert re.search(r"editable\s*=\s*true", source), source
+
+
+def test_the_library_is_not_a_uv_workspace_member(repo_root: Path) -> None:
+    """The sibling checkout is a `path` dependency, never a uv workspace member (REQ-NF-019).
+
+    LLD section 11.1 states that neither manifest declares the other a
+    `[tool.uv.workspace]` member; this asserts this repository's half. A workspace member is
+    resolved by one shared lock and one root, so the library's gate (REQ-NF-021) would no
+    longer be the gate of a standalone distribution.
+    """
+    text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+    assert "[tool.uv.workspace]" not in text, "the library must not be a uv workspace member"
+
+
+def test_both_as_instances_are_users_of_the_platform_library(repo_root: Path) -> None:
+    """Both AS instances consume the extracted skeleton (REQ-F-029).
+
+    The shared shell lives in the ``as_platform`` library and this repository is its
+    reference implementation, so each application package imports the library rather than
+    carrying a private copy of the shell the extraction moved out.
+    """
+    for package in APPLICATION_PACKAGES:
+        consumed = any(
+            imports_module(path.read_text(encoding="utf-8"), LIBRARY_MODULE)
+            for path in (repo_root / "src" / package).rglob("*.py")
+        )
+        assert consumed, f"{package} does not consume the as-platform library (REQ-F-029)"

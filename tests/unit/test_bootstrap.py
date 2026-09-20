@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from as_app.bootstrap import AsSettings, check_port_available, run_startup_self_check
-from as_app.errors import AsError, AsErrorCode
+from as_app.errors import AsError, AsErrorCode, SkeletonErrorCode
 
 pytestmark = pytest.mark.unit
 
@@ -59,7 +59,7 @@ def test_port_availability_check_detects_a_busy_port(free_udp_port: int) -> None
             check_port_available("127.0.0.1", free_udp_port)
     finally:
         blocker.close()
-    assert excinfo.value.code is AsErrorCode.CFG_PORT_UNAVAILABLE
+    assert excinfo.value.code is SkeletonErrorCode.CFG_PORT_UNAVAILABLE
 
 
 def test_self_check_passes_with_a_valid_configuration(free_udp_port: int, rules_file: Path) -> None:
@@ -94,4 +94,4 @@ def test_self_check_fails_without_a_peer(free_udp_port: int, rules_file: Path) -
     )
     with pytest.raises(AsError) as excinfo:
         run_startup_self_check(settings)
-    assert excinfo.value.code is AsErrorCode.CFG_MISSING
+    assert excinfo.value.code is SkeletonErrorCode.CFG_MISSING

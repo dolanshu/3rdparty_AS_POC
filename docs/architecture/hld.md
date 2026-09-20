@@ -447,3 +447,131 @@ outbound dialog identity** (a step that was omitted twice, in two copies of the 
 is P10's input and is recorded at the item's close (`docs/phase2-plan.md` section 3 P9,
 section 5.4).
 
+## 10. The platform library (P10)
+
+`docs/phase2-plan.md` D8 splits the repository in two stages: stage one put the anti-fraud AS
+**in this repository** (section 8), so the second use case could reuse the mock, the console,
+the test scaffolding and the document set; stage two extracts the **skeleton shared by the two
+AS instances** into a library in a new repository, after which this repository becomes the
+library's **reference implementation and first user** (ADR-0009). This section adds the library
+to the system context, the deployment view and the interface view. It extends the views above
+rather than replacing them: the two AS instances, their console and their three demos are
+unchanged (sections 8, 9).
+
+### 10.1 System context
+
+**The library is a build-time dependency, not a runtime component.** Nothing new is deployed:
+the process topology of section 8.2 — the two AS instances, the two mocks and the console — is
+unchanged, and the library adds **no process, no port and no listener**. It sits on the build
+path only: `uv` resolves it when this repository's environment is created, and the extracted
+code runs **inside** the two AS processes exactly where it ran before (ADR-0009 decisions 1
+and 2).
+
+```mermaid
+graph LR
+    subgraph lib["as_platform (sibling checkout)"]
+        PLAT["library: the shared skeleton<br/>observability, sip_adapter, errors,<br/>bootstrap, controller/call-map/stack shells,<br/>transport + state-store seams"]
+    end
+    subgraph ours["this repository — the reference implementation"]
+        AS["src/as_app/<br/>number translation"]
+        FRAUD["src/anti_fraud_as/<br/>anti-fraud"]
+    end
+    PLAT -. "build-time import<br/>(no wire, no port)" .-> AS
+    PLAT -. "build-time import<br/>(no wire, no port)" .-> FRAUD
+    FRAUD -. "version chain only (from as_app import __version__)" .-> AS
+```
+
+**This repository is the library's reference implementation (REQ-F-029): the library is
+developed against two real consumers, not against an imagined one.** The two consumers are
+`src/as_app/` (number translation, the Phase 1 AS) and `src/anti_fraud_as/` (anti-fraud, the
+P8 AS). A library induced from one use case would be shaped like it; the extraction has exactly
+two samples, which is both the reason the seams exist and the limit of what they prove
+(ADR-0009, *Gaps accepted*).
+
+### 10.2 Deployment view
+
+**What changes on a machine is the checkout, not the topology.** The library repository
+`as_platform` must be checked out **beside** this one (`../as_platform`), and `AGENT.md`
+section 10's guarantee *"clone → `uv sync` → `make demo`"* becomes **"clone both repositories
+side by side → `uv sync` → `make demo`"** (REQ-F-032, ADR-0009 decision 6). There is **no new
+environment variable, no new port and no new service**: the library is not deployed, and the
+port matrices of sections 8.2 and 9.2 are untouched.
+
+| Checkout | Path | Role |
+| --- | --- | --- |
+| this repository | the working tree | the library's **reference implementation** and first user |
+| `as_platform` | `../as_platform` (sibling) | the library; consumed through a `path` source |
+
+The sibling layout is not a convention: the `path` in `pyproject.toml` is resolved **relative
+to the consuming `pyproject.toml`**, so `../as_platform` means a sibling of this repository's
+root and a deeper nesting does not find it (ADR-0009, *Verified facts* (f)). A checkout with
+only this repository does not resolve `as-platform` at all (*Verified facts* (a)).
+
+### 10.3 Interface view
+
+The library's public surface is grouped below; each group's reasoning is in ADR-0009 and is not
+re-argued here. Everything in the table is imported **by this repository**, and the library
+imports neither application (REQ-F-030).
+
+| Surface | What it is | ADR-0009 |
+| --- | --- | --- |
+| error mechanism | the memberless `ErrorCode`, `SIP_PHRASES`, `sip_status_for`, `AsError`, and the `SkeletonErrorCode` family | decision 3 |
+| observability | structured logging, counters/dispositions/peer status, per-Call-ID trace and console feed | decision 2 |
+| sippy adapter | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `outbound_call_id`, `build_request_uri`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `TRANSACTION_TIMER_NAMES`, `CallLeg` | decision 2 |
+| hop | the `NextHop` value object, in its own module (`hop.py`) so `sip_adapter` and `call_controller` can both import it without a cycle; `as_app.routing.rules` re-exports it | decision 2 |
+| bootstrap plumbing | `ShutdownController`, `install_signal_handlers`, `check_port_available` | decision 2 |
+| controller shell | `BaseCallController`, `BaseCallMap`, `PolicyDecision` | decision 4 |
+| stack shell | `BaseAsStack` | decision 4 |
+| internal-API shell | the app factory, `InternalApiServer` and the payload builders, generalised over a payload provider | decision 2 |
+| transport seam | `Transport` / `UdpTransport` | decision 5 |
+| state-store seam | `StateStore` / `InMemoryStateStore` | decision 5 |
+| version | the distribution → `VERSION` chain | decision 2 |
+
+**The direction rule the library must satisfy is one-way (REQ-F-030):** `as_platform` imports
+**neither** `as_app` nor `anti_fraud_as`, so it carries the skeleton and not either use case.
+The other direction changed with the extraction: `src/anti_fraud_as/**` now imports the
+**library** (`as_platform`) directly for the skeleton, so the extraction replaced ADR-0007
+decision 9's *mechanism* — direct import from `as_app` — while that decision's *substance*, a
+second process and not a framework, still holds. The only `as_app` import left in that package
+is the version chain (`from as_app import __version__`), and the assertable invariant
+`src/as_app/**` ↛ `anti_fraud_as` (REQ-F-026, REQ-F-030) still holds.
+
+### 10.4 Key message flows
+
+**No message flow changes, and that is the point.** The extraction moves where the skeleton's
+code lives, not what any process does with a message: the relay, the failover walk, the `608`
+reject, the per-leg `Call-ID` derivation and the ICID pass-through of sections 4, 8.4 and 9.4
+are the same code in the same processes on the same wire. The heading is kept for structural
+symmetry with sections 8 and 9; its content is the absence of a flow delta (REQ-F-031).
+
+### 10.5 What the extraction does not change
+
+- **The SIP signalling on the trunk is byte-identical.** The same messages, headers,
+  Request-URI, SDP body and pass-through header set cross every leg (ADR-0009 decision 2).
+- **The `AS-*` codes, SIP statuses and reason phrases are unchanged.** `SIP_PHRASES` —
+  including `608: "Rejected"` — moves once, so the phrase cannot drift between families
+  (ADR-0009 decision 3).
+- **The per-instance Call-ID-keyed trace and console feed are unchanged.** Each AS still keys
+  its trace, log and console feed on the `Call-ID` it saw on its trunk leg (sections 9.3, 9.4).
+- **The two AS instances remain independent processes.** No process boundary moves, and the
+  extraction adds no import between them (section 8.1).
+- **`make demo` / `make demo-fraud` / `make demo-chained` still place real calls.** The three
+  documented entry points keep working from a clean checkout, with the second checkout in place
+  (REQ-F-032).
+- **The three test layers stay green** — unit, integration and e2e (REQ-F-031, `AGENT.md`
+  section 11). The one bounded exception is recorded in ADR-0009 decision 3: it changes no
+  assertion's expected value, and the single uniqueness/status-coverage test is **strengthened**
+  in scope to cover all three error families.
+
+**The extraction is a pure refactor with no wire-visible change.** It moves the skeleton both
+AS instances already share into a library in a new repository; it changes where code lives, not
+what the system does.
+
+### 10.6 What it changes for a developer
+
+- **Two repositories to clone.** A developer clones both checkouts side by side; a working tree
+  with only this repository does not resolve the dependency (section 10.2).
+- **A change to the library's API obliges this repository.** As the reference implementation,
+  this repository follows the library in the same piece of work — it is the first user, not a
+  consumer at a distance (ADR-0009, *Consequences*; D8).
+

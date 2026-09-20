@@ -2796,8 +2796,13 @@ Consistent with the stage-4 position, and not hidden:
   `src/anti_fraud_as/call_controller.py` imports `as_app.sip_adapter` **by design** (ADR-0007
   decision 9); only the forbidden direction (`src/as_app` ↛ `anti_fraud_as`) is assertable and is
   what `test_as_app_does_not_import_the_anti_fraud_as` asserts. ACC-P9-001 claims only that
-  one-way independence. The wording question is escalated as `docs/phase2-plan.md` §7 item 10,
-  not settled here (`AGENT.md` §14 rule 2).
+  one-way independence. **P10-era note (added by the P10 acceptance stage, 2026-09-20): the two
+  sentences above are the P9 record and stay as such — the mechanism changed in P10, where
+  `src/anti_fraud_as/call_controller.py:57` imports `as_platform.sip_adapter` directly and the
+  package's only remaining `as_app` import is the version chain,
+  `src/anti_fraud_as/__init__.py:31`; the one-way invariant this note justifies is unchanged
+  (ADR-0009 decision 2, HLD §10.3).** The wording question is escalated as
+  `docs/phase2-plan.md` §7 item 10, not settled here (`AGENT.md` §14 rule 2).
 - **`REQ-F-025`'s literal call sequence includes `ACK`, but no P9 test asserts it.** The e2e test
   asserts `INVITE`, `180`, `200` and `BYE` in each instance's trace; the emitted AS-1 trace
   contains **no `ACK` row** (the mock's UAC does not record `ACK` in the trace), so the criterion

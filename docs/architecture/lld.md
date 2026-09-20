@@ -1039,7 +1039,7 @@ duplicate (ADR-0009 decision 2):
 | Module | Responsibility |
 | --- | --- |
 | `observability/` | structured logging, counters/dispositions/peer status, per-Call-ID trace and console feed (moved from `as_app.observability`) |
-| `sip_adapter` | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `outbound_call_id`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `CallLeg` (moved from `as_app.sip_adapter`; `TrunkMessage` is **not** carried — deleted with the move, ADR-0009 decision 2) |
+| `sip_adapter` | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `TRANSACTION_TIMER_NAMES`, `outbound_call_id`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `build_request_uri`, `CallLeg` (moved from `as_app.sip_adapter`; `TrunkMessage` is **not** carried — deleted with the move, ADR-0009 decision 2) |
 | `hop` | the `NextHop` value object, in its own module so `sip_adapter` and `call_controller` can both import it without a cycle; `as_app.routing.rules` re-exports it (section 11.1 below, ADR-0009 decision 2) |
 | `errors` (mechanism) | the memberless `ErrorCode` base, `SIP_PHRASES`, `sip_status_for`, `AsError`, and the `SkeletonErrorCode` family (`AS-CFG-*`, `AS-PEER-*`, `AS-INT-*`) (section 11.3) |
 | `bootstrap` (plumbing) | `ShutdownController`, `install_signal_handlers`, `check_port_available` (moved from `as_app.bootstrap`) |
@@ -1315,7 +1315,7 @@ red". This is the executable order:
 | 2 | Move the leaf modules with the `as_app` facades. | `observability/`, the `errors` mechanism plus `SkeletonErrorCode`, `sip_adapter` (with `TrunkMessage` deleted) | all three layers; the facades keep every by-path reference resolving |
 | 3 | Move the version chain and the bootstrap plumbing. | `version`; `ShutdownController` / `install_signal_handlers` / `check_port_available`, generalised | all three layers |
 | 4 | Move the controller shell and rewire both controllers to `decide()`. | `BaseCallController` + `PolicyDecision` + `BaseCallMap`; `CallController` and `FraudCallController` become subclasses | all three layers **plus** `tools/chained_as_probe.py` — the largest step, and the only one that can change behaviour |
-| 5 | Move and generalise `internal_api` (a payload provider instead of a bound store). | the app factory, `InternalApiServer`, the payload builders | all three layers; both applications keep their routes and payload shapes |
+| 5 | Move and generalise `internal_api` (a payload provider instead of a bound store), then move the stack shell (`BaseAsStack`). | the app factory, `InternalApiServer`, the payload builders, `BaseAsStack` (the stack shell, now `as_platform/main.py`) | all three layers; both applications keep their routes and payload shapes |
 | 6 | Add the two seams, one implementation each (section 11.4). | new `Transport` / `UdpTransport`, `StateStore` / `InMemoryStateStore` | all three layers; no behaviour change |
 | 7 | Give the library its own suite, gate, independence assertion and documents (REQ-NF-021). | the library's `tests/`, gate and documents | this repository's three layers; the library is independently verifiable |
 

@@ -83,7 +83,7 @@ the shells the two applications currently duplicate:
 | Library module | Moved from | Responsibility |
 | --- | --- | --- |
 | `observability/` | `as_app.observability` | structured logging, counters/dispositions/peer status, per-Call-ID trace and console feed |
-| `sip_adapter` | `as_app.sip_adapter` | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `outbound_call_id`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `CallLeg` (`TrunkMessage` is not carried — deleted with the move, below) |
+| `sip_adapter` | `as_app.sip_adapter` | `PASSTHROUGH_HEADERS`, `B2BUA_CALL_ID_SUFFIX`, `TRANSACTION_TIMER_NAMES`, `outbound_call_id`, `extract_called_number`, `is_allowed_peer`, `cancel_transaction_timers`, `build_request_uri`, `CallLeg` (`TrunkMessage` is not carried — deleted with the move, below) |
 | `hop` | `as_app.routing.rules` | the `NextHop` value object — the ordered next hop a B2BUA relays towards (its own module, below) |
 | `errors` (mechanism) | `as_app.errors` | the memberless `ErrorCode` base, `SIP_PHRASES`, `sip_status_for`, `AsError` (decision 3) |
 | `bootstrap` (plumbing) | `as_app.bootstrap` | `ShutdownController`, `install_signal_handlers`, `check_port_available` |
@@ -411,7 +411,7 @@ a valid step, and no step is allowed to be "temporarily red".
 | 2 | Move the leaf modules — `observability/`, the `errors` mechanism plus the skeleton family, `sip_adapter` — with the `as_app` facades (decision 2). | green; the facades keep every by-path reference resolving |
 | 3 | Move the version chain and the `bootstrap` plumbing; generalise `check_port_available` / `ShutdownController` / `install_signal_handlers`. | green |
 | 4 | Move the controller shell: `BaseCallController` + `PolicyDecision` + `BaseCallMap`, then rewire both controllers to `decide()` and preserve the public `AsStack` / `FraudAsStack` names (decision 4). | green; the largest step, and the one the three layers guard |
-| 5 | Move and generalise `internal_api` (a payload provider instead of a bound store); both applications keep their routes and payload shapes. | green |
+| 5 | Move and generalise `internal_api` (a payload provider instead of a bound store), then move the stack shell (`BaseAsStack`, now `as_platform/main.py`); both applications keep their routes and payload shapes. | green |
 | 6 | Add the two seams: `Transport` / `UdpTransport` and `StateStore` / `InMemoryStateStore` (decision 5), one implementation each. | green; no behaviour change |
 | 7 | Give the library its own suite and gate, its independence assertion and its documents (decisions 1 and 8). | green; the library is independently verifiable |
 

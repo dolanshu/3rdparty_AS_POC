@@ -43,5 +43,8 @@ docs_cn/
 # Agent team session state (per-run, machine-local)
 .codebuddy/teams/
 
+# TRAE workspace artefacts (machine-local plans, session state)
+.trae/
+
 # Office temporary lock files
 ~$*

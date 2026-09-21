@@ -263,9 +263,7 @@ def site_packages(consumer: Path) -> Path:
     """
     found = next((consumer / ".venv" / "lib").glob("python*/site-packages"), None)
     if found is None:
-        raise RuntimeError(
-            f"no site-packages directory under {consumer / '.venv' / 'lib'}"
-        )
+        raise RuntimeError(f"no site-packages directory under {consumer / '.venv' / 'lib'}")
     return found
 
 

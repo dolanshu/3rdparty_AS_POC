@@ -72,6 +72,7 @@ ALLOWED_IMPORTS = frozenset(
         "contextlib",
         "dataclasses",
         "enum",
+        "json",
         "logging",
         "math",
         "os",

@@ -13,7 +13,7 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `AGENT.md` §1–§5, §15 | ready | Positioning, boundaries, non-goals, delivery standards, roadmap |
 | `docs/architecture/hld.md` | ready | System context, deployment view, interface view, quality attributes, key flows — including the second AS instance (§8) |
 | `docs/architecture/lld.md` | ready | Modules, data structures, state machines, error codes, process model, log fields — including the anti-fraud AS (§9) |
-| `docs/architecture/adr/` | ready | ADR-0001 … ADR-0009: sippy, process separation, UDP only, YAML rules, mock strategy, signalling only, anti-fraud AS / `608 Rejected`, chained topology / per-leg `Call-ID`, platform library extraction / `path` consumption |
+| `docs/architecture/adr/` | ready | ADR-0001 … ADR-0010: 0001 sippy, 0002 process separation, 0003 UDP only (superseded for the library's pluggable seam by ADR-0010), 0004 YAML rules, 0005 mock strategy, 0006 signalling only, 0007 anti-fraud AS / `608 Rejected`, 0008 chained topology / per-leg `Call-ID`, 0009 platform library extraction / `path` consumption, 0010 P11 TLS + Redis + capacity harness verification |
 | `../as_platform/` (the platform library) | ready | The shared skeleton both AS instances build on, in its own repository checked out beside this one and consumed through a `path` source (`editable = true`). Carries its own `ruff` / `mypy` / `pytest` gate and its library-standard documents — API reference, integration guide, compatibility matrix (`REQ-NF-019`, `REQ-NF-021`, ADR-0009) |
 | `docs/production-gaps.md` | ready | Every POC shortcut and what production would require |
 | `docs/glossary.md` | ready | Terminology |

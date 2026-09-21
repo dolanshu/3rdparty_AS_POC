@@ -71,7 +71,7 @@ Production Gap Register (§3).
   The harness reports constraints, never a headline number.
 - **No production-grade HA, multi-tenancy or auditing.**
 - **No charging.** No CDRs, no RADIUS, no settlement.
-- **No transport beyond UDP.** TCP and TLS are not implemented.
+- **No production-grade transport on the trunk.** Demo stack is UDP-only. The platform library (`../as_platform`) ships a pluggable `Transport` seam with `TlsTransport` behind it (P11, ADR-0010). TCP and SIP Digest remain out of scope.
 - **No production deployment concerns** beyond a local `docker compose` demo.
 
 ## 3. Production Gap Register

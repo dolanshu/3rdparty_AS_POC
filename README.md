@@ -281,7 +281,7 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 - No performance or capacity work, no benchmarking claims.
 - No production HA, multi-tenancy or auditing.
 - No charging (no CDRs, no RADIUS).
-- No transport beyond UDP: no TCP, no TLS, no SIP Digest.
+- No production-grade transport on the trunk; demo stack is UDP-only. The platform library (`../as_platform`, ADR-0010) ships a pluggable `Transport` seam with `TlsTransport` behind it — TCP is still out of scope, SIP Digest is still out of scope.
 - No production deployment beyond a local `docker compose` demo.
 
 ## Documentation index
@@ -292,7 +292,7 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 | `docs/requirements/functional-and-nonfunctional.md` | `REQ-F-*` / `REQ-NF-*` capability list |
 | `docs/architecture/hld.md` | context, deployment and interface views, message flows |
 | `docs/architecture/lld.md` | modules, data structures, state machines, error codes, log fields |
-| `docs/architecture/adr/` | ADR-0001 … ADR-0009 (0007 covers the anti-fraud AS, `608 Rejected` and cross-call state; 0008 covers the chained topology and the per-leg `Call-ID`; 0009 covers the platform library extraction and the `path` consumption) |
+| `docs/architecture/adr/` | ADR-0001 … ADR-0010: 0007 anti-fraud AS / `608 Rejected`, 0008 chained topology / per-leg `Call-ID`, 0009 platform library extraction / `path` consumption, 0010 P11 TLS + Redis + capacity harness verification |
 | `../as_platform/` (the platform library) | the shared skeleton both AS instances build on, in its own repository checked out beside this one, with its own gate and its library-standard documents (API reference, integration guide, compatibility matrix) |
 | `docs/specs/index.md`, `docs/specs/message-samples/` | normative references and real message samples; the generated samples are gitignored, only the folder `README.md` is tracked |
 | `docs/operations/deployment.md` | topology, port matrix, health checks |
@@ -303,7 +303,9 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 | `docs/demo-script.md` | the 5–10 minute narrated demo |
 | `docs/glossary.md` | IMS/SIP terminology |
 | `docs/production-gaps.md` | every POC shortcut and what production would require |
-| `docs/roadmap.md` | milestone status, handover notes, open items |
+| `docs/roadmap.md` | milestone status, handover notes, open items — live status board |
+| `docs/phase2-plan.md` | Phase 2 (P8 anti-fraud, P9 chained demo, P10 platform extraction, P11 TLS/Redis/harness): decisions, work sequence, acceptance |
+| `docs/post-phase2-directions.md` | post-phase2 direction candidates (multi-tenancy, STIR/SHAKEN, HA, …) |
 
 ## Development
 

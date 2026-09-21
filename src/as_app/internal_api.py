@@ -37,13 +37,14 @@ Endpoints (ADR-0002)::
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Final
 
 from as_platform.internal_api import InternalApiServer as _InternalApiServer
 from as_platform.internal_api import create_internal_api_app as _create_internal_api_app
 from as_platform.internal_api import health_payload as _health_payload
 from as_platform.internal_api import metrics_payload, trace_payload, traces_payload
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from as_app.observability.metrics import MetricsRegistry
 from as_app.observability.tracing import TraceRecorder
@@ -211,11 +212,74 @@ def create_internal_api_app(
     )
 
 
+class SimplePublisher:
+    """Asyncio-friendly WebSocket fanout for P12 event emission.
+
+    Kept as a tiny class rather than importing from a pubsub library: the AS
+    has at most one or two console connections (ADR-0002), so a set of
+    WebSockets and one ``asyncio.Queue``-less broadcast is enough.
+    """
+
+    def __init__(self) -> None:
+        self._connections: set[WebSocket] = set()
+
+    async def connect(self, ws: WebSocket) -> None:
+        """Accept and track one WebSocket connection."""
+        await ws.accept()
+        self._connections.add(ws)
+
+    def disconnect(self, ws: WebSocket) -> None:
+        """Remove one WebSocket from the fanout."""
+        self._connections.discard(ws)
+
+    async def broadcast(self, message: str) -> None:
+        """Send one message to every connected WebSocket.
+
+        Dead connections are pruned lazily on send failure.
+        """
+        if not self._connections:
+            return
+        dead: list[WebSocket] = []
+        for ws in list(self._connections):
+            try:
+                await ws.send_text(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
+
+def _mount_p12_fanout(app: FastAPI, publisher: SimplePublisher) -> None:
+    """Attach the P12 event fanout and its WebSocket endpoint to ``app``.
+
+    Called after :func:`create_internal_api_app` so the parent routes (health,
+    metrics, traces, ...) are already in place; P12 adds only the broadcast
+    mechanism and its own WebSocket path.
+    """
+    app.state.publisher = publisher
+    app.state.broadcast = publisher.broadcast  # type: ignore[attr-defined]
+
+    @app.websocket("/ws/p12/events")
+    async def p12_events(ws: WebSocket) -> None:
+        """Live P12 event feed (push fanout, not polling)."""
+        await publisher.connect(ws)
+        try:
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            publisher.disconnect(ws)
+
+
 class InternalApiServer(_InternalApiServer):
     """FastAPI/uvicorn internal API server running on a daemon thread.
 
     The public constructor is this instance's: it takes the rule set store the
     number-translation AS serves and binds it to the shared server through the provider.
+
+    Overrides :meth:`start` to build the FastAPI app eagerly, mount the P12
+    broadcast fanout and expose the app on :attr:`app` before uvicorn starts —
+    so the call controller can reference ``app.state.broadcast`` from the sippy
+    thread (P12, REQ-F-042).
 
     Attributes:
         address: Local address the server binds.
@@ -224,6 +288,7 @@ class InternalApiServer(_InternalApiServer):
         rule_set_store: Source of the active rule set, reported as readiness.
         metrics: Counter registry exposed on ``/api/v1/metrics``.
         tracer: Trace recorder exposed on ``/api/v1/traces``.
+        app: The FastAPI application, available after construction.
     """
 
     def __init__(
@@ -247,6 +312,18 @@ class InternalApiServer(_InternalApiServer):
             tracer: Trace recorder.
         """
         self.rule_set_store = rule_set_store
+        # Eagerly build the app + P12 fanout so call_map can access ``.app``
+        # before ``start()`` is called on the daemon thread.
+        import time as _time
+
+        self.app = create_internal_api_app(
+            version=version,
+            rule_set_store=rule_set_store,
+            metrics=metrics,
+            tracer=tracer,
+            started_at=_time.monotonic(),  # real monotonic for health uptime
+        )
+        _mount_p12_fanout(self.app, SimplePublisher())
         super().__init__(
             address,
             port,
@@ -255,3 +332,36 @@ class InternalApiServer(_InternalApiServer):
             metrics=metrics,
             tracer=tracer,
         )
+
+    def start(self) -> None:
+        """Bind the port and serve in the background on a daemon thread.
+
+        Creates a dedicated event loop on the daemon thread so call controllers
+        (which run on the sippy main thread) can schedule broadcast coroutines
+        via ``run_coroutine_threadsafe`` against a known, running loop.
+        """
+        import uvicorn
+
+        def _daemon_run() -> None:
+            import asyncio as _asyncio
+
+            loop = _asyncio.new_event_loop()
+            _asyncio.set_event_loop(loop)
+            self._loop = loop
+            # Expose the loop on app.state so call controllers can find it.
+            self.app.state._loop = loop
+
+            config = uvicorn.Config(
+                self.app,
+                host=self.address,
+                port=self.port,
+                log_level="error",
+                access_log=False,
+            )
+            self._server = uvicorn.Server(config)
+            self._server.run()
+
+        self._thread = threading.Thread(
+            target=_daemon_run, name=self.provider.thread_name, daemon=True
+        )
+        self._thread.start()

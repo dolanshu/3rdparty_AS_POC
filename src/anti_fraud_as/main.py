@@ -200,6 +200,25 @@ class FraudAsStack(BaseAsStack[FraudAsSettings]):
             tracer=self.tracer,
         )
 
+    def start_internal_api(self) -> InternalApiServer:
+        """Start the internal API server and wire its app into the call map (P12)."""
+        server = self._create_internal_api_server(self.api_address, self.api_port)
+        # P12: inject the eagerly-built FastAPI app into the call_map so call
+        # controllers can emit events via app.state.broadcast before any SIP
+        # INVITE arrives (call_map is created by stack.start() above).
+        if self.call_map is not None:
+            self.call_map.app = server.app
+        server.start()
+        self.internal_api = server
+        log_event(
+            _LOGGER,
+            logging.INFO,
+            "internal api listening",
+            direction=LogDirection.INTERNAL,
+            address=f"{self.api_address}:{self.api_port}",
+        )
+        return server
+
     def _poll_reload(self) -> None:
         """Run the loop-owned screening-data reload.
 

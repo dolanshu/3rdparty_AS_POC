@@ -47,7 +47,7 @@ from as_platform.call_controller import (
     PolicyAction,
     PolicyDecision,
 )
-from sippy.CCEvents import CCEventTry
+from sippy.CCEvents import CCEventFail, CCEventTry
 from sippy.SipCallId import SipCallId
 
 from as_app.errors import AsError, AsErrorCode
@@ -128,9 +128,10 @@ class CallController(BaseCallController):
     def _emit_p12(self, event: str, attributes: dict[str, Any]) -> None:
         """Emit a per-call event via the internal_api WebSocket fanout.
 
-        Safe to call from any thread — uses ``asyncio.get_event_loop()`` and
-        falls back to ``run_coroutine_threadsafe`` when not on the event loop
-        thread. No-op when :attr:`_emit_app` is ``None``.
+        Safe to call from any thread — uses the uvicorn daemon thread's event
+        loop (captured in ``app.state._loop``) and bridges via
+        ``run_coroutine_threadsafe``. No-op when :attr:`_emit_app` is ``None``
+        or the daemon loop has not started yet.
         """
         import asyncio as _asyncio
         import json as _json
@@ -138,6 +139,9 @@ class CallController(BaseCallController):
 
         if self._emit_app is None:
             return
+        loop = getattr(self._emit_app.state, "_loop", None)
+        if loop is None:
+            return  # daemon thread not ready yet — drop silently
         event_dict = {
             "timestamp": _time.time(),
             "source": self._SOURCE,
@@ -147,15 +151,54 @@ class CallController(BaseCallController):
         }
         try:
             msg = _json.dumps(event_dict, default=str)
-            loop = _asyncio.get_event_loop()
-            if _asyncio.get_running_loop() is loop:
+            try:
+                running = _asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is loop:
                 loop.create_task(self._emit_app.state.broadcast(msg))
             else:
-                _asyncio.run_coroutine_threadsafe(
-                    self._emit_app.state.broadcast(msg), loop
-                )
+                _asyncio.run_coroutine_threadsafe(self._emit_app.state.broadcast(msg), loop)
         except (RuntimeError, AttributeError):
-            pass  # No event loop or app has no broadcast — skip silently
+            pass
+
+    # --- P12 apply_call_policy / record_disposition overrides ---------------
+
+    def apply_call_policy(self, event: Any) -> PolicyDecision:
+        """Override to emit call_routed / call_rejected after decide()."""
+        decision = super().apply_call_policy(event)
+        if decision.action is PolicyAction.RELAY:
+            self._emit_p12(
+                "call_routed",
+                {
+                    "rule_id": self._decision.rule_id if self._decision else "",
+                    "next_hop": decision.next_hops[0].name if decision.next_hops else "",
+                    "translated_number": (
+                        self._decision.translated_number if self._decision else ""
+                    ),
+                },
+            )
+        elif decision.action is PolicyAction.REJECT:
+            self._emit_p12(
+                "call_rejected",
+                {
+                    "rule_id": decision.attributes.get("rule_id", ""),
+                    "error_code": decision.error.code.code if decision.error else "",
+                    "sip_status": decision.error.sip_status if decision.error else 0,
+                },
+            )
+        return decision
+
+    def _record_disposition(self, event: Any) -> None:
+        """Override to emit call_ended with reason classification."""
+        super()._record_disposition(event)
+        if isinstance(event, CCEventFail):
+            reason = "fail"
+        elif self.uaA is not None and bool(self.uaA.isConnected()):
+            reason = "bye"
+        else:
+            reason = "cancel"
+        self._emit_p12("call_ended", {"reason": reason})
 
     # --- the application hook -----------------------------------------------
 
@@ -420,6 +463,7 @@ class TrunkCallMap(BaseCallMap):
         allowed_peers: tuple[str, ...] = (),
         metrics: MetricsRegistry | None = None,
         tracer: TraceRecorder | None = None,
+        app: Any | None = None,
     ) -> None:
         """Create the trunk call map.
 
@@ -429,9 +473,11 @@ class TrunkCallMap(BaseCallMap):
             allowed_peers: Source addresses accepted on the trunk.
             metrics: Counter registry; the process-wide one is used when omitted.
             tracer: Trace recorder; the process-wide one is used when omitted.
+            app: FastAPI app for P12 event emission; ``None`` backward-compat.
         """
         super().__init__(global_config, allowed_peers=allowed_peers, metrics=metrics, tracer=tracer)
         self.rule_set_store = rule_set_store
+        self.app = app
 
     def _build_controller(self, next_hop: tuple[str, int] | None) -> CallController:
         """Create a call controller bound to this process configuration.
@@ -448,4 +494,5 @@ class TrunkCallMap(BaseCallMap):
             self.tracer,
             global_config=self.global_config,
             next_hop=next_hop,
+            app=self.app,
         )

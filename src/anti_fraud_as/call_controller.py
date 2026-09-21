@@ -55,7 +55,7 @@ from as_platform.observability.logging import LogDirection, get_logger, log_even
 from as_platform.observability.metrics import CallDisposition, MetricsRegistry
 from as_platform.observability.tracing import TraceRecorder
 from as_platform.sip_adapter import outbound_call_id
-from sippy.CCEvents import CCEventTry
+from sippy.CCEvents import CCEventFail, CCEventTry
 from sippy.SipCallId import SipCallId
 
 from anti_fraud_as.caller_state import CallerStateStore
@@ -212,12 +212,20 @@ class FraudCallController(BaseCallController):
     _SOURCE: ClassVar[str] = "as_anti_fraud"
 
     def _emit_p12(self, event: str, attributes: dict[str, Any]) -> None:
-        """Emit a per-call event via the internal_api WebSocket fanout."""
+        """Emit a per-call event via the internal_api WebSocket fanout.
+
+        Uses the uvicorn daemon thread's event loop (``app.state._loop``) for
+        thread-safe scheduling via ``run_coroutine_threadsafe``. No-op when
+        the daemon loop has not started yet.
+        """
         import asyncio as _asyncio
         import json as _json
         import time as _time
 
         if self._emit_app is None:
+            return
+        loop = getattr(self._emit_app.state, "_loop", None)
+        if loop is None:
             return
         event_dict = {
             "timestamp": _time.time(),
@@ -228,15 +236,48 @@ class FraudCallController(BaseCallController):
         }
         try:
             msg = _json.dumps(event_dict, default=str)
-            loop = _asyncio.get_event_loop()
-            if _asyncio.get_running_loop() is loop:
+            try:
+                running = _asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is loop:
                 loop.create_task(self._emit_app.state.broadcast(msg))
             else:
-                _asyncio.run_coroutine_threadsafe(
-                    self._emit_app.state.broadcast(msg), loop
-                )
+                _asyncio.run_coroutine_threadsafe(self._emit_app.state.broadcast(msg), loop)
         except (RuntimeError, AttributeError):
             pass
+
+    # --- P12 apply_call_policy / record_disposition overrides ---------------
+
+    def apply_call_policy(self, event: Any) -> PolicyDecision:
+        """Override to emit call_allowed / call_rejected_608 after decide()."""
+        decision = super().apply_call_policy(event)
+        if decision.action is PolicyAction.RELAY:
+            self._emit_p12(
+                "call_allowed",
+                {"verdict": "allow"},
+            )
+        elif decision.action is PolicyAction.REJECT:
+            self._emit_p12(
+                "call_rejected_608",
+                {
+                    "verdict": "reject",
+                    "error_code": decision.error.code.code if decision.error else "",
+                    "screen_source": decision.attributes.get("screen_source", ""),
+                },
+            )
+        return decision
+
+    def _record_disposition(self, event: Any) -> None:
+        """Override to emit call_ended with reason classification."""
+        super()._record_disposition(event)
+        if isinstance(event, CCEventFail):
+            reason = "fail"
+        elif self.uaA is not None and bool(self.uaA.isConnected()):
+            reason = "bye"
+        else:
+            reason = "cancel"
+        self._emit_p12("call_ended", {"reason": reason})
 
     # --- the application hook -----------------------------------------------
 
@@ -495,6 +536,7 @@ class FraudCallMap(BaseCallMap):
         allowed_peers: tuple[str, ...] = (),
         metrics: MetricsRegistry | None = None,
         tracer: TraceRecorder | None = None,
+        app: Any | None = None,
     ) -> None:
         """Create the trunk call map.
 
@@ -505,10 +547,12 @@ class FraudCallMap(BaseCallMap):
             allowed_peers: Source addresses accepted on the trunk.
             metrics: Counter registry; the process-wide one is used when omitted.
             tracer: Trace recorder; the process-wide one is used when omitted.
+            app: FastAPI app for P12 event emission; ``None`` backward-compat.
         """
         super().__init__(global_config, allowed_peers=allowed_peers, metrics=metrics, tracer=tracer)
         self.screening_data = screening_data
         self.caller_state = caller_state
+        self.app = app
 
     def _build_controller(self, next_hop: tuple[str, int] | None) -> FraudCallController:
         """Create a call controller bound to this process configuration.
@@ -526,4 +570,5 @@ class FraudCallMap(BaseCallMap):
             tracer=self.tracer,
             global_config=self.global_config,
             next_hop=next_hop,
+            app=self.app,
         )

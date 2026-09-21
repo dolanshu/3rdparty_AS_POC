@@ -8,6 +8,66 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-22 — P12 Call Load capability (Phase 3)
+
+### Added
+
+- **P12 Call Load backend** — an interactive load generator tool
+  (`tools/call_load_generator.py`) that drives the AS instances through real SIP
+  INVITEs at configurable concurrency (1–50) and call-rate (0.1–10/sec), with
+  a leaky-bucket pool + Little's Law bound-rate interaction (D6, REQ-F-038/039).
+  The generator supports all 10 Phase 1/2 call types (T1–T6, F1–F4) and four
+  duration classes (D1 fast 30%, D2 medium 50%, D3 long 15%, D4 timeout 5%).
+  REST control surface: `POST /load/start|stop`, `PUT /load/config`,
+  `GET /load/status` (REQ-F-040/041/044).
+
+- **Per-call event stream on the internal API WebSocket.** Both AS instances
+  (`as_app` and `anti_fraud_as`) now emit `call_started`, `call_routed`
+  / `call_allowed`, `call_rejected` / `call_rejected_608`, and `call_ended`
+  events — each keyed by Call-ID, enriched with the source AS and the decision
+  result. The AS's `InternalApiServer` subclass eagerly builds a FastAPI app
+  with `SimplePublisher` fanout at `/ws/p12/events`, and its `start()` daemon
+  thread captures its own `asyncio.new_event_loop()` into `app.state._loop`,
+  so `_emit_p12` uses `run_coroutine_threadsafe` from the sippy ED2 thread — no
+  silent event drop (REQ-F-042, REQ-NF-027).
+
+- **Genuine concurrent-load test suite.** P12 adds 7 integration tests that each
+  place ≥10 calls **back-to-back without yielding** — all 10 INVITEs sent before
+  any sippy `CCEvent*` fires, so the tests exercise real concurrent interleaving,
+  not sequential one-call-at-a-time (`REQ-NF-030`). The suite proves:
+
+  * 10 concurrent translation AS calls each complete independently with distinct
+    outbound Call-IDs (no B2BUA leg collision).
+  * 10 concurrent anti-fraud AS calls each complete on the allow path.
+  * 10 concurrent chained-topology calls (anti-fraud → translation → core) each
+    complete, and AS-1 / AS-2 trace Call-IDs are disjoint (no cross-contamination).
+  * 10 concurrent failover calls (primary hop on an unbound port) each
+    independently time out and fail over — the core receives exactly 10 INVITEs,
+    which is what proves per-call P8a timer independence (`REQ-F-043`).
+
+  Acceptance items `ACC-P12-001 … ACC-P12-011` in `docs/acceptance/criteria.md`;
+  evidence in `docs/acceptance/report.md`.
+
+### Changed
+
+- **No changes to `as_platform`** (`REQ-NF-027`). All event emissions are
+  AS-local overrides of `BaseCallController.apply_call_policy()` and
+  `BaseCallController._record_disposition()` — pure additive, no library
+  skeleton moves. The sibling library repository stays at `0.2.0`.
+
+### Fixed
+
+- **`_emit_p12` no longer silently drops events on the sippy thread.** The first
+  implementation used `asyncio.get_event_loop()` from the ED2 callback context,
+  which returned a non-running loop and threw `RuntimeError` — excepted away.
+  Each AS `InternalApiServer.start()` now runs `asyncio.new_event_loop()` on its
+  daemon thread and stores it on `app.state._loop`; the emit helper schedules
+  the fanout broadcast with `run_coroutine_threadsafe(coro, app.state._loop)`.
+- **`CallController.started_at`** (health uptime) was baked as the integer `0.0`;
+  now set with `time.monotonic()`.
+
+## [0.9.0] - 2026-09-21 — P11 platform verification (Phase 2)
+
 ### Added
 
 - **P11 platform verification** — the two pluggable seams now ship two implementations each,

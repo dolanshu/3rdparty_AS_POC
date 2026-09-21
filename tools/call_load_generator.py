@@ -148,3 +148,175 @@ class CallInstance:
     far_end_behavior: str
     started_at: float
     ended_at: float | None = None
+
+
+# ======================================================================
+# CallPool — leaky-bucket concurrency pool with refill throttle
+# ======================================================================
+
+
+class CallPool:
+    """Closed-loop concurrency pool with open-loop rate throttle.
+
+    Two controls interact via Little's Law (`L = λW`; ADR-0013) — the
+    :meth:`compute_binding_constraint` method tells which control is
+    currently limiting the pool and is exposed on ``/load/status``.
+
+    Tick loop runs every :data:`TICK_INTERVAL` seconds; rate budget resets
+    every :data:`RATE_BUDGET_RESET_INTERVAL` seconds. Call completion is
+    signalled via :meth:`_on_call_ended`, which bridges from a potentially
+    non-asyncio context (sippy thread) to the pool's asyncio loop.
+    """
+
+    TICK_INTERVAL: Final[float] = 0.5
+    RATE_BUDGET_RESET_INTERVAL: Final[float] = 1.0
+
+    def __init__(self, config: PoolConfig, mock_uac: Any | None = None) -> None:
+        self._config = config
+        self._mock_uac = mock_uac
+        self._lock = asyncio.Lock()
+        self.active_calls: int = 0
+        self.active_instances: dict[str, CallInstance] = {}
+        self._rate_budget: float = config.call_rate
+        self._last_budget_reset: float = time.monotonic()
+        self._running: bool = False
+        self._tick_task: asyncio.Task[None] | None = None
+
+    # --------------------------------------------------------------
+    # Lifecycle
+    # --------------------------------------------------------------
+
+    async def start(self) -> None:
+        """Start the tick loop. First tick fires after TICK_INTERVAL ms."""
+        self._running = True
+        self._tick_task = asyncio.create_task(self._tick_loop())
+
+    async def stop(self) -> None:
+        """Stop the tick loop. Active calls are not force-terminated."""
+        self._running = False
+        if self._tick_task is not None:
+            self._tick_task.cancel()
+            try:
+                await self._tick_task
+            except asyncio.CancelledError:
+                pass
+            self._tick_task = None
+
+    async def set_config(self, config: PoolConfig) -> None:
+        """Apply new config on the next tick; already-running calls unaffected."""
+        async with self._lock:
+            self._config = config
+            self._rate_budget = config.call_rate
+            self._last_budget_reset = time.monotonic()
+
+    # --------------------------------------------------------------
+    # Query
+    # --------------------------------------------------------------
+
+    def active_count(self) -> int:
+        return self.active_calls
+
+    def compute_binding_constraint(self) -> str:
+        """Return ``'concurrency'`` or ``'rate'`` (ADR-0013)."""
+        theoretical = self._config.call_rate * DurationModel.AVG_DURATION_SECONDS
+        if theoretical >= self._config.target_concurrency:
+            return "concurrency"
+        return "rate"
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a JSON-serialisable snapshot (for ``/load/status``)."""
+        return {
+            "active_calls": self.active_calls,
+            "target_concurrency": self._config.target_concurrency,
+            "call_rate": self._config.call_rate,
+            "binding_constraint": self.compute_binding_constraint(),
+            "enabled_call_types": sorted(self._config.enabled_call_types),
+            "rate_budget_remaining": round(self._rate_budget, 2),
+        }
+
+    # --------------------------------------------------------------
+    # Internal — tick loop
+    # --------------------------------------------------------------
+
+    async def _tick_loop(self) -> None:
+        while self._running:
+            await asyncio.sleep(self.TICK_INTERVAL)
+            await self._tick()
+
+    async def _tick(self) -> None:
+        # 1. Reset rate budget every full second
+        now = time.monotonic()
+        elapsed = now - self._last_budget_reset
+        if elapsed >= self.RATE_BUDGET_RESET_INTERVAL:
+            self._rate_budget = self._config.call_rate
+            self._last_budget_reset = now
+            # Allow fractional budget from partial-second overshoot in the
+            # tick that crosses the boundary — this models "refill every
+            # second" rather than "proportional refill every half-second".
+
+        # 2. Critical section — check pool + launch
+        async with self._lock:
+            deficit = self._config.target_concurrency - self.active_calls
+            if deficit <= 0 or self._rate_budget <= 0:
+                return
+
+            new_count = min(deficit, int(self._rate_budget))
+            for _ in range(new_count):
+                await self._spawn_one()
+                self._rate_budget -= 1.0
+
+    async def _spawn_one(self) -> None:
+        call_type = CallModel.pick(self._config.enabled_call_types)
+        duration_class = DurationModel.pick()
+        call_id = f"gen-{uuid.uuid4().hex[:12]}"
+        behavior = "timeout_no_answer" if duration_class == "D4" else "answer_and_bye"
+
+        if self._mock_uac is not None:
+            # Make sure _on_call_ended is a plain callable (asyncio bridge inside)
+            self._mock_uac.set_loop(asyncio.get_event_loop())
+            await self._mock_uac.send_invite(
+                call_id=call_id,
+                call_type=call_type,
+                duration_class=duration_class,
+                on_call_ended=self._on_call_ended,
+            )
+
+        self.active_instances[call_id] = CallInstance(
+            call_id=call_id,
+            call_type=call_type,
+            duration_class=duration_class,
+            state="invited",
+            far_end_behavior=behavior,
+            started_at=time.monotonic(),
+        )
+        self.active_calls += 1
+
+    # --------------------------------------------------------------
+    # Call completion — bridges from (potentially) non-asyncio context
+    # --------------------------------------------------------------
+
+    def _on_call_ended(self, call_id: str, reason: str) -> None:
+        """Called by MockSipUac when a call ends.
+
+        May fire from a thread that is not the asyncio loop thread
+        (e.g. sippy's internal callback thread). Bridge safely to the
+        loop via :func:`asyncio.run_coroutine_threadsafe`.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return  # no event loop — shouldn't happen in production
+        if asyncio.get_running_loop() is loop:
+            # Already on the loop thread — schedule a task
+            loop.create_task(self._async_on_call_ended(call_id, reason))
+        else:
+            asyncio.run_coroutine_threadsafe(
+                self._async_on_call_ended(call_id, reason), loop
+            )
+
+    async def _async_on_call_ended(self, call_id: str, reason: str) -> None:
+        async with self._lock:
+            if call_id in self.active_instances:
+                del self.active_instances[call_id]
+                self.active_calls -= 1
+            # Task 4 will emit generator-side call_ended and pool_status_update here.

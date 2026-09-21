@@ -1339,3 +1339,391 @@ The leaf modules have no dependency on the controller; the controller shell depe
 seams are last because they are new code and cannot be validated by the existing suite until it
 is green again.
 
+## 12. Call Load capability (P12)
+
+### 12.1 Module responsibilities of the new load generator
+
+One new file is the entire generator:
+
+| File | Responsibility |
+|------|---------------|
+| `tools/call_load_generator.py` | The whole generator: pool management, mock S-CSCF UAC, call model + duration model, REST API, WebSocket feed, asyncio event loop |
+
+The generator imports:
+- Python stdlib: `asyncio`, `json`, `random`, `time`, `dataclasses`, `typing`
+- `FastAPI`, `uvicorn`, `websockets` — **already dependencies** (console uses FastAPI)
+- `sippy` — **already dependency** (mock UAC reuses sippy's `UacStateIdle` pattern from `tools/chained_as_probe.py`)
+
+The generator does **not** import: `as_platform`, `src/as_app`, `src/anti_fraud_as`, or any AS module. It is a standalone SIP-speaking entity (ADR-0012, REQ-NF-029).
+
+### 12.2 Core data structures
+
+```python
+# tools/call_load_generator.py
+
+@dataclass
+class CallInstance:
+    """One call being driven by the generator."""
+    call_id: str               # generator-generated unique ID
+    call_type: str             # "T1"…"T6" | "F1"…"F4"
+    duration_class: str        # "D1" | "D2" | "D3" | "D4"
+    state: str                 # "pending" | "invited" | "answered" | "ended"
+    far_end_behavior: str      # "answer_and_bye" | "timeout_no_answer"
+    started_at: float          # time.monotonic() of INVITE launch
+    ended_at: float | None     # time.monotonic() of end event or None
+
+
+@dataclass
+class PoolConfig:
+    """Immutable pool configuration (set once per /load/config)."""
+    target_concurrency: int       # 1..50
+    call_rate: float              # 0.1..10.0 calls/sec
+    enabled_call_types: set[str]  # {"T1","T2","T5","F1","F2",...}
+
+
+class CallModel:
+    """Weighted-random selection for call types."""
+    # phase3-plan.md §D7 / HLD §12.3 weights
+    # Implementation: each type has a weight; random.choices() with weights=
+    WEIGHTS: dict[str, float] = { "T1":1, "T2":1, "T3":1, "T4":1, "T5":1, "T6":1,
+                                  "F1":1, "F2":1, "F3":1, "F4":1 }
+
+
+class DurationModel:
+    """Fixed-weight duration classes."""
+    # phase3-plan.md §D7 / HLD §12.4
+    WEIGHTS: dict[str, float] = { "D1":0.30, "D2":0.50, "D3":0.15, "D4":0.05 }
+    # Midpoints used for far-end BYE timing
+    MIDPOINTS: dict[str, float] = { "D1":2.5, "D2":11.5, "D3":25.0, "D4":3.0 }
+```
+
+### 12.3 Pool model — tick loop + race handling
+
+Two independent asyncio structures:
+
+```python
+class CallPool:
+    """Leaky-bucket concurrency pool with refill throttle."""
+
+    def __init__(self):
+        self._lock = asyncio.Lock()           # guards active_calls + rate_budget
+        self.active_calls: int = 0
+        self.active_instances: dict[str, CallInstance] = {}  # call_id → instance
+        self._rate_budget: float = 10.0       # per-second budget, starts at max
+        self._last_budget_reset: float = time.monotonic()
+        self._running: bool = False
+
+    async def tick_loop(self):
+        """Run every ~500 ms via asyncio.create_task + asyncio.sleep(0.5)."""
+        while self._running:
+            await asyncio.sleep(0.5)
+            await self._tick()
+
+    async def _tick(self):
+        # 1. Reset rate budget if a new second has elapsed
+        now = time.monotonic()
+        elapsed = now - self._last_budget_reset
+        if elapsed >= 1.0:
+            self._rate_budget = self._config.call_rate
+            self._last_budget_reset = now
+        else:
+            # Partial second: proportional budget
+            self._rate_budget = min(self._rate_budget, self._config.call_rate * elapsed)
+
+        # 2. Acquire lock — critical section: check pool + launch new calls
+        async with self._lock:
+            pool_deficit = self._config.target_concurrency - self.active_calls
+            if pool_deficit <= 0 or self._rate_budget <= 0:
+                return  # pool full or rate exhausted
+
+            new_call_count = min(pool_deficit, int(self._rate_budget))
+            for _ in range(new_call_count):
+                await self._spawn_one_call()
+                self._rate_budget -= 1.0  # each launch consumes 1.0 of budget
+
+    async def _spawn_one_call(self):
+        """Launch one call: weighted random type + duration, mock UAC INVITE."""
+        call_type = CallModel.pick(self._config.enabled_call_types)
+        duration = DurationModel.pick()
+        call_id = f"gen-{uuid.uuid4().hex[:12]}"
+        instance = CallInstance(call_id, call_type, duration, "invited", ...)
+
+        # MockSipUac.send_invite() — creates sippy UAC, sends real SIP INVITE
+        await self._mock_uac.send_invite(
+            to=self._called_number_for(call_type),
+            caller=self._caller_for(call_type),
+            call_id=call_id,
+            on_call_ended=self._on_call_ended,  # callback from mock UAC
+        )
+        self.active_instances[call_id] = instance
+        self.active_calls += 1
+
+    def _on_call_ended(self, call_id: str, reason: str):
+        """Called by MockSipUac when a call ends — may fire from sippy thread."""
+        asyncio.create_task(self._async_on_call_ended(call_id, reason))
+
+    async def _async_on_call_ended(self, call_id: str, reason: str):
+        async with self._lock:
+            if call_id in self.active_instances:
+                del self.active_instances[call_id]
+                self.active_calls -= 1
+            # Emit generator-side call_ended event
+            await self._emit_event("call_ended", {"call_id": call_id, "reason": reason})
+            # Update binding constraint indicator
+            await self._emit_pool_status()
+```
+
+**Race handling — three edges:**
+
+| Edge | Design |
+|------|--------|
+| Tick loop fires while call is ending | `asyncio.Lock` around both `_tick()` (pool check + launch) and `_async_on_call_ended()` (pool decrement + delete). Lock serialises the two paths — no split-account race. |
+| Call hangs indefinitely (never ends, never times out from generator's perspective) | Generator tracks every call_id in `active_instances`. A **60 s force-terminate timeout** (configurable, not a console control) fires if any call stays in `active_instances` for > 60 s. Timeout cancels the mock UAC's dialog and cleans up pool state. |
+| Config hot-update (target_concurrency / rate / toggles change mid-pool) | Next `_tick()` reads fresh `self._config`. Already-running calls are **never force-terminated** by a config change — the change applies to new calls only. This prevents surprising mid-call terminations that would break the demo narrative. |
+
+**Binding constraint calculation** — every tick and every `_on_call_ended`:
+
+```python
+def compute_binding_constraint(self) -> str:
+    AVG_DURATION = 9.5  # design constant, HLD §12.4
+    theoretical = self._config.call_rate * AVG_DURATION
+    if theoretical >= self._config.target_concurrency:
+        return "concurrency"   # 池子上限
+    else:
+        return "rate"          # Call Rate 限速
+```
+
+### 12.4 Mock S-CSCF UAC — far-end behaviour control
+
+Reuses the UAC pattern from `tools/chained_as_probe.py` but adds **duration-class-controlled**
+far-end behavior:
+
+```python
+class MockSipUac:
+    """Sends real SIP INVITEs, receives real SIP responses, controls far-end behavior."""
+
+    def send_invite(self, to: str, caller: str, call_id: str,
+                    duration_class: str,
+                    on_call_ended: Callable[[str, str], Awaitable[None]]):
+        # Create sippy UACStateIdle (same as tools/chained_as_probe.py pattern)
+        # Send INVITE to AS's SIP listen port
+        # ...
+
+        if duration_class == "D4":
+            # Timeout case: never answer 200 OK.
+            # AS's 3 s no-answer timer will tear down the call.
+            # When AS sends BYE or CANCEL, the UAC receives it and calls on_call_ended.
+            pass
+        else:
+            # Answer case: send 200 OK after ~1 s, then BYE after midpoint duration.
+            midpoint = DurationModel.MIDPOINTS[duration_class]
+            asyncio.create_task(self._answer_then_bye(call_id, 1.0, midpoint, on_call_ended))
+```
+
+### 12.5 Event JSON schema — generator and AS emit identically
+
+Both sides emit events on the WebSocket with the same JSON structure. The console merges them
+keyed by `call_id`.
+
+**Common envelope:**
+```jsonc
+{
+  "timestamp": 1726838400.123,        // time.time(), seconds since epoch
+  "source": "load_generator"          // | "as_translation" | "as_anti_fraud"
+  "event": "call_started"             // | "call_state_changed" | "call_ended" | "call_rejected_608" | "pool_status_update"
+  "call_id": "gen-abc123..."           // omitted for pool_status_update
+  "attributes": { ... source-specific fields ... }
+}
+```
+
+**Generator-side `call_started`:**
+```jsonc
+{
+  "source": "load_generator",
+  "event": "call_started",
+  "call_id": "gen-abc123...",
+  "attributes": {
+    "call_type": "T1",                // weighted-random type chosen by generator
+    "duration_class": "D2",           // weighted-random duration
+    "to": "+8613800138000",           // destination
+    "from": "1001"                    // caller
+  }
+}
+```
+
+**Generator-side `pool_status_update` (no call_id):**
+```jsonc
+{
+  "source": "load_generator",
+  "event": "pool_status_update",
+  "attributes": {
+    "active_calls": 12,
+    "target_concurrency": 15,
+    "call_rate": 3.0,
+    "binding_constraint": "concurrency",  // | "rate"
+    "enabled_call_types": ["T1","T2","T5","F1","F2"],
+    "rate_budget_remaining": 3.0          // current tick's remaining budget
+  }
+}
+```
+
+**AS-side `call_started` (per-CallController emit):**
+```jsonc
+{
+  "source": "as_translation",            // | "as_anti_fraud"
+  "event": "call_started",
+  "call_id": "c29f-9c7...",              // sippy-generated, separate from generator's call_id
+  "attributes": {
+    "direction": "trunk_in",             // inbound = "trunk_in", outbound = "next_hop"
+    "caller": "1001",
+    "called": "+8613800138000"
+  }
+}
+```
+
+**AS-side `call_state_changed`:**
+```jsonc
+{
+  "source": "as_translation",
+  "event": "call_state_changed",
+  "call_id": "c29f-9c7...",
+  "attributes": {
+    "from_state": "INVITE_RECEIVED",
+    "to_state": "RESPONSE_200_SENT",    // state names from CallController lifecycle
+    "transition": "180 Ringing → 200 OK"
+  }
+}
+```
+
+**AS-side `call_rejected_608` (anti-fraud only):**
+```jsonc
+{
+  "source": "as_anti_fraud",
+  "event": "call_rejected_608",
+  "call_id": "a12f-...",
+  "attributes": {
+    "reason": "block_list",             // | "high_rate", "score_exceeded"
+    "caller_reputation": 0.85,
+    "caller_rate_window_count": 12
+  }
+}
+```
+
+### 12.6 AS internal event emission — CallController emit hook points
+
+P12 extends each AS instance's existing internal API WebSocket handler (no `as_platform`
+changes, REQ-NF-027). Emission points are **AS-local**:
+
+| Emit point | When | Event name |
+|------------|------|------------|
+| `CallController.__init__` (after INVITE received) | New call enters AS | `call_started` |
+| `CallController.handle_180_response` | Ringing | `call_state_changed` |
+| `CallController.handle_200_response` | Answer | `call_state_changed` |
+| `CallController.handle_bye` | Normal termination | `call_ended` (reason="bye") |
+| `CallController.handle_cancel` | Caller abandons | `call_ended` (reason="cancel") |
+| `CallController._teardown_timeout` (P8a timer fires) | No-answer or timeout | `call_ended` (reason="timeout") |
+| Fraud AS: `FraudCallController.verdict = "reject"` | 608 reject | `call_rejected_608` + `call_ended` (reason="608") |
+
+**Mechanism.** Both AS instances already run an `InternalApiServer` (FastAPI) that serves
+`/ws/events` (the console's existing per-Call-ID trace stream). P12 **extends** that
+WebSocket handler — each `CallController` instance gets a reference to the AS's
+FastAPI `app.state` and can call `app.state.broadcast(event_dict)` on the existing
+websocket fanout. No new library method, no new transport, no change to `as_platform`.
+
+```python
+# In src/as_app/call_controller.py (P12 implementation):
+
+class CallController(BaseCallController):
+    def __init__(self, ..., app):
+        super().__init__(...)
+        self._app = app  # FastAPI app passed in by AsStack on construction
+        self._emit("call_started", {...})
+
+    def _emit(self, event: str, attributes: dict):
+        """Emit per-call event via existing internal_api WebSocket fanout."""
+        event_dict = {
+            "timestamp": time.time(),
+            "source": "as_translation",  # or "as_anti_fraud" in the other controller
+            "event": event,
+            "call_id": self.call_id,
+            "attributes": attributes,
+        }
+        asyncio.create_task(
+            self._app.state.broadcast(json.dumps(event_dict))
+        )
+```
+
+### 12.7 REST API for generator control
+
+All endpoints on the generator's own FastAPI instance (separate from AS's internal API):
+
+| Method | Path | Request body | Response |
+|--------|------|-------------|----------|
+| POST | `/load/start` | `{}` (empty) | `{"status": "started"}` |
+| POST | `/load/stop` | `{}` (empty) | `{"status": "stopped", "active_calls_at_stop": N}` |
+| PUT | `/load/config` | `{"target_concurrency": 15, "call_rate": 3.0, "enabled_call_types": ["T1","T2","T5","F1","F2"]}` | `{"status": "configured", "config": {...new config...}}` |
+| GET | `/load/status` | — | `{"active_calls": 12, "target_concurrency": 15, "binding_constraint": "concurrency", "rate_budget_remaining": 3.0}` |
+
+**Defaults at startup** (no config sent):
+- `target_concurrency`: 10
+- `call_rate`: 3.0
+- `enabled_call_types`: all 10 types enabled
+
+### 12.8 Process model and port matrix
+
+```
+Process                  | SIP listen    | REST API      | WebSocket feed
+-------------------------|---------------|---------------|------------------
+translation AS           | 127.0.0.1:5060| —             | /ws/events 5090 (internal)
+anti-fraud AS            | 127.0.0.1:5062| —             | /ws/events 5092 (internal)
+load generator           | — (talks AS)   | 127.0.0.1:5095| /ws/pool 5095
+console (FastAPI)        | —             | 127.0.0.1:5000| consumes AS /ws/events + gen /ws/pool
+```
+
+Ports 5090/5092 are the AS's existing internal API ports (already in Phase 2's `.env.example`).
+Port 5095 is new for the generator (Phase 3 `.env.example` delta). Console stays 5000.
+
+### 12.9 What P12 changes in the codebase
+
+| What | Where | Nature |
+|------|-------|--------|
+| **New file** — load generator | `tools/call_load_generator.py` | ~400-500 lines, self-contained |
+| **New file** — AS event emission helper (shared by both ASes) | `src/<as_app\|anti_fraud_as>/call_controller.py` | 8-line `_emit()` method + 7 emit hook points (pure additions, no existing code changed) |
+| **Extended** — AS internal API WebSocket handler | `src/<as_app\|anti_fraud_as>/internal_api.py` | Add `broadcast()` to app.state fanout (P12 uses existing mechanism, no new transport) |
+| **Extended** — console WebSocket handler | `src/console/main.py` | Accept new event types (`call_state_changed`, `call_rejected_608`, `pool_status_update`) — P13 fully exploits, P12 just passes through |
+| **Extended** — `.env.example` | root | Add generator config vars (none required for default behavior) |
+| **New tests** | `tests/integration/`, `tests/e2e/` | Concurrent-call isolation tests (≥ 10 concurrent), P8a timer independence under load |
+| **NEW ADRs** | `docs/architecture/adr/0012-*.md`, `0013-*.md` | Two decisions per §12.10 |
+| **Updated** — AGENT.md | §4.4 (Phase 3, P13's vendored lib amendment — P12 does not touch) | P13's job |
+
+### 12.10 Structural changes for the implementation commit
+
+Per `AGENT.md section 13`, each major design-phase decision commits its structural changes
+together. For P12 Stage 3 (Implementation):
+
+| Change | Location |
+|--------|----------|
+| New `tools/call_load_generator.py` | this repository |
+| AS event emission hooks in both controllers | `src/as_app/call_controller.py`, `src/anti_fraud_as/call_controller.py` |
+| AS internal API WebSocket broadcast extension | both `internal_api.py` |
+| Test files for concurrent isolation | `tests/integration/`, `tests/e2e/` |
+| `.env.example` generator vars | root |
+| ADR-0012, ADR-0013 committed with implementation | `docs/architecture/adr/` |
+| Generator run command documented | `docs/README.md` (Phase 3 delta) |
+
+### 12.11 The staged sequence
+
+One implementation stage (no P10-style staged refactor):
+
+1. Generator skeleton + pool tick loop + MockSipUac (UAC pattern from `chained_as_probe.py`).
+2. Call model + duration model → weighted random selection + far-end behavior control.
+3. REST API (`/load/start`, `/load/stop`, `/load/config`, `/load/status`) + WebSocket feed.
+4. AS event emission hooks in both CallControllers (7 emit points, `_emit()` helper).
+5. Pool status update + binding constraint calculation.
+6. Integration tests: 10 concurrent calls through translation AS → verify each independent.
+7. Integration tests: 10 concurrent calls through anti-fraud AS → verify allow/reject isolation.
+8. P8a timer independence test: concurrent unreachable-next-hop calls → verify timer cancellation does not cross-contaminate.
+9. Chained topology e2e: 10 concurrent calls → anti-fraud → translation → core.
+
+Each step leaves the repository building, linting and passing its three test layers.
+

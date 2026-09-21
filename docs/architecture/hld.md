@@ -575,3 +575,151 @@ what the system does.
   this repository follows the library in the same piece of work — it is the first user, not a
   consumer at a distance (ADR-0009, *Consequences*; D8).
 
+## 12. Call Load capability (P12)
+
+Phase 3's first item. Demonstrates that the AS handles N concurrent SIP calls of mixed
+types, mixed durations, and independent lifecycles — not just single-call functional
+correctness. Phase 1/2 validated one call at a time; P12 is the first time we run N calls
+in parallel and show them progressing independently on an operations dashboard.
+
+### 12.1 System context
+
+The Phase 3 architecture adds **one new process** — the load generator — alongside the
+two AS processes already shown in section 8. The generator is a **standalone Python process**
+that talks to AS processes via SIP and observes via WebSocket event streams. It is
+neither an AS component nor an `as_platform` consumer (ADR-0012).
+
+```
+┌──────────────┐    SIP INVITE (UDP 5060)    ┌──────────────────────┐
+│              │ ──────────────────────────► │ translation AS        │
+│ load         │                            │ (one process, own     │
+│ generator    │   WebSocket /events         │  ED2 loop)            │
+│ (one process)│ ─────────────────────────► └──────────┬───────────┘
+│              │                                        │ SIP INVITE (UDP 5062)
+│              │                                        ▼
+│              │                 ┌──────────────────────────────────┐
+│              │                 │ anti-fraud AS                    │
+│              │                 │ (one process, own ED2 loop)      │
+│              │                 └──────────────────────────────────┘
+│              │
+│              │   WebSocket /pool (generator-side events)
+│              │ ───────────────────────────► console
+└──────────────┘                              (one process, FastAPI)
+```
+
+Each AS process handles **per-AS concurrent isolation**: multiple CallController instances
+in the same process, each with its own `self.call_id`, its own dialog, its own timer.
+The generator does **not** exercise cross-AS concurrency — that is P9's domain, already
+proved. P12 exercises **within-AS** concurrency for the first time.
+
+### 12.2 Interface view
+
+Four interfaces, none modifying `as_platform`:
+
+| # | Interface | Between | Protocol | Purpose |
+|---|-----------|---------|----------|---------|
+| 1 | SIP INVITE/UDP | generator → AS | SIP/UDP | Generator sends real INVITEs to AS's configured SIP listen port; AS sends real 200 OK, BYE, 608 Rejected |
+| 2 | Per-call event stream | AS → console | WebSocket | Each AS emits `call_started`, `call_state_changed`, `call_ended`, `call_rejected_608` events on its existing internal API WebSocket (extended in-place, no library change) |
+| 3 | REST control surface | console → generator | HTTP/FastAPI | `POST /load/start`, `POST /load/stop`, `PUT /load/config` (`target_concurrency`, `call_rate`, `enabled_call_types`), `GET /load/status` |
+| 4 | Generator event feed | generator → console | WebSocket | Generator pushes `pool_status_update` (active/target concurrency, binding constraint) and generator-side per-call events |
+
+### 12.3 Call model — the 10 call types
+
+The generator sends INVITEs whose caller/called number combinations the AS's existing
+rules and anti-fraud configuration route into the following 10 types. The generator
+does **not** assert call types — it asserts the caller/called numbers it sends and
+observes the AS's decision via the event stream.
+
+**Translation AS types (T1–T6):**
+
+| Type | Called number pattern | Expected result | Routing |
+|------|----------------------|-----------------|---------|
+| T1 | `+86...` E.164 | Convert to `0...`, relay | allow-listed caller |
+| T2 | `0...` national | Keep format, relay | allow-listed caller |
+| T3 | `00...` international | Convert to `+...`, relay | allow-listed caller |
+| T4 | 4-digit short code | No matching rule → 404 | allow-listed caller |
+| T5 | reachable next hop | 200 OK | allow-listed caller |
+| T6 | unreachable next hop | 3 s timeout → AS fails | allow-listed caller |
+
+**Anti-fraud AS types (F1–F4):**
+
+| Type | Caller profile | Expected result |
+|------|---------------|-----------------|
+| F1 | allow-listed | relay → downstream AS |
+| F2 | block-listed | 608 Rejected |
+| F3 | high-rate window | 608 Rejected |
+| F4 | missing P-Asserted-Identity | fail-open → relay |
+
+The generator draws call types via weighted random selection with a per-type
+**enable/disable toggle** (console-controlled, REQ-F-040). Toggles filter the
+selection pool — disabled types are excluded.
+
+### 12.4 Duration model — the 4 classes
+
+Fixed weights (REQ-F-041):
+
+| Class | Weight | Far-end behavior |
+|-------|--------|-----------------|
+| D1 Fast | 30% | Mock S-CSCF answers 200 OK in ~1 s, sends BYE after **2 s** |
+| D2 Medium | 50% | Answers 200 OK in ~2 s, sends BYE after **8–15 s** (midpoint 11.5 s) |
+| D3 Long | 15% | Answers 200 OK in ~2 s, sends BYE after **20–30 s** (midpoint 25 s) |
+| D4 Timeout | 5% | **Never answers.** AS's 3 s no-answer timer tears down the call. |
+
+The weight-derived average duration (used for Little's Law coupling) is:
+
+```
+avg_duration = 0.30 × 2.5 + 0.50 × 11.5 + 0.15 × 25 + 0.05 × 3 = 9.5 seconds
+```
+
+This is a **design constant**, not a runtime measurement (ADR-0013).
+
+### 12.5 Two controls with Little's Law coupling
+
+The generator exposes two interactive controls (ADR-0013, REQ-F-039):
+
+| Control | Range | Mechanism | Binding when |
+|---------|-------|-----------|-------------|
+| **Target concurrency** | 1–50 | Closed-loop pool ceiling. Tick loop (every 500 ms) fills pool to this target. | Pool caps at target; rate throttle never reached |
+| **Call rate** | 0.1–10 calls/sec | Open-loop refill throttle. Even if pool is below target, no more than `rate` calls per second are launched. | Pool stabilises at `rate × avg_duration`, below target |
+
+**Binding constraint rule:**
+
+```
+if rate × 9.5 >= target_concurrency:
+    binding = "concurrency"   # 池子上限
+else:
+    binding = "rate"          # Call Rate 限速
+```
+
+The binding constraint is exposed in `/load/status` and every `pool_status_update`
+event. The console (P13) displays it so the reviewer understands the interaction.
+
+### 12.6 Quality attributes
+
+| Attribute | Source | Constraint |
+|-----------|--------|------------|
+| **AS library unchanged** | REQ-NF-027, D1 | P12 does not move anything into `as_platform`. Event stream emissions are AS-local internal_api extensions. |
+| **Generator is external** | REQ-NF-029, ADR-0012 | Generator does not import AS code. Talks SIP + observes events. `make demo` stays self-contained. |
+| **Concurrent isolation validated** | REQ-F-043, REQ-NF-030 | Tests launch ≥ 10 concurrent calls per AS process and assert each CallController completes independently, including P8a timer independence. |
+| **D10 benchmark boundary preserved** | D-P3-3, REQ-NF-025 | Console real-time numbers are demo artefacts, not published claims. No numbers in README/CHANGELOG. |
+| **Per-AS process model** | REQ-NF-028 | Each AS is its own process with its own sippy `ED2` loop. P9.5's shared-loop bottleneck does not apply. |
+| **No new dependencies** | REQ-NF-014 precedent | Generator uses Python stdlib + FastAPI (already a dependency — console is FastAPI). No new third-party package. |
+
+### 12.7 What P12 does NOT change
+
+Phase 3's design intent ("demonstrate what exists, not invent what doesn't") means
+P12 touches deliberately nothing that works:
+
+- **No SIP signalling changes.** No new headers, no message rewriting, no B2BUA behaviour change.
+- **No routing or translation rule changes.** Rules stay `config/rules.yaml`.
+- **No anti-fraud verdict engine changes.** Per-caller reputation decay, call-rate window,
+  block/allow lists — all unchanged.
+- **No chained topology wiring changes.** P9's chain (`anti-fraud → translation → core`)
+  is still configuration only.
+- **No sippy source modifications.** `AGENT.md section 6` forbids this.
+- **No HLD/LLD changes to sections 1–11.** P12 is additive — delta at the tail, never rewrite.
+- **No gap closure from the production gap register.** Phase 3 closes zero registered gaps
+  (phase3-plan.md §8).
+- **Generator is not launched by `make demo`.** `make demo` stays self-contained. P12 generator
+  is an **additional** process for interactive demos.
+

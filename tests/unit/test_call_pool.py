@@ -10,12 +10,11 @@ These unit tests run the CallPool tick loop at speed and verify:
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import pytest
-
-from tools.call_load_generator import CallModel, CallPool, DurationModel, PoolConfig
-
+from tools.call_load_generator import CallModel, CallPool, PoolConfig
 
 # ---------------------------------------------------------------------------
 # Helpers

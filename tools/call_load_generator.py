@@ -29,9 +29,9 @@ import asyncio
 import random
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Final
-
+from typing import Any, Final
 
 # ======================================================================
 # Call type model
@@ -51,7 +51,7 @@ class CallModel:
         {f"T{i}" for i in range(1, 7)} | {f"F{i}" for i in range(1, 5)}
     )
 
-    _base_weights: Final[dict[str, float]] = {t: 1.0 for t in ALL_TYPES}
+    _base_weights: Final[dict[str, float]] = dict.fromkeys(ALL_TYPES, 1.0)
 
     @classmethod
     def pick(cls, enabled_types: set[str]) -> str:

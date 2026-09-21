@@ -5,19 +5,15 @@ Uses FastAPI's TestClient; no actual sippy or network needed.
 from __future__ import annotations
 
 import asyncio
-import json
 
 import pytest
 from fastapi.testclient import TestClient
-
 from tools.call_load_generator import (
     CallModel,
     CallPool,
-    DurationModel,
     PoolConfig,
     build_generator_app,
 )
-
 
 # ---------------------------------------------------------------------------
 # Build a full app backed by a real CallPool but with a FakeUac

@@ -7,9 +7,7 @@ Covers: CallModel (weighted-random call type selection), DurationModel
 from __future__ import annotations
 
 import pytest
-
-from tools.call_load_generator import CallModel, CallInstance, DurationModel, PoolConfig
-
+from tools.call_load_generator import CallInstance, CallModel, DurationModel, PoolConfig
 
 # ---------------------------------------------------------------------------
 # CallModel
@@ -47,7 +45,7 @@ def test_call_model_rejects_unknown_types():
 def test_call_model_all_types_constant():
     """ALL_TYPES is exactly the 10 expected keys."""
     expected = {f"T{i}" for i in range(1, 7)} | {f"F{i}" for i in range(1, 5)}
-    assert CallModel.ALL_TYPES == expected
+    assert expected == CallModel.ALL_TYPES
 
 
 # ---------------------------------------------------------------------------

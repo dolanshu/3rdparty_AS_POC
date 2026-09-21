@@ -8,6 +8,19 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+### Added
+
+- **P11 platform verification** — the two pluggable seams now ship two implementations each,
+  the capacity harness is a first-class library module, and `NextHop.transport` is widened
+  to `Literal["udp", "tls"]` (ADR-0010, REQ-F-034…REQ-F-037, REQ-NF-022…REQ-NF-026).
+  Implementation lives in the sibling library repository `../as_platform` (bumped to `0.2.0`),
+  consumed unchanged by this repository: the widened `NextHop.transport` field is
+  backwards-compatible (every `"udp"` value keeps working), `UdpTransport` and
+  `InMemoryStateStore` supply no-op `start()`/`stop()` methods for the Protocol lifecycle
+  that P11 added, so zero consumer code change was required. Acceptance items
+  `ACC-P11-001 … ACC-P11-006` in `docs/acceptance/criteria.md`; evidence in
+  `docs/acceptance/report.md`.
+
 ### Fixed
 
 - The outbound leg now carries its own Call-ID instead of reusing the trunk one verbatim.

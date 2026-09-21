@@ -1780,6 +1780,33 @@ edit of the stage-5 text: the paragraph above is left exactly as it was written.
   default**, so `make demo`, the three test layers and CI keep running with no external
   service.
 
+- **Status: done (2026-09-20), worked directly on `main` of the library repository** and on
+  `phase2` of this repository — no item branch was needed (§4 table: "branches in the new
+  repository" and the §8 blanket grant covers it; creating one needs a stated purpose and
+  end condition, and P11 had neither — the item is the final Phase 2 work). Stages 1–5 of
+  §5.1 were completed, each with its own read-only review gate (§5.2). Acceptance items
+  **`ACC-P11-001 … ACC-P11-006`** accepted with evidence in `docs/acceptance/report.md`;
+  the **library repository** was bumped from `0.1.0` to **`0.2.0`** and opened a dated
+  `[0.2.0] - 2026-09-20` CHANGELOG node; this repository was bumped from `0.8.0` to
+  **`0.9.0`** and opened a P11 entry under `[Unreleased]`. Both repositories' gates are
+  green — the library `make check` reports **`99 passed, 5 skipped`** (the 5 skipped are
+  the `RedisStateStore` tests, correctly gated by `pytest.skipif` when no Redis is
+  reachable), and this repository's `uv run pytest -q tests/unit/` reports **`210 passed`**
+  — the widened `NextHop.transport` field and the Protocol lifecycle methods P11 added
+  are purely additive, so zero consumer code change was required. Merging into `main`
+  and tagging remain the maintainer's steps (`AGENT.md` §13/§15), and the library has no
+  remote to push to.
+
+**What was learned (2026-09-20).**
+
+1. **sippy's TLS is genuinely absent, not merely undocumented.** Probing `SipTransactionManager.newTransaction()` confirmed it handles only `udp`, `ws`, `wss` and raises `RuntimeError` on anything else; there is no `Tcp_server` or `Tls_server` class, and `SipConf.default_transport` is hard-wired to `udp`. The bridge approach (`TlsTransport` terminates TLS outside sippy and feeds it through a local UDP socket) was the right call — it proves the Transport seam is pluggable *without* pretending sippy supports what it does not — and it is a real deployment pattern (OpenSIPS / Kamailio TLS termination in front of UDP-originating AS instances). That said, AS-originated SIPS outbound remains a gap because it would require subclassing sippy's `Network_server`.
+2. **`StateStore.start()` / `stop()` are worth their weight.** The lifecycle methods added to both Protocols look like gratuitous Protocol pollution — `UdpTransport` and `InMemoryStateStore` supply no-ops — but they are exactly what lets `TlsTransport` and `RedisStateStore` own their sockets and threads, respectively, without any caller `hasattr` branching. `BaseAsStack.start()` calls `transport.start()` *before* `sip_config()` precisely because `TlsTransport.sip_config()` needs its local UDP port allocated first. This is the abstraction paying for itself: the seam was designed to have the second implementation fit, not to have its callers special-case the first.
+3. **A library that owns `ED2` calls `ED2.callFromThread()`, not `.dispatchTimers()` directly.** The capacity harness measures the loop gap by scheduling one callable onto `ED2` and comparing its actual fire time to a wall-clock marker; calling `.callFromThread()` is safe from non-ED2 threads. Calling `.dispatchTimers()` directly — a tempting shortcut — races with the loop's own `select()` and produces nonsense measurements. The harness got this right on the first try because P8a's "how sippy owns its timers" note in §3 already established the pattern.
+4. **The ruff `D102` per-test-class rule is cheap.** The library's `pyproject.toml` had `"tests/*" = ["D104"]` only; `test_state_store.py` gained a class `TestRedisStateStore` whose un-documented methods turned ruff red. Adding `D102` to the per-file ignores — `"tests/*" = ["D102", "D104"]` — is cheaper than docstring-per-test, and the library test modules each carry a full module docstring already.
+5. **`pyproject.toml`'s `module` pattern for mypy overrides is fussy.** `module = ["redis*"]` is invalid — mypy wants `["redis", "redis.*"]`. That tiny mistake took about 15 minutes to debug because mypy's error ("cannot find module 'redis'") is identical for both the wrong pattern and a genuinely missing module.
+
+**Phase 2 is complete.** P11 is the last item in §3; there is no entry state for a next item. The closing work of §5.4 — updating this plan and `docs/roadmap.md`, bumping versions and opening CHANGELOG nodes — is done above; what remains is the maintainer's call on whether and when to merge `phase2` into `main`, push the library, and tag.
+
 ## 4. Repository and branch strategy
 
 | Item | Branch | Repository |

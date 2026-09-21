@@ -825,6 +825,18 @@ every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
   beside this one at `../as_platform` — and this repository becomes its reference implementation
   (ADR-0009). Not merged into `main` and not tagged.
 
+- **P11 — platform verification. [Status: Done]** (2026-09-20, worked directly on `main` of the
+  library repository and on `phase2` of this repository). A pointer only: the plan, status,
+  review-gate findings and the "Phase 2 is complete" close live in `docs/phase2-plan.md` §3
+  on `phase2`; the acceptance evidence is in `docs/acceptance/report.md`. Three outcomes:
+  `TlsTransport` (second Transport), `RedisStateStore` (second StateStore, background-worker
+  queue), and `CapacityDriver` (library-level harness, no benchmark claims). `NextHop.transport`
+  widened from `Literal["udp"]` to `Literal["udp", "tls"]` as a purely additive change — zero
+  consumer code change required. Library bumped `0.1.0 → 0.2.0`, this repository bumped
+  `0.8.0 → 0.9.0`. Both repositories' gates are green — library `make check` 99 passed / 5
+  skipped Redis, POC unit tests 210 passed. Not merged into `main`, not tagged; the library
+  has no remote to push to.
+
 ## Conventions
 
 - **Single source of truth:** rules live in `AGENT.md`; live status lives here; evidence

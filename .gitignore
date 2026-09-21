@@ -37,6 +37,9 @@ docs/specs/message-samples/*.txt
 *.swp
 .DS_Store
 
+# docs_cn
+docs_cn/
+
 # Agent team session state (per-run, machine-local)
 .codebuddy/teams/
 

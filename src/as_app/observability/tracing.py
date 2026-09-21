@@ -22,6 +22,7 @@ resolving for ``tools/``, ``tests/`` and the frozen docs. It adds no behaviour a
 from __future__ import annotations
 
 from as_platform.observability.tracing import (
+    DEFAULT_MAX_TRACED_CALLS,
     CallTrace,
     RecordedSipMessage,
     SipMessageRecorder,
@@ -32,6 +33,7 @@ from as_platform.observability.tracing import (
 
 __all__ = [
     "CallTrace",
+    "DEFAULT_MAX_TRACED_CALLS",
     "RecordedSipMessage",
     "SipMessageRecorder",
     "TraceEvent",

@@ -437,7 +437,11 @@ def observe_level(
     finished = draw_loop_until(all_released, cap, heartbeat=gap.beat)
 
     outcomes = [mock.uac.outcome_for(call_id) for call_id in call_ids]
-    completed = sum(1 for outcome in outcomes if outcome is not None and outcome.status == 200)
+    completed = sum(
+        1
+        for outcome in outcomes
+        if outcome is not None and outcome.released and outcome.status == 200
+    )
     non_200 = sum(
         1
         for outcome in outcomes

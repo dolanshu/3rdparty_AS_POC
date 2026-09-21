@@ -149,6 +149,16 @@ class CallController(BaseCallController):
             return self._reject_decision(
                 error, disposition=self.disposition_for(decision), rule_id=decision.rule_id
             )
+        if not decision.next_hops:
+            return self._reject_decision(
+                AsError(
+                    AsErrorCode.ROUTE_NO_NEXT_HOP,
+                    f"rule {decision.rule_id or '-'} selected no next hop",
+                    call_id=self.call_id,
+                ),
+                disposition=CallDisposition.REJECTED,
+                rule_id=decision.rule_id,
+            )
         translated = decision.translated_number or called_number
         # The second leg gets its own Call-ID: sippy regenerates ``From``, ``To`` and
         # ``CSeq`` for the outbound dialog, but copies a non-``None`` Call-ID verbatim

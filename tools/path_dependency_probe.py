@@ -261,7 +261,12 @@ def site_packages(consumer: Path) -> Path:
     Returns:
         The first ``lib/python*/site-packages`` directory found in its virtual environment.
     """
-    return next((consumer / ".venv" / "lib").glob("python*/site-packages"))
+    found = next((consumer / ".venv" / "lib").glob("python*/site-packages"), None)
+    if found is None:
+        raise RuntimeError(
+            f"no site-packages directory under {consumer / '.venv' / 'lib'}"
+        )
+    return found
 
 
 def installed_version(consumer: Path) -> str:

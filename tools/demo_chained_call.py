@@ -13,6 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# OCR-R10 TODO: ~120 lines of helpers (draw_loop_until, verdict_attributes,
+# decision_rule, _icid_of, _header_value, received_invite_icid, chain setup) are
+# duplicated in tools/chained_as_probe.py. Extract to a shared module under
+# tools/ (like capture_call already does) before the two drift further.
+
 """Run the chained AS topology and narrate what every hop saw.
 
 This is the demo of P9's chain of ``docs/architecture/lld.md`` section 10: two B2BUAs in

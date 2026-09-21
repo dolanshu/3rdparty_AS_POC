@@ -199,7 +199,6 @@ class FraudCallController(BaseCallController):
         )
         self.screening_data = screening_data
         self.caller_state = caller_state
-        self._verdict: ScreeningDecision | None = None
 
     # --- the application hook -----------------------------------------------
 
@@ -238,7 +237,6 @@ class FraudCallController(BaseCallController):
                 reject_above_calls=current.reject_above_calls,
             ),
         )
-        self._verdict = decision
         self._record_verdict(decision, signals, sip_608_declared)
         if decision.verdict is ScreeningVerdict.REJECT:
             self.caller_state.penalise(signals.calling_number)

@@ -225,15 +225,17 @@ def run_probe(status: int = 608, phrase: str = "Rejected") -> int:
             client.sendto(invite, (host, stack_port))
             client.settimeout(5.0)
             deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline:
-                try:
-                    data, _ = client.recvfrom(65535)
-                except TimeoutError:
-                    break
-                result["responses"].append(data)
-                if _is_final_response(data):
-                    break
-        ED2.breakLoop()
+            try:
+                while time.monotonic() < deadline:
+                    try:
+                        data, _ = client.recvfrom(65535)
+                    except TimeoutError:
+                        break
+                    result["responses"].append(data)
+                    if _is_final_response(data):
+                        break
+            finally:
+                ED2.breakLoop()
 
     threading.Thread(target=send_invite, daemon=True).start()
     ED2.loop()

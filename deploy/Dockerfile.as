@@ -28,6 +28,11 @@ WORKDIR /app
 RUN useradd --create-home --uid 10001 as
 
 COPY pyproject.toml uv.lock ./
+# OCR-R02 TODO: `as-platform = { path = "../as_platform" }` is OUTSIDE the compose build
+# context (context: .. = repo root), so `uv sync --frozen` fails here. Fix by either
+# (a) cloning as_platform into /tmp during build (like CI does — see .github/workflows/ci.yml),
+# (b) docker-compose `additional_contexts` (Compose 2.17+), or (c) switching as-platform
+# to a git source. Blocked until as_platform has a published remote.
 # `uv sync --frozen` installs exactly what uv.lock records: the wheel URLs in the lock point
 # at files.pythonhosted.org and uv does NOT substitute the configured index for them
 # (verified with uv 0.12.15 — a sync whose index was unreachable still downloaded those

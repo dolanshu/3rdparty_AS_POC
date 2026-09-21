@@ -19,7 +19,7 @@ P9's design assumption (``docs/phase2-plan.md`` section 3, P9; REQ-F-025 / REQ-F
 that the chained topology ``SBC -> AS-1 (anti-fraud) -> AS-2 (number translation) -> core``
 can be wired by **configuration only** — pointing AS-1's allowed-relay next hop
 (``FRAUD_SBC_PEER_*``) at AS-2's SIP listen address — with no iFC emulation added to the
-mock and no code shared between the two AS instances. Three properties are observed here
+mock and no code shared between the two AS instances. Four properties are observed here
 rather than assumed (``AGENT.md`` section 6):
 
 1. an INVITE AS-1 **allows** is relayed into AS-2, translated there and answered by the

@@ -118,15 +118,15 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 "use strict";var A="__AS_API_URL__",W=A.replace(/^http/,"ws")+"/ws/events",cv="call-trace",tc=[],sel=null,rd=null,sd=null,md=null,hd=null,ws=null,wr=null;
 function E(i){return document.getElementById(i)}function C(n){n.innerHTML=""}function ft(s){try{return new Date(s).toLocaleTimeString()}catch(e){return s}}
 function esc(s){if(s===null||s===undefined)return"";return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
-async function fh(){try{var r=await fetch(A+"/healthz");hd=await r.json();E("aSt").textContent=hd.status;
+async function fh(){try{var r=await fetch(A+"/healthz");if(!r.ok)return;hd=await r.json();E("aSt").textContent=hd.status;
 E("aDot").className="dot "+(hd.status==="ok"?"ok":"er");E("aVer").textContent=hd.version||"-";
 E("aInst").textContent=hd.instance||"-";
 document.title=(hd.instance?hd.instance+" - ":"")+"3rd-party AS Console";
 E("aUp").textContent=Math.round(hd.uptime_seconds||0)+"s"}catch(e){E("aSt").textContent="unreachable";E("aDot").className="dot er"}}
-async function fm(){try{var r=await fetch(A+"/api/v1/metrics");md=await r.json();E("aCal").textContent=md.calls_total||0;
+async function fm(){try{var r=await fetch(A+"/api/v1/metrics");if(!r.ok)return;md=await r.json();E("aCal").textContent=md.calls_total||0;
 var p=Object.entries(md.peer_status||{}).map(function(x){return x[0]+":"+x[1]}).join(", ");E("aPeer").textContent=p||"-";
 if(cv==="statistics")rs()}catch(e){}}
-async function ftr(){try{var r=await fetch(A+"/api/v1/traces");var d=await r.json();tc=d.calls||[];rtl()}catch(e){}}
+async function ftr(){try{var r=await fetch(A+"/api/v1/traces");if(!r.ok)return;var d=await r.json();tc=d.calls||[];rtl()}catch(e){}}
 function rtl(){var f=(E("filt").value||"").toLowerCase(),l=E("tlist");C(l);
 var q=tc.filter(function(t){return!f||t.call_id.toLowerCase().indexOf(f)>=0});
 if(!q.length){l.innerHTML='<div class="empty">no calls</div>';return}
@@ -163,7 +163,7 @@ b.innerHTML='<svg width="300" height="50" viewBox="0 0 300 50" xmlns="http://www
 '<line x1="214" y1="26" x2="252" y2="26" stroke="'+lc+'" stroke-width="2"'+la+
 '<rect x="252" y="14" width="46" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/><text x="275" y="30" text-anchor="middle" fill="var(--mut)" font-size="9">next hop</text>'+
 (tag?'<text x="106" y="11" fill="var(--rule)" font-size="9">'+tag+"</text>":"")+"</svg>"}
-async function fr(){try{var r=await fetch(A+"/api/v1/rules");rd=await r.json();
+async function fr(){try{var r=await fetch(A+"/api/v1/rules");if(!r.ok)return;rd=await r.json();
 if(cv==="rules")rr();if(cv==="configuration")rcfg()}catch(e){}}
 function rr(){if(!rd)return;var h=E("nhT").querySelector("tbody");C(h);
 (rd.next_hops||[]).forEach(function(x){h.innerHTML+="<tr><td>"+esc(x.name)+"</td><td>"+esc(x.address)+"</td><td>"+x.port+
@@ -178,7 +178,7 @@ if(a.kind==="route"){as+=" hops:"+(a.next_hops||[]).join(",");if(a.translate){as
 (a.translate.prepend?"+"+a.translate.prepend:"")}}else{as+=" "+a.status}
 t.innerHTML+="<tr><td>"+esc(r.rule_id)+"</td><td>"+r.priority+'</td><td><span class="tag '+(r.enabled?"en":"di")+'">'+
 (r.enabled?"on":"off")+"</span></td><td>"+esc(r.description)+"</td><td>"+esc(ms.join(" | "))+"</td><td>"+as+"</td></tr>"})}
-async function fs(){try{var r=await fetch(A+"/api/v1/screening");sd=await r.json();
+async function fs(){try{var r=await fetch(A+"/api/v1/screening");if(!r.ok)return;sd=await r.json();
 if(cv==="screening")rsd();if(cv==="configuration")rcfg()}catch(e){}}
 function rl(id,rows){var t=E(id);if(!t)return;var b=t.querySelector("tbody");C(b);
 if(!rows.length){b.innerHTML='<tr><td colspan="3" class="empty">no entries</td></tr>';return}

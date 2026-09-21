@@ -29,6 +29,7 @@ Every scenario is a :class:`s_sbc_mock.uac.CallScenario` running on the shared
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pytest
@@ -319,3 +320,155 @@ def test_ten_concurrent_calls_in_chained_topology_do_not_cross_contaminate(
     assert len(as2_ids) == CONCURRENCY, f"AS-2 tracked {len(as2_ids)} Call-IDs"
     # And they are disjoint — not one AS-1 Call-ID leaks into AS-2's key space.
     assert set(as1_ids).isdisjoint(set(as2_ids)), "AS-1 and AS-2 share trace keys"
+
+
+# ======================================================================
+# Task 9: P8a timer cross-contamination — 10 concurrent failover calls
+# ======================================================================
+
+
+def test_ten_concurrent_failover_calls_each_try_primary_then_land_on_secondary(
+    tmp_path,
+) -> None:
+    """When primary hop is unreachable, each of 10 concurrent calls fails over independently.
+
+    P8a / REQ-NF-030 — per-transaction timers (INVITE retransmit, no-answer) must
+    remain independent per call. A naive implementation would share one timer or
+    one failover attempt across all calls and collapse them. This test puts 10
+    calls through a rules file whose ``s-sbc-primary`` hop points at an unbound port.
+    """
+    import socket
+
+    from sippy.Core.EventDispatcher import ED2
+    from sippy.Time.Timeout import Timeout
+
+    from as_app.bootstrap import AsSettings
+    from as_app.main import AsStack
+    from as_app.observability.tracing import SipMessageRecorder
+    from s_sbc_mock.main import MockConfig, SMockApplication
+
+    def _free_udp_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            return int(probe.getsockname()[1])
+
+    unbound_port = _free_udp_port()
+    as_port = _free_udp_port()
+    core_port = _free_udp_port()
+    trunk_port = _free_udp_port()
+    api_port = _free_udp_port()
+
+    failover_rules = tmp_path / "failover_rules.yaml"
+    failover_rules.write_text(
+        f"""version: 1
+name: failover-test
+next_hops:
+  - name: s-sbc-primary
+    address: 127.0.0.1
+    port: {unbound_port}
+    priority: 1
+  - name: s-sbc-failover
+    address: 127.0.0.1
+    port: {core_port}
+    priority: 2
+rules:
+  - rule_id: R-MOB-40
+    priority: 100
+    description: China Mobile, failover to the second hop
+    match:
+      called_prefixes: ["+86138"]
+      number_format: e164
+    action:
+      kind: route
+      translate:
+        to_format: national
+        strip_prefix: "+86"
+        prepend: "0"
+      next_hops: [s-sbc-primary, s-sbc-failover]
+""",
+        encoding="utf-8",
+    )
+
+    settings = AsSettings(
+        _env_file=None,
+        sip_listen_address="127.0.0.1",
+        sip_listen_port=as_port,
+        sbc_peer_address="127.0.0.1",
+        sbc_peer_port=core_port,
+        allowed_peers=["127.0.0.1"],
+        rules_file=failover_rules,
+        internal_api_address="127.0.0.1",
+        internal_api_port=api_port,
+        log_payloads=False,
+    )
+    as_messages = SipMessageRecorder()
+    as_stack = AsStack(settings, sip_logger=as_messages)
+    as_stack.start()
+    mock = SMockApplication(
+        MockConfig(
+            listen_address="127.0.0.1",
+            listen_port=core_port,
+            as_address="127.0.0.1",
+            as_port=as_port,
+        ),
+        sip_logger=SipMessageRecorder(),
+        uac_local_port=trunk_port,
+    )
+    mock.start()
+    try:
+        scenarios = [
+            CallScenario(
+                name=f"fo-{i}",
+                calling_number="+86216180001",
+                called_number=f"+861380013800{i % 10}",
+                ring_seconds=0.1,
+                talk_seconds=0.1,
+            )
+            for i in range(CONCURRENCY)
+        ]
+        call_ids: list[str] = []
+        for sc in scenarios:
+            call_ids.append(str(mock.uac.place_call(sc)))
+        assert len(call_ids) == CONCURRENCY
+
+        # Drive ED2 until every call releases. Timeout is long because each call
+        # on average waits one T1 retransmit before the primary times out.
+        deadline = time.monotonic() + 30.0
+        state: dict[str, bool] = {"done": False}
+
+        def poll() -> None:
+            all_released = all(
+                (out.released if (out := mock.uac.outcome_for(cid)) else False)
+                for cid in call_ids
+            )
+            if all_released or time.monotonic() >= deadline:
+                state["done"] = all_released
+                ED2.breakLoop()
+
+        timer = Timeout(poll, 0.05, -1)
+        try:
+            ED2.loop(timeout=30.0)
+        finally:
+            timer.cancel()
+
+        assert state["done"], f"not all {CONCURRENCY} failover calls finished within 30 s"
+
+        # Every call completed via the failover hop (200 OK).
+        for cid in call_ids:
+            outcome = mock.uac.outcome_for(cid)
+            assert outcome is not None
+            assert outcome.status == 200, (
+                f"failover call {cid} answered {outcome.status} instead of 200 OK"
+            )
+
+        # The failover hop (mock core) received exactly CONCURRENCY INVITEs —
+        # one per call. This is what proves per-call timer independence: if the
+        # implementation had collapsed multiple calls into one failover attempt,
+        # we would see fewer than CONCURRENCY INVITEs here.
+        invites = list(mock.uas.received_invites)
+        assert len(invites) == CONCURRENCY, (
+            f"expected {CONCURRENCY} failover INVITEs at the core, got {len(invites)}"
+        )
+    finally:
+        as_stack.stop()
+        mock.stop()

@@ -238,3 +238,84 @@ def test_ten_concurrent_calls_through_anti_fraud_as(fraud_trunk_pair) -> None:
 
     snap = fraud_trunk_pair.as_stack.metrics.snapshot()
     assert snap.calls_total >= CONCURRENCY
+
+
+# ======================================================================
+# Task 10: chained topology e2e — 10 concurrent (anti-fraud → translation → core)
+# ======================================================================
+
+
+def test_ten_concurrent_calls_through_chained_topology(chained_pair_factory) -> None:
+    """Ten simultaneous calls traverse both B2BUA instances and finish 200 OK.
+
+    The chain is **AS-1 (anti-fraud, allow path) → AS-2 (number translation) → emulated
+    core**. Each call gets its own independent CallController on each AS instance,
+    and the three-leg chain (trunk → AS-2 → core) must not cross-contaminate.
+
+    Callers use distinct numbers (each matching the allow prefix ``+86138001380``)
+    so AS-1's 5-call/60 s window per caller does not throttle any of them.
+    """
+    pair = chained_pair_factory()
+    called_number = "+8613800138000"
+
+    scenarios = [
+        CallScenario(
+            name=f"chain-{i}",
+            calling_number=f"+861380013800{i}",  # each matches allow prefix
+            called_number=called_number,
+            ring_seconds=0.05,
+            talk_seconds=0.05,
+        )
+        for i in range(CONCURRENCY)
+    ]
+    call_ids = _place_n(pair, scenarios)
+    assert len(call_ids) == CONCURRENCY
+
+    finished = pair.run_until(
+        lambda: _all_released(pair, call_ids),
+        timeout_seconds=30.0,
+    )
+    assert finished, "not all 10 chained calls finished within 30 s"
+
+    for cid in call_ids:
+        outcome = pair.outcome_for(cid)
+        assert outcome is not None, f"no outcome for chained call {cid}"
+        assert outcome.status == 200, f"chained call {cid} answered {outcome.status}"
+
+
+def test_ten_concurrent_calls_in_chained_topology_do_not_cross_contaminate(
+    chained_pair_factory,
+) -> None:
+    """Every call in a 10-call chain gets its own per-instance trace keys.
+
+    REQ-F-028 forbids the two AS instances from sharing trace keys; a bug would
+    show two distinct Call-IDs per call, one on each instance, but a shared
+    trace key would collapse them. With 10 calls simultaneously in flight
+    that same bug would make every AS-2 trace entry ambiguous.
+    """
+    pair = chained_pair_factory()
+    called_number = "+8613800138000"
+
+    scenarios = [
+        CallScenario(
+            name=f"chain-ids-{i}",
+            calling_number=f"+861380013800{i}",
+            called_number=called_number,
+            ring_seconds=0.05,
+            talk_seconds=0.05,
+        )
+        for i in range(CONCURRENCY)
+    ]
+    call_ids = _place_n(pair, scenarios)
+    pair.run_until(
+        lambda: _all_released(pair, call_ids),
+        timeout_seconds=30.0,
+    )
+
+    # Each AS instance tracked exactly CONCURRENCY distinct Call-IDs.
+    as1_ids = pair.as_stack.tracer.known_call_ids()
+    as2_ids = pair.second_as.tracer.known_call_ids()
+    assert len(as1_ids) == CONCURRENCY, f"AS-1 tracked {len(as1_ids)} Call-IDs"
+    assert len(as2_ids) == CONCURRENCY, f"AS-2 tracked {len(as2_ids)} Call-IDs"
+    # And they are disjoint — not one AS-1 Call-ID leaks into AS-2's key space.
+    assert set(as1_ids).isdisjoint(set(as2_ids)), "AS-1 and AS-2 share trace keys"

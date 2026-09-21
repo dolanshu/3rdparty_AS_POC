@@ -39,7 +39,7 @@ arriving on the trunk. It rejects sources outside ``ALLOWED_PEERS`` with ``403``
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from as_platform.call_controller import (
     BaseCallController,
@@ -93,6 +93,7 @@ class CallController(BaseCallController):
         *,
         global_config: dict[str, Any] | None = None,
         next_hop: tuple[str, int] | None = None,
+        app: Any | None = None,
     ) -> None:
         """Create a call controller.
 
@@ -103,14 +104,58 @@ class CallController(BaseCallController):
             global_config: sippy global configuration; empty when the controller is
                 exercised without a stack (unit tests).
             next_hop: ``(address, port)`` of the next hop for the outbound INVITE.
+            app: FastAPI application for event emission (P12); ``None`` when running
+                without a console connection (backward-compatible default).
         """
         super().__init__(
             metrics=metrics, tracer=tracer, global_config=global_config, next_hop=next_hop
         )
         self.rule_set_store = rule_set_store
+        self._emit_app = app
         # The routing decision of this call, kept so the failover attempts and the
         # rejection vocabulary reproduce the decision that produced them.
         self._decision: RoutingDecision | None = None
+        # P12: emit call_started event (as_app is "as_translation")
+        if app is not None:
+            self._emit_p12("call_started", {"direction": "trunk_in"})
+
+    # ------------------------------------------------------------------
+    # P12 per-call event emission (no as_platform changes — AS-local only)
+    # ------------------------------------------------------------------
+
+    _SOURCE: ClassVar[str] = "as_translation"
+
+    def _emit_p12(self, event: str, attributes: dict[str, Any]) -> None:
+        """Emit a per-call event via the internal_api WebSocket fanout.
+
+        Safe to call from any thread — uses ``asyncio.get_event_loop()`` and
+        falls back to ``run_coroutine_threadsafe`` when not on the event loop
+        thread. No-op when :attr:`_emit_app` is ``None``.
+        """
+        import asyncio as _asyncio
+        import json as _json
+        import time as _time
+
+        if self._emit_app is None:
+            return
+        event_dict = {
+            "timestamp": _time.time(),
+            "source": self._SOURCE,
+            "event": event,
+            "call_id": getattr(self, "call_id", "unknown"),
+            "attributes": attributes,
+        }
+        try:
+            msg = _json.dumps(event_dict, default=str)
+            loop = _asyncio.get_event_loop()
+            if _asyncio.get_running_loop() is loop:
+                loop.create_task(self._emit_app.state.broadcast(msg))
+            else:
+                _asyncio.run_coroutine_threadsafe(
+                    self._emit_app.state.broadcast(msg), loop
+                )
+        except (RuntimeError, AttributeError):
+            pass  # No event loop or app has no broadcast — skip silently
 
     # --- the application hook -----------------------------------------------
 

@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from as_platform.call_controller import (
     LEG_NEXT_HOP,
@@ -183,6 +183,7 @@ class FraudCallController(BaseCallController):
         tracer: TraceRecorder | None = None,
         global_config: dict[str, Any] | None = None,
         next_hop: tuple[str, int] | None = None,
+        app: Any | None = None,
     ) -> None:
         """Create a call controller.
 
@@ -193,12 +194,49 @@ class FraudCallController(BaseCallController):
             tracer: Trace recorder; the process-wide one is used when omitted.
             global_config: sippy global configuration; empty when exercised without a stack.
             next_hop: ``(address, port)`` the allowed INVITE is relayed to.
+            app: FastAPI application for event emission (P12); ``None`` backward-compat.
         """
         super().__init__(
             metrics=metrics, tracer=tracer, global_config=global_config, next_hop=next_hop
         )
         self.screening_data = screening_data
         self.caller_state = caller_state
+        self._emit_app = app
+        if app is not None:
+            self._emit_p12("call_started", {"direction": "trunk_in"})
+
+    # ------------------------------------------------------------------
+    # P12 per-call event emission (no as_platform changes — AS-local only)
+    # ------------------------------------------------------------------
+
+    _SOURCE: ClassVar[str] = "as_anti_fraud"
+
+    def _emit_p12(self, event: str, attributes: dict[str, Any]) -> None:
+        """Emit a per-call event via the internal_api WebSocket fanout."""
+        import asyncio as _asyncio
+        import json as _json
+        import time as _time
+
+        if self._emit_app is None:
+            return
+        event_dict = {
+            "timestamp": _time.time(),
+            "source": self._SOURCE,
+            "event": event,
+            "call_id": getattr(self, "call_id", "unknown"),
+            "attributes": attributes,
+        }
+        try:
+            msg = _json.dumps(event_dict, default=str)
+            loop = _asyncio.get_event_loop()
+            if _asyncio.get_running_loop() is loop:
+                loop.create_task(self._emit_app.state.broadcast(msg))
+            else:
+                _asyncio.run_coroutine_threadsafe(
+                    self._emit_app.state.broadcast(msg), loop
+                )
+        except (RuntimeError, AttributeError):
+            pass
 
     # --- the application hook -----------------------------------------------
 

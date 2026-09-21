@@ -35,6 +35,32 @@ wheels = [
 ]
 
 [[package]]
+name = "as-platform"
+version = "0.1.0"
+source = { editable = "../as_platform" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "sippy" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.110" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "sippy", specifier = "==2.4.2" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.27" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.9" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "ruff", specifier = ">=0.5" },
+]
+
+[[package]]
 name = "ast-serialize"
 version = "0.11.2"
 source = { registry = "https://pypi.org/simple" }
@@ -600,9 +626,10 @@ wheels = [
 
 [[package]]
 name = "third-party-as-poc"
-version = "0.5.1"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
+    { name = "as-platform" },
     { name = "sippy" },
 ]
 
@@ -635,6 +662,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "as-platform", editable = "../as_platform" },
     { name = "fastapi", marker = "extra == 'as'", specifier = ">=0.110" },
     { name = "fastapi", marker = "extra == 'console'", specifier = ">=0.110" },
     { name = "pydantic", marker = "extra == 'as'", specifier = ">=2.0" },

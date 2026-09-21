@@ -16,9 +16,12 @@
 
 The stack is ``SipConf`` + ``SipTransactionManager`` + ``ED2.loop()``
 (``AGENT.md`` section 5), with the call control logic of
-:mod:`as_app.call_controller` behind it. M1 wires the transaction manager, the trunk
-call map and the graceful shutdown of the loop; the behaviour of the stack was verified
-with ``tools/sippy_probe.py`` and is re-verified by the e2e suite.
+:mod:`as_app.call_controller` behind it. The process skeleton is shared with the anti-fraud
+AS and lives in the platform library (``as_platform.main.BaseAsStack``); this module keeps
+the number-translation identity — its user agent name, its rule set and its reload timer —
+as a subclass (ADR-0009 decision 2). M1 wired the transaction manager, the trunk call map
+and the graceful shutdown of the loop; the behaviour of the stack was verified with
+``tools/sippy_probe.py`` and is re-verified by the e2e suite.
 
 Two sippy facts shape this module (see ``docs/operations/troubleshooting.md``):
 
@@ -39,11 +42,8 @@ import signal
 from pathlib import Path
 from typing import Any
 
-from sippy.Core.EventDispatcher import ED2
-from sippy.SipConf import SipConf
-from sippy.SipLogger import SipLogger
-from sippy.SipTransactionManager import SipTransactionManager
-from sippy.Time.Timeout import Timeout
+from as_platform.main import BaseAsStack
+from as_platform.transport import UdpTransport
 
 from as_app import __version__
 from as_app.bootstrap import (
@@ -56,10 +56,9 @@ from as_app.call_controller import TrunkCallMap
 from as_app.errors import AsError
 from as_app.internal_api import InternalApiServer
 from as_app.observability.logging import LogDirection, configure_logging, get_logger, log_event
-from as_app.observability.metrics import MetricsRegistry, get_metrics_registry
-from as_app.observability.tracing import TraceRecorder, get_trace_recorder
+from as_app.observability.metrics import MetricsRegistry
+from as_app.observability.tracing import TraceRecorder
 from as_app.routing.rules import RuleSetStore
-from as_app.sip_adapter import cancel_transaction_timers
 
 __all__ = ["AsStack", "main"]
 
@@ -94,35 +93,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _build_sip_logger(settings: AsSettings, sip_logger: Any | None = None) -> Any:
-    """Build the sippy SIP message logger for the process.
+class AsStack(BaseAsStack[AsSettings]):
+    """The sippy signalling stack of the number-translation AS process.
 
-    The structured application log never carries payloads. This is the separate SIP
-    message channel, and it is switched by ``LOG_PAYLOADS`` (``AGENT.md`` section 9):
-    when payload logging is off, sippy's message log is suppressed instead of printed.
-
-    Args:
-        settings: The loaded configuration.
-        sip_logger: An explicit logger, used by the capture tooling; ``None`` builds the
-            default one.
-
-    Returns:
-        An object with the ``write()`` interface sippy expects.
-    """
-    if sip_logger is not None:
-        return sip_logger
-    logger = SipLogger("as")
-    if not settings.log_payloads:
-        logger.write = logger.donoting
-    return logger
-
-
-class AsStack:
-    """The sippy signalling stack of the AS process.
-
-    One instance owns the transaction manager, the trunk call map and the internal API
-    server. It can run the blocking sippy loop (:meth:`run`) or be driven step by step,
-    which is how the integration and e2e tests use it.
+    The sippy process skeleton — the transaction manager, the trunk call map, the internal
+    API server and the graceful shutdown of the loop — is inherited from
+    :class:`as_platform.main.BaseAsStack`; this subclass supplies the number-translation
+    identity and the rule set the call controller needs (ADR-0009 decision 2). It can run
+    the blocking sippy loop or be driven step by step, which is how the integration and e2e
+    tests use it.
 
     Attributes:
         settings: The loaded configuration.
@@ -134,6 +113,11 @@ class AsStack:
         metrics: Counter registry.
         tracer: Per-Call-ID trace recorder.
     """
+
+    sip_user_agent_name = SIP_USER_AGENT_NAME
+    sip_logger_name = "as"
+    shutdown_poll_seconds = SHUTDOWN_POLL_SECONDS
+    reload_poll_seconds = RULE_RELOAD_POLL_SECONDS
 
     def __init__(
         self,
@@ -153,141 +137,57 @@ class AsStack:
             tracer: Trace recorder; the process-wide one is used when omitted.
             sip_logger: Explicit sippy SIP message logger, used by the capture tooling.
         """
-        self.settings = settings
         self.rule_set_store = rule_set_store or RuleSetStore(settings.rules_file)
-        self.metrics = metrics or get_metrics_registry()
-        self.tracer = tracer or get_trace_recorder()
-        self.internal_api: InternalApiServer | None = None
-        self._sip_logger = _build_sip_logger(settings, sip_logger)
-        self._shutdown_timer: Any = None
-        self._reload_timer: Any = None
-        self.transaction_manager: Any = None
-        self.global_config: dict[str, Any] = {}
-        self.call_map: TrunkCallMap | None = None
-
-    def start(self) -> None:
-        """Bind the trunk socket, the transaction manager and the internal API.
-
-        Raises:
-            AsError: Propagated from sippy when the signalling port cannot be bound.
-        """
-        settings = self.settings
-        SipConf.my_uaname = SIP_USER_AGENT_NAME
-        SipConf.my_address = settings.sip_listen_address
-        SipConf.my_port = settings.sip_listen_port
-        self.global_config = {
-            "nh_addr": (settings.sbc_peer_address, settings.sbc_peer_port),
-            "_sip_address": settings.sip_listen_address,
-            "_sip_port": settings.sip_listen_port,
-            "_sip_uaname": SIP_USER_AGENT_NAME,
-            "_sip_logger": self._sip_logger,
-        }
-        self.call_map = TrunkCallMap(
-            self.global_config,
-            self.rule_set_store,
+        super().__init__(
+            settings,
+            transport=UdpTransport(settings.sip_listen_address, settings.sip_listen_port),
+            peer_address=settings.sbc_peer_address,
+            peer_port=settings.sbc_peer_port,
             allowed_peers=tuple(settings.allowed_peers),
+            api_address=settings.internal_api_address,
+            api_port=settings.internal_api_port,
+            metrics=metrics,
+            tracer=tracer,
+            sip_logger=sip_logger,
+        )
+
+    def _create_call_map(self, global_config: dict[str, Any]) -> TrunkCallMap:
+        """Create the number-translation trunk call map.
+
+        Args:
+            global_config: sippy global configuration; ``nh_addr`` carries the next hop.
+
+        Returns:
+            The trunk call map wired to this AS's rule set.
+        """
+        return TrunkCallMap(
+            global_config,
+            self.rule_set_store,
+            allowed_peers=tuple(self.settings.allowed_peers),
             metrics=self.metrics,
             tracer=self.tracer,
         )
-        self.transaction_manager = SipTransactionManager(
-            self.global_config, self.call_map.recv_request
-        )
-        self.global_config["_sip_tm"] = self.transaction_manager
-        log_event(
-            _LOGGER,
-            logging.INFO,
-            "signalling stack bound",
-            direction=LogDirection.INTERNAL,
-            listen=f"{settings.sip_listen_address}:{settings.sip_listen_port}",
-            next_hop=f"{settings.sbc_peer_address}:{settings.sbc_peer_port}",
-            allowed_peers=",".join(settings.allowed_peers),
-        )
 
-    def start_internal_api(self) -> InternalApiServer:
-        """Start the health and counters endpoint on its own thread.
+    def _create_internal_api_server(self, address: str, port: int) -> InternalApiServer:
+        """Create the number-translation internal API server.
+
+        Args:
+            address: Local address the server binds.
+            port: Local TCP port the server binds.
 
         Returns:
-            The running internal API server.
+            The internal API server bound to this AS's rule set.
         """
-        server = InternalApiServer(
-            self.settings.internal_api_address,
-            self.settings.internal_api_port,
+        return InternalApiServer(
+            address,
+            port,
             version=__version__,
             rule_set_store=self.rule_set_store,
             metrics=self.metrics,
             tracer=self.tracer,
         )
-        server.start()
-        self.internal_api = server
-        log_event(
-            _LOGGER,
-            logging.INFO,
-            "internal api listening",
-            direction=LogDirection.INTERNAL,
-            address=f"{self.settings.internal_api_address}:{self.settings.internal_api_port}",
-        )
-        return server
 
-    def run(self, shutdown: ShutdownController) -> None:
-        """Run the blocking sippy event loop until a shutdown is requested.
-
-        Signal handlers only set the flag; the timer below is owned by the loop, which is
-        the only place allowed to stop it (ADR-0002, ``AGENT.md`` section 6). A second
-        loop-owned timer polls the rules file for hot reload (ADR-0004): the reload is
-        pull-based because the sippy thread must not be blocked by file I/O.
-
-        Args:
-            shutdown: Shutdown state written by the signal handlers.
-        """
-        self._shutdown_timer = Timeout(self._poll_shutdown, SHUTDOWN_POLL_SECONDS, -1, shutdown)
-        self._reload_timer = Timeout(self._poll_rule_reload, RULE_RELOAD_POLL_SECONDS, -1)
-        log_event(
-            _LOGGER,
-            logging.INFO,
-            "sippy event loop running",
-            direction=LogDirection.INTERNAL,
-            rules_file=str(self.settings.rules_file),
-            reload_poll_seconds=str(RULE_RELOAD_POLL_SECONDS),
-        )
-        ED2.loop()
-
-    def stop(self) -> None:
-        """Release the trunk socket, the loop timers and the internal API port.
-
-        Everything the stack armed has to be cancelled before sippy's own
-        :meth:`SipTransactionManager.shutdown` runs: that call only cancels its own
-        cache-purge timer and releases the sockets, so the loop-owned timers of calls
-        that are still in flight would survive it and fire into a torn-down stack. See
-        :func:`as_app.sip_adapter.cancel_transaction_timers` and the gap row "Closing a
-        transaction manager mid-retransmission" in ``docs/production-gaps.md``.
-        """
-        if self._shutdown_timer is not None:
-            self._shutdown_timer.cancel()
-            self._shutdown_timer = None
-        if self._reload_timer is not None:
-            self._reload_timer.cancel()
-            self._reload_timer = None
-        if self.call_map is not None:
-            self.call_map.dispose()
-        if self.transaction_manager is not None:
-            cancel_transaction_timers(self.transaction_manager)
-            self.transaction_manager.shutdown()
-            self.transaction_manager = None
-        if self.internal_api is not None:
-            self.internal_api.stop()
-            self.internal_api = None
-
-    @staticmethod
-    def _poll_shutdown(shutdown: ShutdownController) -> None:
-        """Stop the sippy loop when a shutdown has been requested.
-
-        Args:
-            shutdown: Shutdown state written by the signal handlers.
-        """
-        if shutdown.requested:
-            ED2.breakLoop()
-
-    def _poll_rule_reload(self) -> None:
+    def _poll_reload(self) -> None:
         """Reload the rule set when the file changed on disk (ADR-0004).
 
         Reload is fail-safe: a broken edit keeps the previous rule set active and logs
@@ -316,6 +216,14 @@ class AsStack:
                 rules_file=str(self.settings.rules_file),
                 **error.as_log_fields(),
             )
+
+    def _reload_log_fields(self) -> dict[str, str]:
+        """Return the reload-source log field for the event loop start line.
+
+        Returns:
+            The rules-file field naming the reloaded file.
+        """
+        return {"rules_file": str(self.settings.rules_file)}
 
 
 def main(argv: list[str] | None = None) -> int:

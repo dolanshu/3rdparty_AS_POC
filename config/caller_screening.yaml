@@ -1,0 +1,65 @@
+# Caller screening data for the anti-fraud AS (AGENT.md section 4.6: real-looking data,
+# not a unit-test fixture).
+#
+# This file is data, not code (ADR-0004 pattern): it is validated on load and reloaded when
+# it changes. The console shows it read-only; it never edits it.
+#
+# Verdict order is allow list, then block list, then the call-rate window, then reputation.
+# The first signal that fires decides. A caller is rejected above `window.max_calls` calls
+# inside `window.seconds`, or below `reputation.reject_below`; a rejected call subtracts
+# `reputation.reject_penalty`, which then decays back towards `default_score` with the
+# configured half-life. An entry may carry a `number` (exact) or a `prefix`, never both.
+#
+# Nothing here holds a peer address: the next hop is FRAUD_SBC_PEER_* in the environment, so
+# there is no second copy of an address to drift from.
+
+version: 1
+name: sample-office-screening
+description: >-
+  Caller screening for the Shanghai office: reported robocallers, the premium-rate ranges
+  the office blocks by policy, the exemptions that must always be delivered, and the window
+  and reputation parameters behind the automated verdict.
+
+window:
+  # Five calls inside a minute from one calling party is normal for a switchboard and
+  # abnormal for a subscriber line, so that is where the window starts.
+  seconds: 60
+  max_calls: 5
+
+reputation:
+  # A rejected call subtracts 40 points; with a 300 s half-life the caller is back inside
+  # the threshold roughly ten minutes later unless it keeps calling.
+  half_life_seconds: 300
+  default_score: 100.0
+  reject_below: 30.0
+  reject_penalty: 40.0
+  max_tracked_callers: 5000
+
+block_list:
+  - number: "+8613400000001"
+    reason: reported robocaller, 41 complaints this week
+    description: Reported by three of the office sites
+  - number: "+8613400000002"
+    reason: debt-collection scam, spoofed CLI
+    description: Same campaign as the entry above, second handset
+  - number: "+8621500000009"
+    reason: recorded advertising, ignores opt-out
+    description: Persisted after two written requests
+  - prefix: "+86168"
+    reason: premium-rate information services blocked by office policy
+    description: Matches the premium-rate range the routing rules block as well
+  - prefix: "+86169"
+    reason: premium-rate information services blocked by office policy
+  - prefix: "0044"
+    reason: international revenue share from an unallocated range
+    description: Unallocated UK range abused for revenue share
+  - prefix: "+882"
+    reason: international networks this office does not dial
+
+allow_list:
+  # An operator exemption always wins, including over the window and the reputation.
+  - number: "+86216180000"
+    reason: office switchboard, every internal extension dials out from here
+  - prefix: "+86138001380"
+    reason: field engineering fleet, call bursts are expected during incidents
+    description: About 400 handsets share this prefix

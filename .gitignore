@@ -25,6 +25,9 @@ htmlcov/
 captures/
 artifacts/
 
+# Local scratch directory (never committed)
+tmp/
+
 # Generated sample captures (regenerate with `make capture`)
 docs/specs/message-samples/*.txt
 
@@ -34,8 +37,14 @@ docs/specs/message-samples/*.txt
 *.swp
 .DS_Store
 
+# docs_cn
+docs_cn/
+
 # Agent team session state (per-run, machine-local)
 .codebuddy/teams/
+
+# TRAE workspace artefacts (machine-local plans, session state)
+.trae/
 
 # Office temporary lock files
 ~$*

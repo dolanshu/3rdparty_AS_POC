@@ -70,6 +70,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 </style></head><body>
 <div class="sb" id="sb">
 <div class="si"><span class="dot" id="aDot"></span><span class="sv" id="aSt">connecting</span></div>
+<div class="si"><span class="sl">instance</span><span class="sv" id="aInst">-</span></div>
 <div class="si"><span class="sl">ver</span><span class="sv" id="aVer">-</span></div>
 <div class="si"><span class="sl">uptime</span><span class="sv" id="aUp">-</span></div>
 <div class="si"><span class="sl">calls</span><span class="sv" id="aCal">0</span></div>
@@ -80,6 +81,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 <nav class="nav" id="nav">
 <button data-v="call-trace" class="act">Call Trace</button>
 <button data-v="rules">Rules</button>
+<button data-v="screening">Screening</button>
 <button data-v="configuration">Configuration</button>
 <button data-v="statistics">Statistics</button>
 <button data-v="about">About</button>
@@ -93,11 +95,17 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 <div class="st">Next Hops</div><div class="card"><table id="nhT"><thead><tr><th>Name</th><th>Address</th><th>Port</th><th>Pri</th><th>Description</th></tr></thead><tbody></tbody></table></div>
 <div class="st">Routing Rules</div><div class="card"><table id="rlT"><thead><tr><th>Rule ID</th><th>Pri</th><th>Enabled</th><th>Description</th><th>Match</th><th>Action</th></tr></thead><tbody></tbody></table></div>
 </div>
+<div class="vw" id="vw-screening">
+<div class="st">Caller Screening (anti-fraud AS)</div><div class="card" id="scrC"><div class="empty">loading...</div></div>
+<div class="st">Block List</div><div class="card"><table id="blT"><thead><tr><th>Entry</th><th>Number / prefix</th><th>Reason</th></tr></thead><tbody></tbody></table></div>
+<div class="st">Allow List</div><div class="card"><table id="alT"><thead><tr><th>Entry</th><th>Number / prefix</th><th>Reason</th></tr></thead><tbody></tbody></table></div>
+</div>
 <div class="vw" id="vw-configuration"><div class="st">AS Configuration</div><div class="card" id="cfgC"><div class="empty">loading...</div></div></div>
 <div class="vw" id="vw-statistics">
 <div class="sg" id="sg"></div>
 <div class="card" style="margin-top:12px"><div class="st">Calls by Disposition</div><div class="bc" id="dispC"></div></div>
 <div class="card"><div class="st">Rule Hits</div><div class="bc" id="rhC"></div></div>
+<div class="card"><div class="st">Verdicts and Screening Signals</div><div class="bc" id="vcC"></div></div>
 <div class="card"><div class="st">Errors by Code</div><table id="errT"><thead><tr><th>Code</th><th>Count</th></tr></thead><tbody></tbody></table></div>
 </div>
 <div class="vw about" id="vw-about"><div class="st">3rd-party Application Server POC</div>
@@ -107,16 +115,18 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 </div>
 </main></div>
 <script>
-"use strict";var A="__AS_API_URL__",W=A.replace(/^http/,"ws")+"/ws/events",cv="call-trace",tc=[],sel=null,rd=null,md=null,hd=null,ws=null,wr=null;
+"use strict";var A="__AS_API_URL__",W=A.replace(/^http/,"ws")+"/ws/events",cv="call-trace",tc=[],sel=null,rd=null,sd=null,md=null,hd=null,ws=null,wr=null;
 function E(i){return document.getElementById(i)}function C(n){n.innerHTML=""}function ft(s){try{return new Date(s).toLocaleTimeString()}catch(e){return s}}
 function esc(s){if(s===null||s===undefined)return"";return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
-async function fh(){try{var r=await fetch(A+"/healthz");hd=await r.json();E("aSt").textContent=hd.status;
+async function fh(){try{var r=await fetch(A+"/healthz");if(!r.ok)return;hd=await r.json();E("aSt").textContent=hd.status;
 E("aDot").className="dot "+(hd.status==="ok"?"ok":"er");E("aVer").textContent=hd.version||"-";
+E("aInst").textContent=hd.instance||"-";
+document.title=(hd.instance?hd.instance+" - ":"")+"3rd-party AS Console";
 E("aUp").textContent=Math.round(hd.uptime_seconds||0)+"s"}catch(e){E("aSt").textContent="unreachable";E("aDot").className="dot er"}}
-async function fm(){try{var r=await fetch(A+"/api/v1/metrics");md=await r.json();E("aCal").textContent=md.calls_total||0;
+async function fm(){try{var r=await fetch(A+"/api/v1/metrics");if(!r.ok)return;md=await r.json();E("aCal").textContent=md.calls_total||0;
 var p=Object.entries(md.peer_status||{}).map(function(x){return x[0]+":"+x[1]}).join(", ");E("aPeer").textContent=p||"-";
 if(cv==="statistics")rs()}catch(e){}}
-async function ftr(){try{var r=await fetch(A+"/api/v1/traces");var d=await r.json();tc=d.calls||[];rtl()}catch(e){}}
+async function ftr(){try{var r=await fetch(A+"/api/v1/traces");if(!r.ok)return;var d=await r.json();tc=d.calls||[];rtl()}catch(e){}}
 function rtl(){var f=(E("filt").value||"").toLowerCase(),l=E("tlist");C(l);
 var q=tc.filter(function(t){return!f||t.call_id.toLowerCase().indexOf(f)>=0});
 if(!q.length){l.innerHTML='<div class="empty">no calls</div>';return}
@@ -138,18 +148,22 @@ if(ha){r.onclick=function(){var dl=r.querySelector(".ea");if(!dl.innerHTML){Obje
 var dt=document.createElement("dt");dt.textContent=kv[0]+":";var dd=document.createElement("dd");
 dd.textContent=typeof kv[1]==="object"?JSON.stringify(kv[1]):String(kv[1]);dl.appendChild(dt);dl.appendChild(dd)})}
 dl.classList.toggle("vis")}}c.appendChild(r)})}
-function utopo(t){var b=E("topo");var ho=t.events&&t.events.some(function(e){return e.direction==="out"});
-var rv=t.events?t.events.find(function(e){return e.rule_id}):null;
+function utopo(t){var b=E("topo");var evs=t.events||[];
+var vv=evs.find(function(e){return e.attributes&&e.attributes.verdict});
+var v=vv?vv.attributes.verdict:null;var rv=evs.find(function(e){return e.rule_id});
+var ho=v?v==="allow":evs.some(function(e){return e.direction==="out"});
+var inst=(hd&&hd.instance)?hd.instance:"AS";
 var ac=ho?"var(--in)":"var(--mut)",lc=ho?"var(--acc)":"var(--bd)";
 var la=ho?' stroke-dasharray="4 2"><animate attributeName="stroke-dashoffset" from="0" to="-12" dur=".5s" repeatCount="indefinite"/></line>':"/>";
-b.innerHTML='<svg width="210" height="46" viewBox="0 0 210 46" xmlns="http://www.w3.org/2000/svg">'+
-'<rect x="2" y="11" width="56" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/><text x="30" y="27" text-anchor="middle" fill="var(--mut)" font-size="10">S-SBC</text>'+
-'<line x1="58" y1="23" x2="104" y2="23" stroke="'+lc+'" stroke-width="2"'+la+
-'<rect x="104" y="11" width="40" height="24" rx="4" fill="var(--p2)" stroke="'+ac+'"/><text x="124" y="27" text-anchor="middle" fill="'+ac+'" font-size="10">AS</text>'+
-'<line x1="144" y1="23" x2="188" y2="23" stroke="'+lc+'" stroke-width="2"'+la+
-'<rect x="188" y="11" width="20" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/><text x="196" y="27" text-anchor="middle" fill="var(--mut)" font-size="8">NH</text>'+
-(rv?'<text x="106" y="9" fill="var(--rule)" font-size="9">'+esc(rv.rule_id)+"</text>":"")+"</svg>"}
-async function fr(){try{var r=await fetch(A+"/api/v1/rules");rd=await r.json();
+var tag=v?esc(v):(rv?esc(rv.rule_id):"");
+b.innerHTML='<svg width="300" height="50" viewBox="0 0 300 50" xmlns="http://www.w3.org/2000/svg"><title>'+esc(inst)+'</title>'+
+'<rect x="2" y="14" width="58" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/><text x="31" y="30" text-anchor="middle" fill="var(--mut)" font-size="10">S-SBC</text>'+
+'<line x1="60" y1="26" x2="104" y2="26" stroke="'+lc+'" stroke-width="2"'+la+
+'<rect x="104" y="14" width="110" height="24" rx="4" fill="var(--p2)" stroke="'+ac+'"/><text x="159" y="30" text-anchor="middle" fill="'+ac+'" font-size="9">'+esc(inst)+"</text>"+
+'<line x1="214" y1="26" x2="252" y2="26" stroke="'+lc+'" stroke-width="2"'+la+
+'<rect x="252" y="14" width="46" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/><text x="275" y="30" text-anchor="middle" fill="var(--mut)" font-size="9">next hop</text>'+
+(tag?'<text x="106" y="11" fill="var(--rule)" font-size="9">'+tag+"</text>":"")+"</svg>"}
+async function fr(){try{var r=await fetch(A+"/api/v1/rules");if(!r.ok)return;rd=await r.json();
 if(cv==="rules")rr();if(cv==="configuration")rcfg()}catch(e){}}
 function rr(){if(!rd)return;var h=E("nhT").querySelector("tbody");C(h);
 (rd.next_hops||[]).forEach(function(x){h.innerHTML+="<tr><td>"+esc(x.name)+"</td><td>"+esc(x.address)+"</td><td>"+x.port+
@@ -164,16 +178,33 @@ if(a.kind==="route"){as+=" hops:"+(a.next_hops||[]).join(",");if(a.translate){as
 (a.translate.prepend?"+"+a.translate.prepend:"")}}else{as+=" "+a.status}
 t.innerHTML+="<tr><td>"+esc(r.rule_id)+"</td><td>"+r.priority+'</td><td><span class="tag '+(r.enabled?"en":"di")+'">'+
 (r.enabled?"on":"off")+"</span></td><td>"+esc(r.description)+"</td><td>"+esc(ms.join(" | "))+"</td><td>"+as+"</td></tr>"})}
-function rcfg(){var c=E("cfgC");if(!rd||!hd){c.innerHTML='<div class="empty">loading...</div>';return}C(c);
-[[ "AS version",hd.version||"-"],["AS status",hd.status||"-"],["Uptime (s)",Math.round(hd.uptime_seconds||0)],
+async function fs(){try{var r=await fetch(A+"/api/v1/screening");if(!r.ok)return;sd=await r.json();
+if(cv==="screening")rsd();if(cv==="configuration")rcfg()}catch(e){}}
+function rl(id,rows){var t=E(id);if(!t)return;var b=t.querySelector("tbody");C(b);
+if(!rows.length){b.innerHTML='<tr><td colspan="3" class="empty">no entries</td></tr>';return}
+rows.forEach(function(x){b.innerHTML+="<tr><td>"+esc(x.entry_id)+"</td><td>"+esc(x.value)+"</td><td>"+esc(x.reason)+"</td></tr>"})}
+function rsd(){if(!sd)return;var c=E("scrC");if(!c)return;C(c);var w=sd.window||{},rp=sd.reputation||{};
+[["data set",sd.name],["source",sd.source],["window (s)",w.seconds],["max calls / window",w.max_calls],
+["reputation default",rp.default_score],["reject below",rp.reject_below],["reject penalty",rp.reject_penalty],
+["half-life (s)",rp.half_life_seconds]
+].forEach(function(r){c.innerHTML+='<div class="cr"><span class="ck">'+esc(r[0])+'</span><span class="cv">'+esc(String(r[1]))+"</span></div>"});
+rl("blT",sd.block_list||[]);rl("alT",sd.allow_list||[])}
+function rcfg(){var c=E("cfgC");if(!c)return;if(!hd){c.innerHTML='<div class="empty">loading...</div>';return}C(c);
+var rows=null;
+if(rd){rows=[["AS version",hd.version||"-"],["AS status",hd.status||"-"],["Uptime (s)",Math.round(hd.uptime_seconds||0)],
 ["Rule set loaded",hd.rule_set_loaded],["Rule set name",rd.name||"-"],["Rule set source",rd.source||"-"],
-["Rule set version",rd.version||"-"],["Rules (total)",(rd.rules||[]).length],["Next hops (total)",(rd.next_hops||[]).length]
-].forEach(function(r){c.innerHTML+='<div class="cr"><span class="ck">'+esc(r[0])+'</span><span class="cv">'+esc(String(r[1]))+"</span></div>"})}
+["Rule set version",rd.version||"-"],["Rules (total)",(rd.rules||[]).length],["Next hops (total)",(rd.next_hops||[]).length]]}
+else if(sd){rows=[["AS version",hd.version||"-"],["AS status",hd.status||"-"],["Uptime (s)",Math.round(hd.uptime_seconds||0)],
+["Screening data loaded",hd.screening_data_loaded],["Data set",sd.name||"-"],["Data source",sd.source||"-"],
+["Block list (total)",(sd.block_list||[]).length],["Allow list (total)",(sd.allow_list||[]).length],
+["Window (s)",(sd.window||{}).seconds],["Max calls / window",(sd.window||{}).max_calls]]}
+if(!rows){c.innerHTML='<div class="empty">no configuration available</div>';return}
+rows.forEach(function(r){c.innerHTML+='<div class="cr"><span class="ck">'+esc(r[0])+'</span><span class="cv">'+esc(String(r[1]))+"</span></div>"})}
 function rs(){if(!md)return;var g=E("sg");C(g);var cs=[["Total calls",md.calls_total||0]];
 Object.entries(md.calls_by_disposition||{}).forEach(function(d){cs.push([d[0],d[1]])});
 cs.forEach(function(c){g.innerHTML+='<div class="sc"><div class="n">'+c[1]+'</div><div class="l">'+esc(c[0])+"</div></div>"});
 rbc("dispC",md.calls_by_disposition||{},{completed:"g",failed:"r",rejected:"o",no_match:"gr",abandoned:"gr"});
-rbc("rhC",md.rule_hits||{});var t=E("errT").querySelector("tbody");C(t);
+rbc("rhC",md.rule_hits||{});rbc("vcC",md.counters||{});var t=E("errT").querySelector("tbody");C(t);
 var es=Object.entries(md.errors_by_code||{});if(!es.length){t.innerHTML='<tr><td colspan="2" class="empty">no errors</td></tr>'}
 else{es.forEach(function(e){t.innerHTML+="<tr><td>"+esc(e[0])+"</td><td>"+e[1]+"</td></tr>"})}}
 function rbc(id,d,cl){var c=E(id);C(c);var es=Object.entries(d);if(!es.length){c.innerHTML='<div class="empty">no data</div>';return}
@@ -182,7 +213,7 @@ es.forEach(function(e){var p=mx>0?Math.round(e[1]/mx*100):0;var cls=(cl&&cl[e[0]
 c.innerHTML+='<div class="br"><span class="bl">'+esc(e[0])+'</span><div class="bt"><div class="bf '+cls+'" style="width:'+p+'%"></div></div><span class="bv">'+e[1]+"</span></div>"})}
 function sv(v){cv=v;document.querySelectorAll(".nav button").forEach(function(b){b.classList.toggle("act",b.dataset.v===v)});
 document.querySelectorAll(".vw").forEach(function(w){w.classList.remove("act")});E("vw-"+v).classList.add("act");
-if(v==="rules"){if(!rd)fr();else rr()}if(v==="configuration"){if(!rd)fr();else rcfg()}if(v==="statistics")rs();if(v==="call-trace")rtl()}
+if(v==="rules"){if(!rd)fr();else rr()}if(v==="screening"){if(!sd)fs();else rsd()}if(v==="configuration"){if(!rd)fr();if(!sd)fs();if(rd||sd)rcfg()}if(v==="statistics")rs();if(v==="call-trace")rtl()}
 function cws(){try{ws=new WebSocket(W)}catch(e){ewso();return}
 ws.onopen=function(){E("wsSt").textContent="live";E("wsSt").className="si ws live"};
 ws.onmessage=function(m){try{var d=JSON.parse(m.data);if(d.type==="traces"&&d.traces){d.traces.forEach(function(t){
@@ -191,7 +222,7 @@ if(cv==="call-trace")rtl();if(sel){var t=tc.find(function(c){return c.call_id===
 ws.onclose=function(){ewso()};ws.onerror=function(){ws.close()}}
 function ewso(){E("wsSt").textContent="offline";E("wsSt").className="si ws down";if(!wr){wr=setTimeout(function(){wr=null;cws()},3000)}}
 E("apiUrl").textContent=A;document.querySelectorAll(".nav button").forEach(function(b){b.onclick=function(){sv(b.dataset.v)}});
-E("filt").oninput=rtl;fh();fm();ftr();fr();cws();setInterval(fh,3000);setInterval(fm,3000);setInterval(ftr,5000);
+E("filt").oninput=rtl;fh();fm();ftr();fr();fs();cws();setInterval(fh,3000);setInterval(fm,3000);setInterval(ftr,5000);setInterval(fs,5000);
 </script></body></html>
 """
 

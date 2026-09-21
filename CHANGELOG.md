@@ -8,6 +8,19 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+### Added
+
+- **P11 platform verification** — the two pluggable seams now ship two implementations each,
+  the capacity harness is a first-class library module, and `NextHop.transport` is widened
+  to `Literal["udp", "tls"]` (ADR-0010, REQ-F-034…REQ-F-037, REQ-NF-022…REQ-NF-026).
+  Implementation lives in the sibling library repository `../as_platform` (bumped to `0.2.0`),
+  consumed unchanged by this repository: the widened `NextHop.transport` field is
+  backwards-compatible (every `"udp"` value keeps working), `UdpTransport` and
+  `InMemoryStateStore` supply no-op `start()`/`stop()` methods for the Protocol lifecycle
+  that P11 added, so zero consumer code change was required. Acceptance items
+  `ACC-P11-001 … ACC-P11-006` in `docs/acceptance/criteria.md`; evidence in
+  `docs/acceptance/report.md`.
+
 ### Fixed
 
 - The outbound leg now carries its own Call-ID instead of reusing the trunk one verbatim.
@@ -20,6 +33,206 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   and every failover hop reuses the same value. `CallController.call_id` stays the trunk
   Call-ID for the log/trace correlation key. The message samples and the affected acceptance
   items (ACC-M1-002 / ACC-M1-005 / ACC-M2-005) were re-tested.
+
+## [0.8.0] - 2026-09-20 — P10 platform extraction (Phase 2)
+
+### Added
+
+- The **`as-platform` library**, a new repository checked out beside this one at
+  `../as_platform` (ADR-0009 decision 1). It carries the skeleton both AS instances share: the
+  `observability` package (structured logging, counters and the per-Call-ID trace), the
+  `errors` mechanism (the memberless `ErrorCode` base, `SIP_PHRASES`, `sip_status_for`,
+  `AsError` and the skeleton `AS-CFG-* / AS-PEER-* / AS-INT-*` family), the `sip_adapter`
+  boundary, the `hop` value object, the `bootstrap` plumbing, the `version` chain, the
+  `call_controller` shell (`BaseCallController`, `PolicyDecision`, `BaseCallMap`), the
+  `internal_api` shell and the `main` process shell (`BaseAsStack`).
+- The library's two **pluggable seams, one implementation each**: `Transport` / `UdpTransport`
+  and `StateStore` / `InMemoryStateStore` (`REQ-NF-020`); the second implementation of each is
+  P11's.
+- The library's **own test suite and its own gate** (`ruff` format and lint, `mypy`, `pytest`)
+  and the three **library-standard documents** — API reference, integration guide, compatibility
+  matrix (`REQ-NF-019`, `REQ-NF-021`). The library is a standalone distribution and is **not** a
+  uv workspace monorepo.
+
+### Changed
+
+- This repository becomes the library's **reference implementation**: `src/as_app/` and
+  `src/anti_fraud_as/` are now **users** of `as-platform` (`REQ-F-029`), and the library imports
+  neither use case — the one-way invariant `src/as_app/**` does not import `anti_fraud_as`
+  survives, and the library imports neither (`REQ-F-030`).
+- The library is consumed through a **`path` source** in `pyproject.toml`
+  (`path = "../as_platform"`, `editable = true`, ADR-0009 decision 6), so the `AGENT.md` §10
+  guarantee *"clone → `uv sync` → `make demo`"* becomes *"clone **both** repositories side by
+  side"* (`REQ-F-032`) — an explicit recorded exception, not a silent weakening.
+- The extraction is **staged** (`REQ-F-033`; the §14 rule 3 waiver is recorded in
+  `docs/phase2-plan.md` §8 item 2): the skeleton moved in steps that each left this repository
+  building, linting and passing its three layers. It is a **pure refactor** with no wire-visible
+  change — the same SIP signalling, the same `AS-*` codes and the same per-instance Call-ID keyed
+  trace (`REQ-F-031`).
+
+### Fixed
+
+- **The routing engine's `AsError` no longer escapes to a silent trunk.** The extraction dropped
+  the guard that used to wrap the policy decision, so an `AsError` raised by the routing engine
+  left `decide()` without a final response on two reachable paths — `AS-ROUTE-004` / `500`
+  ("translation produced an empty number", reachable from a schema-valid rules file whose
+  `strip_prefix` consumes the number) and `AS-ROUTE-003` / `480` (an unresolvable hop named by a
+  matched rule). The number-translation `decide()` now turns the engine's raises into a reject
+  `PolicyDecision` (the application owns that conversion — ADR-0009 decision 4), restoring the
+  **byte-for-byte pre-P10 trunk answer**. The application fix and its regression tests are
+  `b824f11` (`src/as_app/call_controller.py`, `tests/integration/test_translation.py`); the
+  library's abstract `decide()` docstring states the contract truthfully in `aaa453e`
+  (`src/as_platform/call_controller.py`).
+
+### Verified
+
+- The P10 acceptance run: **`ACC-P10-001 … ACC-P10-008` accepted** with evidence in
+  `docs/acceptance/report.md`. Local gate on this tree (item close): `ruff format --check .` →
+  96 files, `ruff check .` → clean, `mypy` → no issues in 29 source files, `pytest` → **210 unit
+  / 36 integration / 9 e2e**; `make demo` exits `0`; `tools/path_dependency_probe.py` exits `0`
+  with `cases measured : 8`, `expectations : all held`. Library repository: `make lint` → 33
+  files, clean, no issues in 15 source files; `pytest` → **84 passed**.
+- **No CI run exists for any P10 commit, in either repository.** Kind ③ is not producible: the
+  library has **no remote and has never been pushed**, so its workflow is an unexecuted
+  definition, and this repository's five CI jobs each clone `../as_platform` before
+  `uv sync --frozen`, a clone that cannot succeed while the library exists only on a filesystem
+  (`docs/production-gaps.md` :134 and :131). The gate above is a **local** run, not a CI result
+  (`AGENT.md` §13).
+
+### Notes
+
+- Version node: `0.8.0` — the Phase 2 precedent is `0.6.0` for P8 and `0.7.0` for P9 (P9.5, a
+  read-only probe, opened no node). P10 produces a new repository and a library two AS instances
+  share, a new capability. `VERSION` / `pyproject.toml` / `uv.lock` were updated together and the
+  editable install re-synced, so `as_app.__version__` reports `0.8.0`.
+- Worked on `feat/platform-extraction`, merged into `phase2` as the final step of the item close
+  (`docs/phase2-plan.md` §4: an item branch merges into `phase2` when the item's own definition
+  of done is met). **Not merged into `main` and not tagged** (`AGENT.md` §13/§15); the library
+  repository keeps its own `VERSION` at `0.1.0` with no new node.
+
+## [0.7.0] - 2026-09-19 — P9 chained AS topology (Phase 2)
+
+### Added
+
+- `make demo-chained`, backed by `tools/demo_chained_call.py`: it runs **both AS instances in
+  series** (`SBC -> AS-1 anti-fraud -> AS-2 number translation -> core`) on dynamically
+  allocated ports and narrates what every hop saw — an allowed call through both B2BUAs, a
+  `608` reject short-circuited before AS-2, the **three distinct** per-leg dialog `Call-ID`s
+  and the preserved `P-Charging-Vector` ICID. It is a **guard**, not a printout: it asserts
+  those properties (including the short-circuit as an absence) and exits non-zero on any
+  mismatch, and it writes nothing. `AGENT.md` section 10, `README.md`, `docs/README.md` and
+  `tools/README.md` carry the new command and tool (`docs/architecture/lld.md` section 10.5).
+
+### Fixed
+
+- The **anti-fraud AS** had its **own copy of the same defect** on its outbound leg:
+  `FraudCallController._originate_allowed` built `CCEventTry(event.getData())`, keeping the
+  trunk Call-ID in element `[0]`, so the inter-AS leg reused the S-CSCF's identity. It now
+  derives a fresh `SipCallId` with the shared `as_app.sip_adapter.outbound_call_id()`, exactly
+  as the number-translation controller does, and rebuilds the event with every other element
+  (the called number included) unchanged. The file exists only on `phase2`, which is why the
+  Phase 1 fix could not reach it; the fix is what turns `tools/chained_as_probe.py` green
+  (`Call-ID per leg: True`, `distinct Call-IDs: 3`). `FraudCallController.call_id` stays the
+  trunk Call-ID. The integration and e2e assertions that encoded the old behaviour were
+  updated to assert the derived value and its difference from the trunk one.
+
+### Verified
+
+- The P9 acceptance run: **`ACC-P9-001 … ACC-P9-005` accepted** with evidence in
+  `docs/acceptance/report.md`. Local gate: `ruff format --check .` → 91 files, `ruff check .`
+  → clean, `mypy` → no issues in 28 source files, `pytest` → **203 unit / 34 integration /
+  9 e2e**. `tools/chained_as_probe.py` exits `0` with `distinct Call-IDs: 3` /
+  `Call-ID per leg: True` / `ICID preserved: True`, and `make demo-chained` exits `0` with its
+  five `OK` verdict lines (`allowed call completed through two B2BUAs`, `608 reject
+  short-circuited before AS-2`, `Call-ID regenerated on every leg`, `three distinct Call-IDs
+  across the chain`, `ICID preserved across every leg`).
+- **No CI run exists for these commits**: `.github/workflows/ci.yml` triggers on `push` /
+  `pull_request` and both target `main`, and nothing here is pushed — the local gate is not a
+  CI result (`AGENT.md` section 13).
+
+### Notes
+
+- Version node: `0.7.0` — a new user-visible capability (a chained topology and its
+  first-class demo). The Phase 1 precedent is `0.5.0` for M4; P8a, a defect fix, stayed
+  `0.5.1`. The `VERSION` / `pyproject.toml` / `uv.lock` trio was updated together and the
+  editable install re-synced, so `as_app.__version__` reports `0.7.0` and the baseline tests
+  hold.
+- Worked on `phase2` (P9 has no branch of its own — `docs/phase2-plan.md` §4). Tagging is the
+  maintainer's step; agents do not tag.
+
+## [0.6.0] - 2026-09-19 — P8 anti-fraud AS (Phase 2)
+
+### Added
+
+- A **second, independently runnable AS** — the anti-fraud / unwanted-call AS
+  (`python -m anti_fraud_as.main`; ADR-0007 and `docs/phase2-plan.md` §3 P8). It screens the
+  **calling** party of a trunk INVITE and returns a verdict: a caller the operator's screening
+  data allows is relayed as a B2BUA with the Request-URI, the SDP body and the pass-through
+  header set unchanged and **no header added**; a caller on the block list is answered
+  **`608 Rejected`** (RFC 8688) from the UAS side, with **no second leg**, no media and no
+  `Call-Info`. It has its own SIP listen port (default `5062`), its own declarative screening
+  file `config/caller_screening.yaml`, its own internal API / console feed, its own startup
+  self-check and its own stop path. It reuses the use-case-agnostic modules of `as_app` by
+  direct import — no framework, no registry (ADR-0007 decision 9).
+- The **verdict** is a pure function (`anti_fraud_as/screening.py`): inputs are caller
+  reputation (decayed over time), a per-caller call-rate window and block/allow lists; the
+  signal order is allow list → block list → rate window → reputation and the deciding signal
+  is named. Cross-call state lives in a **process-level, in-memory** store
+  (`anti_fraud_as/caller_state.py`) with an injected clock, never in the per-call controller
+  (D9). A restart loses it — a registered POC gap, closed in P11 by the pluggable state store.
+- New `AS-FRAUD-001 … AS-FRAUD-006` codes in the shared error model
+  (`src/as_app/errors.py`): the three rejection reasons map to `608`, the screening-data
+  failures to `500`, and `SIP_PHRASES[608] = "Rejected"` is what puts the reason phrase on the
+  wire (ADR-0007). The verdict, its signals/score and the matched list entry are observable
+  through counters, the Call-ID keyed trace and the read-only internal-API payloads.
+- The mock S-SBC's UAC declares `Feature-Caps: *;+sip.608` in its INVITE, so the
+  signalling-only AS may answer `608` without owing an announcement (RFC 8688 §3.4).
+- `make fraud` (run the anti-fraud AS on its own ports) and `make demo-fraud` (two calls: one
+  allowed and relayed, one rejected with `608`); `make probe-608` runs the design probe.
+- `tools/demo_fraud_call.py` (the narrated two-call screening demo) and
+  `tools/anti_fraud_probe.py` (the design probe that verified sippy emits `608 Rejected`
+  through `CCEventFail((status, phrase, None))` — a design instrument, not a test, not in CI).
+- Test layers: `tests/e2e/test_fraud_call_flows.py`,
+  `tests/integration/test_fraud_screening_path.py`, and the unit files
+  `test_caller_state.py`, `test_screening_engine.py`, `test_screening_data.py`,
+  `test_fraud_configuration.py`, `test_fraud_error_model.py`.
+
+### Fixed
+
+- `tools/capture_call.py` no longer fails when `--output-dir` is a **relative** path.
+  `Path.relative_to` raised `ValueError` when one side was relative and the other absolute, so
+  the ADR-0007 evidence command
+  `uv run python tools/capture_call.py --output-dir captures/probe` wrote its 14 samples and
+  then exited `1`. The printed path is now resolved first and falls back to itself outside the
+  repository, so both an absolute and a relative output directory exit `0`; `make capture`
+  (absolute default) is unchanged.
+- `tools/demo_fraud_call.py` no longer leaks a bare `call rejected by screening` line into its
+  transcript. The tool did not configure logging, so the reject path's `WARNING` record reached
+  `logging.lastResort`; it now configures the root logger at `ERROR`, so routine events stay off
+  the transcript while a real failure still prints.
+
+### Verified
+
+- The P8 acceptance run: **`ACC-P8-001 … ACC-P8-006` accepted** with evidence in
+  `docs/acceptance/report.md` — the verification commands with real output, Call-ID keyed
+  allow/reject log excerpts, the honest CI position, and the capture gap recorded rather than
+  filled. Local gate: `ruff format --check .` → 86 files, `ruff check .` → clean, `mypy` → no
+  issues in 28 source files, `pytest tests -q` → **237 passed**. `make demo` (the Phase 1 path,
+  unchanged) and `make demo-fraud` both exit `0`.
+- The `608` reject path over real UDP: the probe's `final status line: SIP/2.0 608 Rejected`
+  and `CCEventFail 608 'Rejected' reject path: OK`, and the integration test's assertion of the
+  full on-wire line `SIP/2.0 608 Rejected` with no `Call-Info` and no second-leg INVITE.
+- **No CI run exists for `phase2`**: `.github/workflows/ci.yml` triggers on `main` only, so the
+  run is recorded as the maintainer's required post-merge action, not as an observed result.
+
+### Notes
+
+- Version node: `0.6.0` — a new user-visible capability (a second AS use case). The Phase 1
+  precedent is `0.5.0` for M4; P8a, a defect fix, stayed `0.5.1`. The `VERSION` /
+  `pyproject.toml` / `uv.lock` trio was updated together and the editable install re-synced, so
+  `as_app.__version__` reports `0.6.0` and the baseline test holds.
+- Worked on `phase2` (P8 has no branch of its own — `docs/phase2-plan.md` §4). Tagging is the
+  maintainer's step; agents do not tag.
 
 ## [0.5.1] - 2026-09-18
 

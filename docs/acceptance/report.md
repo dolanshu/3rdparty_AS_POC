@@ -1981,6 +1981,374 @@ the same flow with narration.
   its own row in `docs/production-gaps.md` and as a follow-up in `docs/phase2-plan.md` §7
   item 7; deliberately left unfixed here (`AGENT.md` §14 rule 4).
 
+## Phase 2 — P8 anti-fraud AS (2026-09-19)
+
+Branch `phase2` (item **P8** in `docs/phase2-plan.md` §3; under the branch model of §4 P8 is
+worked directly on `phase2`). Acceptance items **ACC-P8-001 … ACC-P8-006** in
+`docs/acceptance/criteria.md`; their requirements are `REQ-F-016 … REQ-F-024` and
+`REQ-NF-011 … REQ-NF-015`. Design rationale is **ADR-0007**.
+
+What was verified: a **second, independently runnable** AS process that screens the **calling**
+party and returns a verdict — an allowed INVITE is relayed as a B2BUA unchanged, a rejected one
+is answered `608 Rejected` from the UAS side with **no second leg** and **no `Call-Info`**. The
+cross-call state (call-rate window, reputation decay, block/allow lists) is a process-level,
+in-memory store; the verdict itself is a pure function. Nothing in the number-translation AS's
+behaviour changed, and `make demo` still passes (below).
+
+Result: **accepted**, with the limitations recorded under *Accepted limitations and open items*.
+
+Environment of this run: Linux x86-64, loopback only; Python 3.10.12; sippy 2.4.2; `uv`
+0.12.15; repository `VERSION` = 0.5.1 at the time of the run.
+
+### 1. Command and output
+
+Every command below was run from the repository root on `phase2`; the outputs are pasted
+verbatim (ports and Call-IDs are ephemeral and vary per run).
+
+**The gate (`AGENT.md` §13: local, before the commit — not a CI result, see §3).**
+
+```text
+$ uv run ruff format --check .
+86 files already formatted
+$ uv run ruff check .
+All checks passed!
+$ uv run mypy
+Success: no issues found in 28 source files
+$ uv run pytest tests -q
+237 passed in 34.22s
+```
+
+**ACC-P8-001** — second process, own ports/file/feed, self-check, stop path, no new dependency:
+
+```text
+$ uv run python -m anti_fraud_as.main --self-check-only ; echo $?
+{"timestamp": "2026-09-19T16:27:19+0800", "level": "info", "module": "main", "call_id": "-",
+ "direction": "internal", "peer": "-", "event": "anti-fraud application server starting",
+ "version": "0.5.1", "listen": "127.0.0.1:5062", "next_hop": "127.0.0.1:15061"}
+{"timestamp": "2026-09-19T16:27:19+0800", "level": "info", "module": "main", "call_id": "-",
+ "direction": "internal", "peer": "-", "event": "startup self-check passed",
+ "screening_file": "config/caller_screening.yaml"}
+0
+
+$ uv run pytest tests/integration/test_fraud_screening_path.py tests/unit/test_fraud_configuration.py -q
+28 passed in 14.06s
+```
+
+**ACC-P8-002** — allow relay with nothing added, `608 Rejected` reject with no second leg:
+
+```text
+$ uv run pytest tests/e2e/test_fraud_call_flows.py tests/integration/test_fraud_screening_path.py -q
+15 passed in 14.80s
+```
+
+**ACC-P8-003** — verdict inputs, declarative data, `sip.608` declaration, no media:
+
+```text
+$ uv run pytest tests/unit/test_screening_engine.py tests/unit/test_screening_data.py tests/integration/test_fraud_screening_path.py -q
+58 passed in 14.19s
+```
+
+**ACC-P8-004** — pure verdict, process-level in-memory state, injected clock:
+
+```text
+$ uv run pytest tests/unit/test_caller_state.py tests/unit/test_screening_engine.py -q
+37 passed in 0.05s
+```
+
+**ACC-P8-005** — `AS-FRAUD-*` error model and observability surfaces:
+
+```text
+$ uv run pytest tests/unit/test_fraud_error_model.py -q
+18 passed in 0.27s
+```
+
+**ACC-P8-006** — the `608` reject path verified by running sippy over real UDP:
+
+```text
+$ uv run python tools/anti_fraud_probe.py ; echo $?
+# (before this block the tool echoes the INVITE and the responses through sippy's own
+#  SipLogger; that echo is omitted here because the same messages appear below)
+python      : 3.10.12
+sippy       : 2.4.2
+stack port  : 127.0.0.1:48458  (client port 47300)
+reject      : 608 Rejected  via CCEventFail((status, phrase, None))
+--- INVITE sent -------------------------------------------------
+INVITE sip:+8613800138000@127.0.0.1:48458;user=phone SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:47300;branch=z9hG4bK608probe0001;rport
+Max-Forwards: 70
+From: <sip:+86216180001@127.0.0.1>;tag=608probe-from-0001
+To: <sip:+8613800138000@127.0.0.1>
+Call-ID: 608probe-23172@example.invalid
+CSeq: 1 INVITE
+Contact: <sip:127.0.0.1:47300>
+Feature-Caps: *;+sip.608
+Content-Length: 0
+--- responses received -------------------------------------------
+[1] SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:47300;branch=z9hG4bK608probe0001;rport=47300
+From: <sip:+86216180001@127.0.0.1>;tag=608probe-from-0001
+To: <sip:+8613800138000@127.0.0.1>
+Call-ID: 608probe-23172@example.invalid
+CSeq: 1 INVITE
+Server: AS POC anti-fraud probe
+Content-Length: 0
+[2] SIP/2.0 608 Rejected
+Via: SIP/2.0/UDP 127.0.0.1:47300;branch=z9hG4bK608probe0001;rport=47300
+From: <sip:+86216180001@127.0.0.1>;tag=608probe-from-0001
+To: <sip:+8613800138000@127.0.0.1>;tag=98fda71522ce3e6c0e6c69c69ab4c8f4
+Call-ID: 608probe-23172@example.invalid
+CSeq: 1 INVITE
+Server: AS POC anti-fraud probe
+Content-Length: 0
+handler: CCEventTry -> CCEventFail((608, 'Rejected', None))
+--- verdict --------------------------------------------------------
+final status line: SIP/2.0 608 Rejected
+expected         : SIP/2.0 608 Rejected
+CCEventFail 608 'Rejected' reject path: OK
+0
+```
+
+**Demo rehearsals** (narrated in `docs/demo-script.md`, checklist in `docs/demo-steps.md`).
+
+`make demo` — the Phase 1 path, unchanged and non-regressed, exit 0, Call-ID
+`25fb6631a8f499efe683987779ec8e8d`:
+
+```text
+[2/5] routing decision
+rule        : R-MOB-CM-40
+disposition : route
+translation : called number -> 013800138000
+next hops   : s-sbc-primary -> s-sbc-failover
+served by   : s-sbc-primary
+...
+[4/5] message flow (14 messages on the wire)
+...
+[5/5] outcome
+status      : 200
+released    : True
+cancelled   : False
+
+demo result: call answered and released; number translation applied on the wire
+```
+
+`make demo-fraud` — the new capability, exit 0 (allow Call-ID
+`55bfaf10a1f65dedf82bb81c700754be`, reject Call-ID `22aea7e5add0dc10f702066db1c0849f`):
+
+```text
+anti-fraud AS POC - screening demo
+topology   : emulated S-CSCF --UDP--> anti-fraud AS (608 Rejected) --UDP--> emulated core network
+ports      : anti-fraud-as 127.0.0.1:47280, trunk 47064, core 48564
+screening  : config/caller_screening.yaml
+verdict    : allow list -> block list -> call-rate window -> reputation
+
+[1/2] call allowed and relayed
+caller       : +86216180001
+called       : +8613800138000
+Call-ID      : 55bfaf10a1f65dedf82bb81c700754be
+verdict      : allow
+signal       : none
+reason       : no screening signal rejected the call
+reputation   : 100.0
+calls in window: 1
+sip.608 declared: True
+final status : 200
+released     : True
+
+      expected SIP 200, observed 200; core INVITE delta 1
+
+[2/2] call rejected with 608
+caller       : +8613400000001
+called       : +8613800138000
+Call-ID      : 22aea7e5add0dc10f702066db1c0849f
+verdict      : reject
+signal       : block_list
+reason       : calling party is on the block list
+list entry   : BL-0001
+reputation   : 100.0
+calls in window: 1
+sip.608 declared: True
+final status : 608
+released     : True
+second leg   : none - the AS answered from the UAS side (RFC 8688, no Call-Info)
+
+      expected SIP 608, observed 608; core INVITE delta 0
+
+demo result: allow relayed to the core, reject answered 608 by the AS alone
+```
+
+### 2. Log excerpt
+
+Call-ID **`b1d66c2e342409d7f4a2093614961769`** — the **allow** path, produced by running the
+anti-fraud AS as a real process (`python -m anti_fraud_as.main`, `LOG_STRUCTURED=true`) with the
+mock S-SBC driving two calls. Structured logging on, real lines, verbatim:
+
+```text
+{"timestamp": "2026-09-19T16:28:32+0800", "level": "info", "module": "call_controller", "call_id": "b1d66c2e342409d7f4a2093614961769", "direction": "in", "peer": "127.0.0.1:46163", "event": "invite received on the trunk", "method": "INVITE"}
+{"timestamp": "2026-09-19T16:28:32+0800", "level": "info", "module": "call_controller", "call_id": "b1d66c2e342409d7f4a2093614961769", "direction": "internal", "peer": "127.0.0.1:46163", "event": "screening verdict taken", "verdict": "allow", "screen_source": "none", "screen_reason": "no screening signal rejected the call", "reputation": 100.0, "calls_in_window": 1, "identity_present": true, "sip_608_declared": true, "list_entry": ""}
+{"timestamp": "2026-09-19T16:28:32+0800", "level": "info", "module": "call_controller", "call_id": "b1d66c2e342409d7f4a2093614961769", "direction": "out", "peer": "127.0.0.1:46162", "event": "invite relayed towards the next hop", "method": "INVITE", "verdict": "allow"}
+{"timestamp": "2026-09-19T16:28:33+0800", "level": "info", "module": "call_controller", "call_id": "b1d66c2e342409d7f4a2093614961769", "direction": "internal", "peer": "-", "event": "call finished", "disposition": "completed"}
+```
+
+Call-ID **`688fdcca0121b71f333688fedf432bf1`** — the **`608` reject** path, from the same run.
+It carries the verdict (`reject`), the matched list entry (`BL-0001`), the `608` and the
+`AS-FRAUD-001` code; it carries **no** `invite relayed towards the next hop` event, i.e. no
+second leg was originated:
+
+```text
+{"timestamp": "2026-09-19T16:28:34+0800", "level": "info", "module": "call_controller", "call_id": "688fdcca0121b71f333688fedf432bf1", "direction": "in", "peer": "127.0.0.1:46163", "event": "invite received on the trunk", "method": "INVITE"}
+{"timestamp": "2026-09-19T16:28:34+0800", "level": "info", "module": "call_controller", "call_id": "688fdcca0121b71f333688fedf432bf1", "direction": "internal", "peer": "127.0.0.1:46163", "event": "screening verdict taken", "verdict": "reject", "screen_source": "block_list", "screen_reason": "calling party is on the block list", "reputation": 100.0, "calls_in_window": 1, "identity_present": true, "sip_608_declared": true, "list_entry": "BL-0001"}
+{"timestamp": "2026-09-19T16:28:34+0800", "level": "warning", "module": "call_controller", "call_id": "688fdcca0121b71f333688fedf432bf1", "direction": "out", "peer": "127.0.0.1:46163", "event": "call rejected by screening", "method": "608", "sip_608_declared": true, "error_code": "AS-FRAUD-001", "sip_status": "608", "error_detail": "calling party is on the block list", "screen_source": "block_list"}
+```
+
+The same run's **trunk-side** view (the mock S-SBC) confirms what the caller received, keyed by
+the same Call-ID, and that the AS identified itself as the anti-fraud instance:
+
+```text
+SIP/2.0 608 Rejected
+Via: SIP/2.0/UDP 127.0.0.1:46163;rport=46163;branch=z9hG4bK94de000137268f15809fcb5c3144ec96
+From: <sip:+8613400000001@127.0.0.1>;tag=9a76fd70b5a6eec3f38af1edf018457b
+To: <sip:+8613800138000@127.0.0.1>;tag=666a5439be72cb3aa9a77d822a8e2d05
+Call-ID: 688fdcca0121b71f333688fedf432bf1
+CSeq: 1699667635 INVITE
+Server: 3rd-party AS POC anti-fraud
+Content-Length: 0
+```
+
+### 3. CI
+
+**No CI run can exist for `phase2`, and none exists.** `.github/workflows/ci.yml` triggers on
+`push` / `pull_request` **targeting `main` only**; the only other trigger is `workflow_dispatch`,
+which a maintainer would have to start by hand and which no agent may start. So there is no run
+to link, no badge for this branch and no per-job conclusion to report. `AGENT.md` §13 is explicit
+that the local pre-commit gate is **not** CI and must never be presented as a CI result, so the
+gate in §1 above (ruff format / ruff check / mypy / `pytest tests -q` → `237 passed`) is recorded
+as a **local** run, not as kind-3 evidence.
+
+This is the one `AGENT.md` §4.8 evidence kind that P8 cannot supply from this environment.
+Following the precedent of the P3 section above, it is recorded here as **the maintainer's action
+required**: once P8 lands on the final `phase2` → `main` merge, a run of
+`.github/workflows/ci.yml` on `main` is the kind-3 artefact, and it must be recorded then by
+whoever can read it. Nothing in this report claims a CI result.
+
+### 4. Capture
+
+**There is no capture path for the anti-fraud flows, and this section records that plainly
+rather than manufacturing a reference.** The generated samples under
+`docs/specs/message-samples/` (gitignored; reproduced with `make capture`) come from
+`tools/capture_call.py`, which drives the **number-translation** AS (`as_app.main.AsStack`), not
+`anti_fraud_as.main.FraudAsStack`; there is no `--fraud` variant. So there is no committed pcap
+or message-sample set of the anti-fraud allow/reject flows.
+
+What **does** exist, and is reproducible from the committed tree:
+
+- The wire-level guard is the **integration test's own recorded bytes**: the AS-side
+  `SipMessageRecorder` (`as_messages`) is asserted for the full final status line
+  `SIP/2.0 608 Rejected`, for the absence of `Call-Info` / `Content-Type` on the `608`, and for
+  the absence of any second-leg INVITE. That is the wire reference for this item and it is
+  reproduced by the ACC-P8-002 command above — it is not a file that can be committed
+  (`AGENT.md` §13 forbids committing captures).
+- The mock UAC INVITE that the anti-fraud AS screens — including the `sip.608` declaration — is
+  reproducible with the committed capture tool, exactly as ADR-0007 records it:
+
+  ```text
+  $ uv run python tools/capture_call.py --output-dir captures/probe
+  as port    : 127.0.0.1:48598
+  core port  : 127.0.0.1:46862  (AS next hop)
+  trunk port : 127.0.0.1:47381  (emulated S-CSCF)
+  captured   : 14 messages
+    captures/probe/01-in-invite-trunk.txt
+    captures/probe/02-out-100-trunk.txt
+    captures/probe/03-out-invite-core.txt
+    captures/probe/04-in-100-core.txt
+    captures/probe/05-in-180-core.txt
+    captures/probe/06-out-180-trunk.txt
+    captures/probe/07-in-200-core.txt
+    captures/probe/08-out-ack-core.txt
+    captures/probe/09-out-200-trunk.txt
+    captures/probe/10-in-ack-trunk.txt
+    captures/probe/11-in-bye-core.txt
+    captures/probe/12-out-200-core.txt
+    captures/probe/13-out-bye-trunk.txt
+    captures/probe/14-in-200-trunk.txt
+  (exit 0)
+  $ grep -rin 'feature-caps' captures/probe/
+  captures/probe/01-in-invite-trunk.txt:18:Feature-caps: *;+sip.608
+  ```
+
+  (`captures/` is gitignored.) Key excerpt of that sample, `01-in-invite-trunk.txt` line 18 —
+  note the on-wire casing `Feature-caps`, sippy's generic-header rendering, which RFC 3261 §7.3.1
+  makes case-insensitive; the anti-fraud AS does not depend on this sample, it is the same mock
+  UAC.
+
+**What is missing:** a capture of the anti-fraud allow and reject exchanges (the `608` on the
+trunk, the relayed INVITE on the allow path). Producing one needs either a `--fraud` mode for the
+capture tool, or a committed in-repo recorder dump; neither exists today. Recorded as an open
+item below, not worked around.
+
+### Item results
+
+| ID | Result |
+| --- | --- |
+| ACC-P8-001 | **accepted** — self-check exit `0`; `28 passed`. Real-process lifecycle (health, `SIGTERM` exit `0`), loop-owned reload, stop path cancels the controller timer and leaves no timer of the stopped manager scheduled; own port `5062`, own `FRAUD_*` knobs, no new dependency |
+| ACC-P8-002 | **accepted** — `15 passed`. Full `SIP/2.0 608 Rejected` on the wire, no `Call-Info`, no second-leg INVITE; allow path relays with no header added, Request-URI and SDP kept |
+| ACC-P8-003 | **accepted** — `58 passed`. Signal order, window/reputation thresholds, declarative file validation and fail-safe reload, `sip.608` declared/undeclared handling, no media |
+| ACC-P8-004 | **accepted** — `37 passed`. Pure engine (no clock), process-level bounded store with injected clock and exponential decay. The "restart loses it" half has **no test** (gap register) |
+| ACC-P8-005 | **accepted** — `18 passed`. `AS-FRAUD-001 … 006` in the shared error model; the `AS-FRAUD-006` fallback itself is **untested** (see below) |
+| ACC-P8-006 | **accepted** — probe exit `0`, `CCEventFail 608 'Rejected' reject path: OK`. The probe is a design instrument, **not** a test and **not** in the gate; the on-wire guard is ACC-P8-002's assertion |
+
+### Evidence kinds per item
+
+| Item | Kind 1 (command + output) | Kind 2 (Call-ID log) | Kind 3 (CI) | Kind 4 (capture) |
+| --- | --- | --- | --- | --- |
+| ACC-P8-001 | yes — §1 | **n/a** — a process lifecycle has no Call-ID keyed log; its log lines carry `call_id: "-"`, and §1 holds the process output | **not producible** — §3 | **n/a** — no distinct wire artefact |
+| ACC-P8-002 | yes — §1 | yes — **§2**: allow `b1d66c2e…` (the relay) and reject `688fdcca…` (`SIP/2.0 608 Rejected`, no second leg) | **not producible** — §3 | **partial** — §4: the test asserts the recorded wire bytes; no committed sample |
+| ACC-P8-003 | yes — §1 | yes — **§2**: the `screening verdict taken` line of both Call-IDs (`screen_source`, `reputation`, `calls_in_window`, `sip_608_declared`) | **not producible** — §3 | **n/a** — no separate wire artefact; §4 records the missing capture |
+| ACC-P8-004 | yes — §1 | yes — **§2**: the `reputation` / `calls_in_window` fields of the two verdict lines (the state the store computed) | **not producible** — §3 | **n/a** — pure/state behaviour |
+| ACC-P8-005 | yes — §1 | yes — **§2**: the reject line's `error_code: AS-FRAUD-001`, `sip_status: 608`, `screen_source` and `list_entry` | **not producible** — §3 | **n/a** — no separate wire artefact; §4 records the missing capture |
+| ACC-P8-006 | yes — §1 (the probe's output) | yes — **§1**, not §2: the probe prints its own Call-ID `608probe-23172@example.invalid` in the INVITE and in the `608` response | **not producible** — §3 | yes — §1 and §4: the probe emits the real INVITE and `SIP/2.0 608 Rejected`; §4 records the missing full capture |
+
+**§2 holds only the two real-run structured-log excerpts** (the allow and the reject call), so
+every kind-2 reference above points either at §2 or — for ACC-P8-006 — explicitly at §1, where
+the probe's own Call-ID keyed output lives. Kind 3 is the one kind P8 cannot supply (no CI can
+run for `phase2`); it is recorded honestly above, and the maintainer's post-merge `main` run
+replaces it then. This carries forward the same caveat the P3 section states.
+
+### Accepted limitations and open items
+
+Consistent with the stage-4 position, and not hidden:
+
+- **`REQ-NF-015` is satisfied by a design instrument plus an on-wire assertion, not by a test.**
+  The probe (`tools/anti_fraud_probe.py`, recorded in ADR-0007) is what "verified by running
+  sippy" means; the new integration test asserts the full on-wire line `SIP/2.0 608 Rejected`.
+  The probe is **not a pytest test** and **does not run in CI**.
+- **Two requirement halves have no test because they are non-behaviours:**
+  `REQ-NF-012`'s *"a restart loses it"* half and `REQ-NF-013`'s *"a real UAC that does not
+  declare `sip.608` would require an announcement"* half. Both are covered by registered rows in
+  `docs/production-gaps.md`; neither is an executed check.
+- **`CallScenario.expect_status` is a dead Phase 1 field.** It is set by tests but read nowhere;
+  the assert is always on the observed `CallOutcome.status`. Not modified here (`AGENT.md` §14
+  rule 4) — recorded so it is not mistaken for coverage.
+- **The `AS-FRAUD-006` fallback and the `next_hop is None` branch are untested.**
+  `_error_code_for` falls back to `FRAUD_NO_VERDICT` and `_originate_allowed` answers `AS-CFG-001`
+  when no next hop is configured; neither path is exercised (the stack always configures a next
+  hop). Accepted, not hidden.
+- **`tools/capture_call.py` with a relative `--output-dir`: fixed.** While reproducing
+  ADR-0007's documented command, the final `path.relative_to(REPO_ROOT)` raised
+  `ValueError: 'captures/probe/01-in-invite-trunk.txt' is not in the subpath of '<repo>'` and the
+  tool exited `1` after writing the 14 samples — the same class of bug fixed in
+  `tools/demo_call.py` at M4 (`CHANGELOG.md` 0.5.0 *Fixed*). `tools/capture_call.py` now resolves
+  the path first (`display_path()`), so both an absolute and a relative `--output-dir` print the
+  sample list and exit `0`; a path outside the repository prints resolved. The ADR-0007 command
+  was re-run for real after the fix and its output is quoted in §4. `make capture` (absolute
+  default) was already unaffected and is unchanged.
+- **`make demo-fraud`: fixed.** `tools/demo_fraud_call.py` did not configure logging, so the
+  reject path's `WARNING` record reached `logging.lastResort` and printed a bare
+  `call rejected by screening` line into the demo output. The tool now calls
+  `configure_logging("ERROR", structured=False)` before it starts the stack, so routine
+  INFO/WARNING events stay off the transcript while a genuine failure still prints. `make
+  demo-fraud` was re-run and the output is clean, exit `0`.
+- **No anti-fraud capture path** — see §4; recorded as missing rather than manufactured.
+
 ## Post-fix re-test — Call-ID of the second leg (2026-09-19)
 
 **Cause.** Phase 1 defect: the AS originated its outbound leg with the *inbound* Call-ID
@@ -2085,3 +2453,883 @@ Call-ID) and `03-out-invite-core.txt` (same Call-ID plus `-b2b_1`).
 | ACC-M1-002 | **accepted (re-tested)** — `pytest tests/integration -q -k pass_through`: 1 passed. |
 | ACC-M1-005 | **accepted (re-tested)** — `tools/capture_call.py` wrote 14 files; the outbound Call-ID is the trunk one plus `-b2b_1`. |
 | ACC-M2-005 | **accepted (re-tested)** — as above; the translated call's samples show `<trunk>-b2b_1` on the core leg. |
+
+## Phase 2 — P9 chained topology (2026-09-19)
+
+Branch `phase2` (item **P9** in `docs/phase2-plan.md` §3; under the branch model of §4 P9 is
+worked directly on `phase2`). Acceptance items **ACC-P9-001 … ACC-P9-005** in
+`docs/acceptance/criteria.md`; their requirements are `REQ-F-025 … REQ-F-028` and
+`REQ-NF-016 … REQ-NF-018`. Design rationale is **ADR-0008** (with HLD §9 and LLD §10).
+
+What was verified: the chained topology `SBC → AS-1 (anti-fraud) → AS-2 (number translation) →
+core` runs — two B2BUAs in series — wired **by configuration only** (no iFC emulation, no shared
+import in the forbidden direction); an INVITE AS-1 allows is relayed into AS-2, translated there
+and answered by the core; a `608` reject at AS-1 short-circuits before AS-2 and the core. A
+chained call carries **three distinct** `Call-ID`s, one per leg, so each instance writes its own
+Call-ID keyed trace and cross-AS correlation is **not** solved (`REQ-NF-016`); the standard
+end-to-end key (the `P-Charging-Vector` ICID) **is** preserved across the chain but no
+observability surface is keyed on it. The only code change P9's implementation stage made is the
+anti-fraud controller's outbound `Call-ID` (the defect fix of finding (A)); the rest is a demo,
+its documentation and the recorded friction.
+
+Result: **accepted**, with the limitations recorded under *Accepted limitations and open items*.
+
+Environment of this run: Linux x86-64, loopback only; Python 3.10.12; sippy 2.4.2; `uv`
+0.12.15; repository `VERSION` = 0.6.0 at the time of the run (`0.5.1` was released with
+P8; `0.6.0` landed in `4d32e80`, an ancestor of every P9 commit).
+
+### 1. Command and output
+
+Every command below was run from the repository root on `phase2`; the outputs are pasted
+verbatim (ports and Call-IDs are ephemeral and vary per run).
+
+**The gate (`AGENT.md` §13: local, before the commit — not a CI result, see §3).**
+
+```text
+$ make lint
+uv sync
+Resolved 50 packages in 2ms
+Checked 49 packages in 0.80ms
+uv run ruff format --check .
+91 files already formatted
+uv run ruff check .
+All checks passed!
+uv run mypy
+Success: no issues found in 28 source files
+(exit 0)
+```
+
+```text
+$ make unit
+203 passed in 1.17s
+$ make integration
+34 passed in 32.15s
+$ make e2e
+9 passed in 5.33s
+```
+
+**ACC-P9-001** — the chain end to end (REQ-F-025) and configuration-only chaining (REQ-F-026):
+
+```text
+$ uv run pytest tests/integration/test_chained_topology.py -q
+3 passed in 2.23s
+
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k import_the_anti_fraud
+1 passed, 52 deselected in 0.03s
+```
+
+The integration tests are `test_an_allowed_call_traverses_both_b2bus_and_is_translated`,
+`test_every_leg_regenerates_its_call_id_and_each_instance_keys_its_trace` and
+`test_a_reject_at_as1_short_circuits_before_as2_and_the_core`. The unit test is
+`test_as_app_does_not_import_the_anti_fraud_as`.
+
+**ACC-P9-002** — the `608` reject short-circuits before AS-2 and the core (REQ-F-027):
+
+```text
+$ uv run pytest tests/integration/test_chained_topology.py tests/e2e/test_chained_call_flows.py -q -k reject
+2 passed, 3 deselected in 0.65s
+```
+
+Both assertions are on a **delta of zero**: `tracer.known_call_ids()` at AS-2 and
+`mock.uas.received_invites` at the core, with the wire assertion `"SIP/2.0 608 Rejected" in
+response_lines` in the recorded bytes.
+
+**ACC-P9-003** — per-instance observability and the three per-leg `Call-ID`s (REQ-F-028,
+REQ-NF-016):
+
+```text
+$ uv run pytest tests/integration/test_chained_topology.py tests/e2e/test_chained_call_flows.py -q
+5 passed in 3.35s
+
+$ uv run python tools/chained_as_probe.py ; echo $?
+chained AS POC - two B2BUAs in series, wired by configuration only
+topology   : emulated S-CSCF --UDP--> AS-1 anti-fraud --UDP--> AS-2 number translation --UDP--> emulated core
+ports      : AS-1 127.0.0.1:47482, AS-2 127.0.0.1:46310, trunk 47247, core 46154
+wiring     : AS-1 next hop = AS-2 listen address; AS-2 next hop = the rule set
+
+[1/2] allowed call relayed through both AS instances
+caller        : +86216180001
+called        : +8613800138000
+AS-1 verdict  : allow
+AS-1 signal   : none
+S-CSCF Call-ID: 8030a24ea391ace86f9ee9fa78aada2b
+AS-2 trunk Call-ID: 8030a24ea391ace86f9ee9fa78aada2b-b2b_1
+AS-2 rule     : R-MOB-CM-40
+core Call-ID  : 8030a24ea391ace86f9ee9fa78aada2b-b2b_1-b2b_1
+core called number: 013800138000
+final status  : 200
+released      : True
+distinct Call-IDs: 3
+Call-ID per leg: True
+S-CSCF ICID   : poc-chained-allow
+AS-2 ICID     : poc-chained-allow
+core ICID     : poc-chained-allow
+ICID preserved: True
+
+[2/2] rejected call short-circuits at AS-1
+caller        : +8613400000001
+AS-1 verdict  : reject
+final status  : 608
+AS-2 calls seen: 0
+core INVITEs seen: 0
+
+--- verdict --------------------------------------------------------
+allowed call completed through two B2BUAs : OK
+608 reject short-circuited before AS-2     : OK
+Call-ID regenerated on every leg           : OK
+ICID preserved across every leg            : OK
+0
+```
+
+**ACC-P9-004** — the first-class documented run command (REQ-NF-017):
+
+```text
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k "demo_chained or chaining"
+2 passed, 51 deselected in 0.02s
+
+$ uv run python tools/demo_chained_call.py --rules-file config/routing_rules.yaml --screening-file config/caller_screening.yaml ; echo $?
+chained AS POC - two B2BUAs in series, wired by configuration only
+topology   : emulated S-CSCF --UDP--> AS-1 anti-fraud --UDP--> AS-2 number translation --UDP--> emulated core
+ports      : AS-1 127.0.0.1:47780, AS-2 127.0.0.1:47201, trunk 46982, core 45266
+wiring     : AS-1 next hop = AS-2 listen address; AS-2 next hop = the rule set
+
+[1/2] allowed call relayed through both AS instances
+caller            : +86216180001
+called            : +8613800138000
+AS-1 verdict      : allow
+AS-1 signal       : none
+AS-2 rule         : R-MOB-CM-40
+core called number: 013800138000
+final status      : 200
+released          : True
+
+  the dialog Call-ID is regenerated on every leg (three distinct values):
+S-CSCF Call-ID    : 51486e71823cb9f07a360e90cf25393c
+AS-2 trunk Call-ID: 51486e71823cb9f07a360e90cf25393c-b2b_1
+core Call-ID      : 51486e71823cb9f07a360e90cf25393c-b2b_1-b2b_1
+distinct Call-IDs : 3
+Call-ID per leg   : True (each transition is outbound_call_id of the previous one)
+
+  the end-to-end ICID survives the whole chain (one value at every hop):
+S-CSCF ICID       : poc-chained-allow
+AS-2 ICID         : poc-chained-allow
+core ICID         : poc-chained-allow
+ICID preserved    : True
+
+[2/2] rejected call short-circuits at AS-1
+caller            : +8613400000001
+AS-1 verdict      : reject
+final status      : 608 (608 Rejected, no second leg)
+AS-2 calls seen   : 0 (the absence is the assertion)
+core INVITEs seen : 0 (the absence is the assertion)
+
+--- verdict --------------------------------------------------------
+allowed call completed through two B2BUAs : OK
+608 reject short-circuited before AS-2     : OK
+Call-ID regenerated on every leg           : OK
+three distinct Call-IDs across the chain   : OK
+ICID preserved across every leg            : OK
+0
+```
+
+The unit tests behind the `-k` selection are
+`test_make_demo_chained_is_a_documented_first_class_entry_point` (the `Makefile` target plus
+the command named in `AGENT.md` §10, `README.md`, `docs/README.md` and `tools/README.md`) and
+`test_chaining_added_no_new_configuration_knob` (no declared `.env.example` key contains
+`chain`). The demo is the same tool the `make demo-chained` target runs
+(`tools/demo_chained_call.py`).
+
+**ACC-P9-005** — the friction is recorded (REQ-NF-018):
+
+```text
+$ grep -nE '^\| (iFC / ISC emulation|Cross-AS trace correlation|Shared state between the two instances|Routing catalogue coupling|Chain failure, ordering and capacity semantics) ' docs/production-gaps.md
+96:| iFC / ISC emulation | ...
+97:| Cross-AS trace correlation | ...
+98:| Shared state between the two instances | ...
+99:| Routing catalogue coupling | ...
+100:| Chain failure, ordering and capacity semantics | ...
+(exit 0)
+```
+
+All five rows sit under `## Additional gaps registered while building P9 (chained AS topology,
+2026-09-19)`. There is **no test** for REQ-NF-018: it is a record, verified by reading the
+register.
+
+### 2. Log excerpt
+
+The chain's observability is per instance, so the excerpt is **two Call-ID keyed traces of one
+call** — printed by `tests/e2e/test_chained_call_flows.py -q -s`, a real run. The S-CSCF leg's
+value is `23cdbf10ffd1406c4e8c0561cbbe647c`; AS-2's trunk leg is that value with AS-1's
+`-b2b_1` suffix, `23cdbf10ffd1406c4e8c0561cbbe647c-b2b_1` (the core leg is that value with the
+suffix again, `…-b2b_1-b2b_1`, asserted off the wire by the same test). The two traces carry
+**different keys** and hold events only for their own key:
+
+```text
+AS-1 (anti-fraud), keyed on the S-CSCF Call-ID
+call-id 23cdbf10ffd1406c4e8c0561cbbe647c
+  2026-09-19T15:30:49.740+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-19T15:30:49.741+00:00  internal trunk    verdict allow: no screening signal rejected the call
+  2026-09-19T15:30:49.741+00:00  out      next_hop INVITE  invite relayed towards the next hop
+  2026-09-19T15:30:49.745+00:00  in       next_hop 100     100 Trying on the next-hop leg
+  2026-09-19T15:30:49.745+00:00  out      trunk    100     100 Trying relayed to the trunk leg
+  2026-09-19T15:30:49.983+00:00  in       next_hop 180     180 Ringing on the next-hop leg
+  2026-09-19T15:30:49.983+00:00  out      trunk    180     180 Ringing relayed to the trunk leg
+  2026-09-19T15:30:50.208+00:00  in       next_hop 200     200 OK on the next-hop leg
+  2026-09-19T15:30:50.208+00:00  out      trunk    200     200 OK relayed to the trunk leg
+  2026-09-19T15:30:50.428+00:00  in       next_hop BYE     call released on the next-hop leg
+AS-2 (number translation), keyed on the Call-ID AS-1 sent
+call-id 23cdbf10ffd1406c4e8c0561cbbe647c-b2b_1
+  2026-09-19T15:30:49.742+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-19T15:30:49.743+00:00  internal -        decision route: China Mobile subscribers, E.164 in and national format out
+  2026-09-19T15:30:49.743+00:00  out      next_hop INVITE  invite originated towards the next hop
+  2026-09-19T15:30:49.756+00:00  in       next_hop 100     100 Trying on the next-hop leg
+  2026-09-19T15:30:49.756+00:00  out      trunk    100     100 Trying relayed to the trunk leg
+  2026-09-19T15:30:49.982+00:00  in       next_hop 180     180 Ringing on the next-hop leg
+  2026-09-19T15:30:49.982+00:00  out      trunk    180     180 Ringing relayed to the trunk leg
+  2026-09-19T15:30:50.206+00:00  in       next_hop 200     200 OK on the next-hop leg
+  2026-09-19T15:30:50.207+00:00  out      trunk    200     200 OK relayed to the trunk leg
+  2026-09-19T15:30:50.426+00:00  in       next_hop BYE     call released on the next-hop leg
+```
+
+The **rejected** call of the same run, keyed on `9a4a1cff59f5496c458a273ade843ca2` — one trace,
+no `BYE`, no second leg:
+
+```text
+AS-1 (anti-fraud), the whole call
+call-id 9a4a1cff59f5496c458a273ade843ca2
+  2026-09-19T15:30:50.623+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-19T15:30:50.624+00:00  internal trunk    verdict reject: calling party is on the block list
+  2026-09-19T15:30:50.624+00:00  out      trunk    608     608 Rejected answered on the trunk leg
+```
+
+The three per-leg values are shown explicitly by the design probe, in a **separate** run
+(ports and values are ephemeral per run) — the trunk value `8030a24ea391ace86f9ee9fa78aada2b`,
+then `…-b2b_1`, then `…-b2b_1-b2b_1`, with the ICID `poc-chained-allow` equal at every hop
+(quoted in §1). The two runs are independent; the values differ because the mock generates the
+trunk `Call-ID` fresh each time, and neither is normalised.
+
+### 3. CI
+
+**No CI run exists for these commits, and none can be produced from this environment.**
+`.github/workflows/ci.yml` triggers on `push` / `pull_request` **targeting `main`** (plus
+`workflow_dispatch`, which a maintainer would have to start by hand and which no agent may
+start), and `origin/phase2` (`7df94f2`) means a pull request from `phase2` into `main` *would*
+run CI — but nothing here is pushed, so no run exists for these commits and none can be
+produced from here. So there is no run to link, no badge for these commits and no per-job
+conclusion to report. `AGENT.md` §13 is explicit that the local pre-commit gate is **not** CI
+and must never be presented as a CI result, so the gate in §1 above (ruff format / ruff check /
+mypy clean; `203` / `34` / `9` in the three layers) is recorded as a **local** run, not as
+kind-3 evidence. This is the one `AGENT.md` §4.8 evidence kind P9 cannot supply from this
+environment; it follows the P8 section above and the P3 precedent, and nothing here claims a CI
+result.
+
+### 4. Capture
+
+**There is no capture path for the chain, and this section records that plainly rather than
+manufacturing a reference.** `docs/specs/message-samples/` is generated and **gitignored**
+(only its `README.md` is tracked), so no new sample can be committed (`AGENT.md` §13 forbids
+committing captures), and `tools/capture_call.py` — the generator behind `make capture` — drives
+the **number-translation** AS directly (`as_app.main.AsStack`), not the chain; it captures no
+second B2BUA. So there is no committed pcap or message-sample set of the chained flows.
+
+What **does** exist, and is reproducible from the committed tree:
+
+- The wire-level guard is the **integration and e2e tests' own recorded bytes**: the AS-side
+  `SipMessageRecorder` (`pair.as_messages`) is asserted for the full line `SIP/2.0 608 Rejected`
+  on the reject path, and the core's received INVITE (`pair.mock.uas.received_invites`) is
+  asserted for the translated number `013800138000`, the SDP body and the pass-through headers
+  across both hops. That is the wire reference for this item; it is reproduced by the ACC-P9-001
+  and ACC-P9-002 commands above, and it is not a file that can be committed.
+- `make capture` remains the reproduction command for the single-AS (number-translation) flow's
+  14 samples, but those samples show **one** B2BUA, not the chain, and they are gitignored.
+- The probe and the demo print the real per-hop `Call-ID`s and ICIDs from the wire (§1, §2), which
+  is why the correlation gap is observable without a capture file.
+
+### Item results
+
+| ID | Result |
+| --- | --- |
+| ACC-P9-001 | **accepted** — `3 passed` + `1 passed, 52 deselected`. An allowed call crosses both B2BUs (core INVITE carries `013800138000`, SDP and pass-through headers identical), chaining is configuration-only, and the one-way import independence holds |
+| ACC-P9-002 | **accepted** — `2 passed, 3 deselected`. `SIP/2.0 608 Rejected` on the trunk; zero call state at AS-2 and zero INVITEs at the core, as deltas |
+| ACC-P9-003 | **accepted** — `5 passed`; probe exit `0` with `distinct Call-IDs: 3`, `Call-ID per leg: True`, `ICID preserved: True`. Each trace is keyed on its own leg's value and not on the other's |
+| ACC-P9-004 | **accepted** — `2 passed, 51 deselected`; `tools/demo_chained_call.py` exit `0` with three `Call-ID`s and five `OK` verdict lines. The "no new port" half is not asserted (see below) |
+| ACC-P9-005 | **accepted** — the five P9 gap rows are present under the P9 heading in `docs/production-gaps.md` (grep exit `0`). Verified by the register, **not** by a test |
+
+### Evidence kinds per item
+
+| Item | Kind 1 (command + output) | Kind 2 (Call-ID log) | Kind 3 (CI) | Kind 4 (capture) |
+| --- | --- | --- | --- | --- |
+| ACC-P9-001 | yes — §1 (`3 passed`, `1 passed`) | yes — **§2**: the allow call's two keyed traces and the reject call's trace; the per-hop values are also in §1 (probe/demo) | **not producible** — §3 | **partial** — §4: the tests assert the recorded wire bytes (core INVITE, `608` line); no committed sample |
+| ACC-P9-002 | yes — §1 (`2 passed, 3 deselected`) | yes — **§2**: the reject trace keyed on `9a4a1cff…`, with no `BYE` and no second-leg event | **not producible** — §3 | **partial** — §4: the recorded bytes assert `SIP/2.0 608 Rejected`; no committed sample |
+| ACC-P9-003 | yes — §1 (`5 passed`; probe exit `0`) | yes — **§2**: the three per-leg values (`23cdbf10…`, `…-b2b_1`, `…-b2b_1-b2b_1` / probe `8030a24e…`), each trace keyed on its own value | **not producible** — §3 | **partial** — §4: per-hop `Call-ID`s and ICIDs are read off the recorded wire bytes; no committed sample |
+| ACC-P9-004 | yes — §1 (`2 passed, 51 deselected`; demo exit `0`) | yes — **§2** and §1: the demo transcript is itself Call-ID keyed (three values for the allowed call) | **not producible** — §3 | **n/a** — the demo prints the wire values; §4 records the missing capture |
+| ACC-P9-005 | yes — §1 (grep exit `0`) | **n/a** — a documentation record has no Call-ID keyed log | **not producible** — §3 | **n/a** — no wire artefact |
+
+**§2 holds the real-run Call-ID keyed traces** (the allow call's two per-instance traces and the
+reject trace), so every kind-2 reference above points at §2, with the probe/demo's explicit
+three-value output in §1. Kind 3 is the one kind P9 cannot supply (no CI can run for `phase2`);
+it is recorded honestly above, and the maintainer's post-merge `main` run replaces it then. Kind
+4 is **partial** for the chain: the tests' recorded wire bytes are the reference, and no capture
+file can be committed (`docs/specs/message-samples/` is generated and gitignored, and no capture
+tool drives the chain).
+
+### Accepted limitations and open items
+
+Consistent with the stage-4 position, and not hidden:
+
+- **`REQ-NF-018` is verified by the gap register, not by a test.** "The friction is recorded" is a
+  documentation property; the row is satisfied by the P9 section of `docs/production-gaps.md`
+  (and ADR-0008 decision 7), and no executed check asserts it. Recorded so it is not mistaken for
+  coverage.
+- **The ICID is preserved across the chain but is a per-scenario literal no surface is keyed on.**
+  The probe and the demo both measure `ICID preserved: True`, but the value is
+  `poc-{scenario.name}` (`poc-chained-allow`), the same for two calls of one scenario, and both
+  instances key their trace/log/metrics/console on the local `Call-ID`. So `REQ-NF-016`'s
+  "correlation is not solved" **stands**; the preserved ICID proves pass-through, not per-call
+  identity (ADR-0008 decision 4, gap row *Cross-AS trace correlation*).
+- **`REQ-NF-017`'s "no new port" is not asserted, and the no-new-knob check is a substring
+  heuristic.** `test_chaining_added_no_new_configuration_knob` only asserts that no declared
+  `.env.example` key contains `chain`; "no new port" is inferred from the documented port matrix
+  (`5060` / `5062` already differ), not asserted. Left as it is (the stage-4 finding: pinning the
+  whole key set would make every future knob edit this test).
+- **`REQ-F-026`'s literal "neither AS imports the other" is broader than what can be asserted.**
+  `src/anti_fraud_as/call_controller.py` imports `as_app.sip_adapter` **by design** (ADR-0007
+  decision 9); only the forbidden direction (`src/as_app` ↛ `anti_fraud_as`) is assertable and is
+  what `test_as_app_does_not_import_the_anti_fraud_as` asserts. ACC-P9-001 claims only that
+  one-way independence. **P10-era note (added by the P10 acceptance stage, 2026-09-20): the two
+  sentences above are the P9 record and stay as such — the mechanism changed in P10, where
+  `src/anti_fraud_as/call_controller.py:57` imports `as_platform.sip_adapter` directly and the
+  package's only remaining `as_app` import is the version chain,
+  `src/anti_fraud_as/__init__.py:31`; the one-way invariant this note justifies is unchanged
+  (ADR-0009 decision 2, HLD §10.3).** The wording question is escalated as
+  `docs/phase2-plan.md` §7 item 10, not settled here (`AGENT.md` §14 rule 2).
+- **`REQ-F-025`'s literal call sequence includes `ACK`, but no P9 test asserts it.** The e2e test
+  asserts `INVITE`, `180`, `200` and `BYE` in each instance's trace; the emitted AS-1 trace
+  contains **no `ACK` row** (the mock's UAC does not record `ACK` in the trace), so the criterion
+  quotes the requirement's sequence but the Expected result column states only what is asserted.
+  The `ACK` leg is therefore **not covered** by P9; recorded here so the gap is not implicit.
+- **AS-2's wire recorder is built but discarded** (`tests/conftest.py`), so `REQ-F-027`'s absence
+  is proven through `tracer.known_call_ids()` rather than AS-2's received bytes. Adequate — AS-2
+  traces on INVITE — but it is a **proxy**, registered as such in the stage-4 record.
+- **The integration timing flake of `docs/phase2-plan.md` §7 item 9 is a known flake, not P9
+  friction, and it did not fire here.** It affects
+  `tests/integration/test_fraud_screening_path.py::test_a_broken_edit_keeps_the_previous_screening_data`
+  (a wall-clock race around the relayed leg's 3-second timeout). This run's `make integration`
+  was `34 passed`; the flake is registered in `docs/production-gaps.md` and left unfixed
+  (`AGENT.md` §14 rule 4).
+- **The probe and the demo run both instances in one interpreter.** The production shape is three
+  processes (LLD §10.3); the tools exercise the two instances' logic and wiring, not the process
+  boundary. `SipConf` and `ED2` are process-wide singletons, so each stack is given its own
+  `TraceRecorder` / `MetricsRegistry` (ADR-0008, *Verified facts*).
+- **No capture of the chained flows** — see §4; recorded as missing rather than manufactured.
+
+## Phase 2 — P10 platform extraction (2026-09-20)
+
+Worked on `feat/platform-extraction` (item **P10** in `docs/phase2-plan.md` §3), cut from `phase2`.
+Acceptance items **ACC-P10-001 … ACC-P10-008** in `docs/acceptance/criteria.md`; their
+requirements are `REQ-F-029 … REQ-F-033` and `REQ-NF-019 … REQ-NF-021`. Design rationale is
+**ADR-0009** (with HLD §10 and LLD §11); the stage-by-stage record — the requirement → test
+coverage table, the two honest no-assertion statements, the red signals and the review gates —
+lives in `docs/phase2-plan.md` §3 stages 1–4 and is **cited here, not rewritten**.
+
+What was verified: the skeleton the two AS instances share now lives in a library in a **new
+repository** (checked out beside this one at `../as_platform`, branch `main`, distribution
+`as-platform`, import package `as_platform`, `VERSION` `0.1.0`), and both instances —
+`src/as_app/` and `src/anti_fraud_as/` — are **users** of it; the library imports neither use
+case; the two instances stay independent processes whose externally observable behaviour is
+**unchanged** (the extraction is a pure refactor, so the same signalling, the same `AS-*` codes
+and the same per-instance Call-ID keyed trace); this repository consumes the library through a
+**`path` dependency** (`editable = true`), which is why the `AGENT.md` §10 guarantee *"clone →
+`uv sync` → `make demo`"* widens to *"clone **both** repositories side by side"*; the library is a
+standalone distribution with the three library-standard documents, its own gate and **no** uv
+workspace membership; the two pluggable dimensions P11 verifies are **enabled by, but not built
+in, P10** (one `Transport`, one `StateStore`, no TLS, no Redis, no capacity harness); and the
+extraction ran as an incremental commit sequence that left the three layers green.
+
+Result: **accepted**, with the limitations recorded under *Accepted limitations and open items*.
+
+Environment of this run: Linux x86-64, loopback only; Python 3.10.12; sippy 2.4.2; `uv` 0.12.15;
+application repository `VERSION` = 0.7.0 and library repository `VERSION` = 0.1.0.
+
+### 1. Command and output
+
+Every command below was run from the application repository root on 2026-09-20 unless it says
+otherwise; the outputs are pasted verbatim (ports, temp-dir names and Call-IDs are ephemeral and
+vary per run).
+
+**The gate (`AGENT.md` §13: local, before the commit — not a CI result, see §3).**
+
+```text
+$ make lint
+uv sync
+Resolved 51 packages in 1ms
+Checked 50 packages in 0.49ms
+uv run ruff format --check .
+96 files already formatted
+uv run ruff check .
+All checks passed!
+uv run mypy
+Success: no issues found in 29 source files
+```
+
+```text
+$ make unit
+210 passed in 1.11s
+$ make integration
+36 passed in 30.16s
+$ make e2e
+9 passed in 4.29s
+```
+
+**ACC-P10-001** — the library repository exists with the extracted skeleton and both instances are
+its users (REQ-F-029):
+
+```text
+$ git -C ../as_platform log --oneline
+0eeef37 test(p10): pin the library's standalone manifest and close the module-name hole
+27fe26e test(p10): assert the library's seam, document and gate boundaries
+aaa453e fix(p10): answer the trunk when the routing engine raises
+d627e73 test(p10): give the library its own suite, gate and documents
+d5e4561 refactor(p10): add the transport and state-store seams
+734d82c refactor(p10): move the AS stack shell into the as-platform library
+f82a819 refactor(p10): move and generalise the internal API shell into the as-platform library
+060ef71 refactor(p10): move the controller shell into the as-platform library
+7c1355b refactor: move the version chain and the bootstrap plumbing
+ee02653 build: add the library's ruff, mypy and pytest tooling
+9eebe66 refactor: move the leaf modules into the as-platform library
+4caec3e chore: create the as-platform library repository skeleton
+
+$ cat ../as_platform/VERSION
+0.1.0
+
+$ uv sync --frozen
+Checked 50 packages in 0.41ms   # resolves the library through ../as_platform
+
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k users_of_the_platform_library
+1 passed, 55 deselected in 0.02s
+```
+
+The library manifest self-reports the distribution at `pyproject.toml`'s first two lines —
+`name = "as-platform"` / `version = "0.1.0"` — and its own `uv sync --frozen` is
+`Checked 45 packages in 0.38ms`. The half of the requirement that says this repository is *the
+library's reference implementation* is a role statement with no assertion (below).
+
+**ACC-P10-002** — the library is independent of both use cases (REQ-F-030):
+
+```text
+$ grep -rnE 'as_app|anti_fraud_as' ../as_platform/src/ ; echo $?
+1
+
+$ uv run pytest ../as_platform/tests/test_library_independence.py -q
+2 passed in 0.02s
+
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k import_the_anti_fraud
+1 passed, 55 deselected in 0.02s
+```
+
+The grep prints no line and exits `1` (no match). The library-side file is the suite's own
+assertion; the application-side test is `test_as_app_does_not_import_the_anti_fraud_as`.
+
+**ACC-P10-003** — unchanged behaviour across the three layers (REQ-F-031): the gate block above is
+the evidence — `210` / `36` / `9` across unit, integration and e2e, with the same lint and type
+results. The counts are **above** the pre-extraction baseline (255 total, against 246 before the
+extraction) because the implementation and tests stages added tests; the stage-4 record states the
+same fact from the other side (no test deleted, no assertion loosened, no `src/` change of the
+observable behaviour).
+
+**ACC-P10-004** — the `path` dependency and `uv`'s real behaviour behind it (REQ-F-032):
+
+```text
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k "sibling_checkout or workspace"
+2 passed, 54 deselected in 0.02s
+
+$ uv run python tools/path_dependency_probe.py ; echo $?
+P10 path-dependency probe - reproducing the ADR-0009 *Verified facts*
+layout     : a throwaway library plus one consumer variant per case, in a temp dir
+scope      : this repository is never read or written; the temp dir is removed
+requirement: uv 0.12.x and hatchling/mypy resolvable from the local cache or an index
+
+(a) a dependency key alone does not resolve                    : OK
+    exit 1;   cause: Because as-platform was not found in the package registry and your project depends on as-platform, we can conclude that your project's requirements are unsatisfiable.
+(b) default install is a copy; --reinstall-package refreshes it : OK
+    direct_url editable=False, copy in site-packages=True, edit invisible before re-sync=True, visible after --reinstall-package=True
+(b) editable = true links the checkout; the edit is visible at once : OK
+    direct_url editable=True, _editable_impl pth=True, edit visible with no re-sync=True
+(c) a version constraint is silently ignored                   : OK
+    exit 0, installed '0.4.0' (pin was '>=99.0')
+(g) the key may be spelled as_platform or as-platform          : OK
+    exit 0, installed '0.4.0' from the underscore spelling
+(f) a nested consumer does not find a sibling library          : OK
+    exit 1; error: Distribution not found at: file:///tmp/p10-path-dependency-<ephemeral>/nested/a/lib
+(d) --locked refuses a stale lock; --frozen accepts the skew   : OK
+    --locked exit 1 (refused), --frozen exit 0 installed '0.5.0', lock still records 0.4.0=True
+(e) py.typed is required or mypy refuses the import            : OK
+    mypy with py.typed exit 0, without py.typed exit 1 (import-untyped=True)
+
+--- verdict --------------------------------------------------------
+cases measured : 8
+expectations   : all held
+0
+```
+
+The two unit tests are `test_the_library_is_consumed_from_the_sibling_checkout` (the
+`[project].dependencies` entry, the `[tool.uv.sources]` `path` and `editable = true`) and
+`test_the_library_is_not_a_uv_workspace_member`. The probe measures `uv` against a **two-module
+stand-in** library, not the real skeleton, and it never reads this repository
+(`docs/production-gaps.md`, row *Consumption probe's stand-in scope*).
+
+**ACC-P10-005** — library standard, not the application set, and no workspace membership
+(REQ-NF-019):
+
+```text
+$ ls ../as_platform/docs/
+api-reference.md
+compatibility-matrix.md
+integration-guide.md
+
+$ uv run pytest ../as_platform/tests/test_library_standard.py -q
+6 passed in 0.02s
+
+$ uv run pytest tests/unit/test_repository_baseline.py -q -k workspace
+1 passed, 55 deselected in 0.02s
+```
+
+The library-side file carries the three-document checks, the "the application document set is not
+copied" check, the `Makefile` / CI / `pyproject.toml` assertions and
+`test_the_library_is_a_standalone_distribution_not_a_workspace_member` (no `[tool.uv.workspace]`
+table **and** `[project]` self-reports `as-platform`). Nothing under `../as_platform/docs/` is one
+of this repository's documents.
+
+**ACC-P10-006** — the seams exist, the second implementations do not (REQ-NF-020):
+
+```text
+$ uv run pytest ../as_platform/tests/test_seams.py -q
+4 passed in 0.02s
+```
+
+`test_the_library_ships_no_tls_no_redis_and_no_capacity_harness` is a lower-cased **substring**
+match over each module's stem (the earlier `stem.split("_")` form missed `tlsconfig.py`; both
+`tlsconfig.py` and `redis_store.py` now turn it red — the mutation is recorded in the stage-4
+record) and `test_the_library_defines_no_second_transport_and_no_second_state_store` is the
+`*Transport` / `*StateStore` class-suffix check. The boundary is honest: **module names**, not
+module content or class names.
+
+**ACC-P10-007** — the seven-step sequence and the per-step green (REQ-F-033):
+
+```text
+$ git log --oneline f041174~1..0b12db2
+0b12db2 refactor(p10): bind the stack and the caller state to the new seams
+8ab507d refactor(p10): derive both AS stacks from the library BaseAsStack
+f341aff refactor(p10): turn both internal API modules into facades over the library
+0319c8d refactor(p10): rewire both controllers onto the shared shell
+9a59756 refactor(p10): drop the version helper the extraction orphaned
+efa4386 refactor(p10): move the version chain and the bootstrap plumbing
+ac929a9 refactor(p10): move the leaf modules into the as-platform library
+65aa3c8 docs(p10): correct the ADR's attribution of the single-checkout failure
+f041174 build(p10): consume the as-platform library from the sibling checkout
+```
+
+The library's `main` landed the same moves in order: `9eebe66`, `ee02653`, `7c1355b`, `060ef71`,
+`f82a819`, `734d82c`, `d5e4561`, `d627e73`, `aaa453e`. The per-step green is a **historical**
+property; two steps were re-run here from temporary worktrees (the application checkout detached
+at the step's commit, the library checkout detached at the commit of the same step beside it), and
+both temporary worktrees were removed afterwards — `git worktree list` in both repositories then
+showed only the two main trees, both `git status --short` empty:
+
+```text
+# step 1: application f041174 + library 4caec3e
+94 files already formatted
+All checks passed!
+Success: no issues found in 28 source files
+246 passed in 35.28s
+
+# step 4: application 0319c8d + library 060ef71
+95 files already formatted
+All checks passed!
+Success: no issues found in 29 source files
+246 passed in 35.16s
+```
+
+**No step but these two was re-run**, and no test asserts this property at all.
+
+**ACC-P10-008** — the library's own gate, and the honest CI position (REQ-NF-021):
+
+```text
+$ make lint                       # run in ../as_platform
+uv run ruff format --check .
+33 files already formatted
+uv run ruff check .
+All checks passed!
+uv run mypy
+Success: no issues found in 15 source files
+
+$ uv run pytest -q                # run in ../as_platform
+84 passed in 0.34s
+
+$ uv run python -c "import yaml,pathlib;print(sorted(yaml.safe_load(pathlib.Path('../as_platform/.github/workflows/ci.yml').read_text())['jobs']))"
+['lint', 'test', 'type']
+```
+
+### 2. Log excerpt
+
+The excerpts are **Call-ID keyed traces of real runs** (`pytest -q -s`), one per flow the
+requirements speak about. The values are ephemeral per run and none is normalised.
+
+The **number-translation** call (`tests/e2e/test_call_flows.py -q -s`), keyed on
+`3e75b0d1850d2b1eb53fe78d8347f189` — a complete call through one B2BUA:
+
+```text
+call-id 3e75b0d1850d2b1eb53fe78d8347f189
+  2026-09-20T02:46:12.407+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-20T02:46:12.408+00:00  internal -        decision route: China Mobile subscribers, E.164 in and national format out
+  2026-09-20T02:46:12.408+00:00  out      next_hop INVITE  invite originated towards the next hop
+  2026-09-20T02:46:12.410+00:00  in       next_hop 100     100 Trying on the next-hop leg
+  2026-09-20T02:46:12.410+00:00  out      trunk    100     100 Trying relayed to the trunk leg
+  2026-09-20T02:46:12.613+00:00  in       next_hop 180     180 Ringing on the next-hop leg
+  2026-09-20T02:46:12.614+00:00  out      trunk    180     180 Ringing relayed to the trunk leg
+  2026-09-20T02:46:12.813+00:00  in       next_hop 200     200 OK on the next-hop leg
+  2026-09-20T02:46:12.814+00:00  out      trunk    200     200 OK relayed to the trunk leg
+  2026-09-20T02:46:13.012+00:00  in       next_hop BYE     call released on the next-hop leg
+```
+
+The **anti-fraud** allow and reject paths of one run (`tests/e2e/test_fraud_call_flows.py -q -s`),
+keyed on `ca5fa6017dfadb6c82cf067f5c298cf5` and `999bec4f4a20f6802b3198aadc309168`:
+
+```text
+call-id ca5fa6017dfadb6c82cf067f5c298cf5
+  2026-09-20T02:46:46.935+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-20T02:46:46.936+00:00  internal trunk    verdict allow: no screening signal rejected the call
+  2026-09-20T02:46:46.936+00:00  out      next_hop INVITE  invite relayed towards the next hop
+  2026-09-20T02:46:46.938+00:00  in       next_hop 100     100 Trying on the next-hop leg
+  2026-09-20T02:46:46.938+00:00  out      trunk    100     100 Trying relayed to the trunk leg
+  2026-09-20T02:46:47.141+00:00  in       next_hop 180     180 Ringing on the next-hop leg
+  2026-09-20T02:46:47.141+00:00  out      trunk    180     180 Ringing relayed to the trunk leg
+  2026-09-20T02:46:47.342+00:00  in       next_hop 200     200 OK on the next-hop leg
+  2026-09-20T02:46:47.342+00:00  out      trunk    200     200 OK relayed to the trunk leg
+  2026-09-20T02:46:47.540+00:00  in       next_hop BYE     call released on the next-hop leg
+call-id 999bec4f4a20f6802b3198aadc309168
+  2026-09-20T02:46:47.707+00:00  in       trunk    INVITE  invite received from the trunk
+  2026-09-20T02:46:47.707+00:00  internal trunk    verdict reject: calling party is on the block list
+  2026-09-20T02:46:47.707+00:00  out      trunk    608     608 Rejected answered on the trunk leg
+```
+
+These are the same traces the P8 and P9 runs produced (the extraction changed the code's *home*,
+not its behaviour), which is the observable half of `REQ-F-031`. One honest note on the `-s`
+output: the sippy mock's UAS raises a teardown traceback after the transaction manager is stopped
+(`TypeError: 'NoneType' object is not subscriptable`, from the mock's UAS ring buffer), which is
+noise at the end of the mock's lifetime — the tests themselves pass (`5 passed` / `2 passed`) and
+the traces above are complete.
+
+### 3. CI
+
+**No CI run exists for any P10 commit in either repository, and none can be produced from this
+environment.**
+
+- **Application repository.** `.github/workflows/ci.yml` triggers on `push` / `pull_request`
+  targeting `main` (plus `workflow_dispatch`, which a maintainer would have to start by hand and
+  which no agent may start). P10 is worked on `feat/platform-extraction`, and nothing here is
+  pushed, so no run exists for these commits. On top of that, every CI job now clones the library
+  into `../as_platform` before `uv sync --frozen`, and that clone needs the library **published at
+  a real remote** — the library has **no remote configured yet and has never been pushed**, so CI
+  is not green until it is. That is a registered row: `docs/production-gaps.md` line **134**,
+  *CI second checkout (new dependency)*. A second row, line **131**, records that the library's own
+  gate does **not** run in this repository's CI (*Library gate not in this repository's CI*).
+- **Library repository.** It has its own workflow (`.github/workflows/ci.yml`, three jobs
+  `lint` → `type` → `test`, each `uv sync --frozen`) — but the repository has no remote and has
+  never been pushed, so the workflow is an **unexecuted definition**: no run, no badge, no job
+  conclusion exists for any of its commits.
+
+`AGENT.md` §13 is explicit that the local pre-commit gate is **not** CI and must never be
+presented as a CI result, so the gate in §1 is recorded as a **local** run, not as kind-3
+evidence. This is the one `AGENT.md` §4.8 evidence kind P10 cannot supply from this environment;
+the P8 and P9 sections above record the same position, and nothing here claims a CI result.
+
+### 4. Capture
+
+`docs/specs/message-samples/` was regenerated on 2026-09-20 by `make capture`
+(`tools/capture_call.py`) — 14 sample files plus `README.md`, following
+`NN-direction-method[-qualifier].txt`. The directory is **generated and gitignored** (only its
+`README.md` is tracked), so the evidence is reproduced with `make capture`, not read from the
+repository, and `git status --short docs/specs/` stays clean.
+
+Key files of the run (Call-IDs are ephemeral):
+
+```text
+01-in-invite-trunk.txt
+  INVITE sip:+8613800138000@127.0.0.1:47594 SIP/2.0
+  Call-ID: a04c3c9728bbfc98f09cf1ee277a1692
+  P-Asserted-Identity: <sip:+86216180001@ims.example.invalid>
+
+03-out-invite-core.txt
+  INVITE sip:013800138000@127.0.0.1:46743 SIP/2.0
+  Call-ID: a04c3c9728bbfc98f09cf1ee277a1692-b2b_1
+```
+
+The outbound leg carries the inbound Call-ID plus the AS suffix `-b2b_1` and the translated
+number, i.e. the extraction left the wire bytes exactly as `ACC-M1-005` / `ACC-M2-005` recorded
+them. There is **no pcap** anywhere in the repository and none is produced: `AGENT.md` §13 forbids
+committing captures, and the samples above are the message-level reference.
+
+### Item results
+
+| ID | Result |
+| --- | --- |
+| ACC-P10-001 | **accepted** — the library repository exists at `../as_platform` with the extraction commits and `VERSION` `0.1.0`; `uv sync --frozen` resolves it; `1 passed, 55 deselected`. The "reference implementation" half is unasserted (below) |
+| ACC-P10-002 | **accepted** — library independence grep exits `1` with no match; `2 passed`; `1 passed, 55 deselected` for the application's one-way invariant |
+| ACC-P10-003 | **accepted** — `210` / `36` / `9` with the same lint and type results; the counts are above the pre-extraction baseline because tests were added, and no assertion was loosened |
+| ACC-P10-004 | **accepted** — `2 passed, 54 deselected`; the probe measured 8 cases, all expectations held, exit `0`. Its stand-in scope is a registered limitation |
+| ACC-P10-005 | **accepted** — the three library documents exist; `6 passed`; `1 passed, 55 deselected` for the workspace half |
+| ACC-P10-006 | **accepted** — `4 passed`; the module-name vocabulary check trips on `tlsconfig.py` and `redis_store.py`. P11 rewrites these assertions by design |
+| ACC-P10-007 | **accepted** — the nine-commit sequence in order; two of the seven steps re-run green (`246 passed` each) from temporary worktrees, both removed and both trees left clean. **No test asserts this**, and only two steps were re-run (below) |
+| ACC-P10-008 | **accepted** — library gate `33` / `All checks passed!` / `15 source files` / `84 passed`; the workflow declares `['lint', 'test', 'type']`. Kind 3 is not producible (below) |
+
+### Evidence kinds per item
+
+| Item | Kind 1 (command + output) | Kind 2 (Call-ID log) | Kind 3 (CI) | Kind 4 (capture) |
+| --- | --- | --- | --- | --- |
+| ACC-P10-001 | yes — §1 (`1 passed, 55 deselected`; library log, `VERSION`, sync) | **n/a** — a repository-shape check emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-002 | yes — §1 (grep exit `1`; `2 passed`; `1 passed`) | **n/a** — an import check emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-003 | yes — §1 (the gate block: `210` / `36` / `9`) | yes — **§2**: three keyed traces of real runs, the same shape P8/P9 recorded | **not producible** — §3 | yes — **§4**: `make capture`, 14 samples; `01` and `03` quoted (generated and gitignored) |
+| ACC-P10-004 | yes — §1 (`2 passed, 54 deselected`; probe 8 cases, exit `0`) | **n/a** — `uv` resolution emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-005 | yes — §1 (`ls`; `6 passed`; `1 passed`) | **n/a** — a manifest/document check emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-006 | yes — §1 (`4 passed`) | **n/a** — a module-name check emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-007 | yes — §1 (the commit sequence and the two worktree gates) | **n/a** — a commit-graph and per-step gate check emits no call | **not producible** — §3 | **n/a** — no wire artefact |
+| ACC-P10-008 | yes — §1 (library gate `33` / `15` / `84 passed`; job list) | **n/a** — a gate check emits no call | **not producible** — §3: the library has no remote and has never been pushed | **n/a** — no wire artefact |
+
+Kind 3 is the one kind P10 cannot supply for **any** item, for the two reasons in §3 — it is
+recorded honestly rather than substituted, and the maintainer's post-merge `main` run replaces it
+once the library is published. Kind 2 belongs to the behaviour item (ACC-P10-003): the extraction
+is a pure refactor, so the Call-ID keyed traces are its observable evidence; the other items are
+structural checks that emit no call, and each says so instead of borrowing ACC-P10-003's trace.
+
+### Accepted limitations and open items
+
+Consistent with the stage-4 position, and not hidden:
+
+- **`REQ-F-033` has no test.** "The extraction is staged and every step leaves the layers green"
+  is a **process and historical property**, not a property of the artefacts; the stage-4 record
+  states this and ACC-P10-007 verifies the sequence and two re-run steps instead. The other five
+  steps' green is **asserted by the commit messages, not re-measured here**.
+- **`REQ-F-029`'s "reference implementation" half has no assertion.** It is a role statement about
+  this repository's relationship to the library, not a property a test can check; only the *user*
+  half is asserted (`test_both_as_instances_are_users_of_the_platform_library`, ruled kept by the
+  maintainer).
+- **`ACC-P10-003`'s counts are not the pre-extraction counts.** `255` total today against `246`
+  before the extraction; the increase is added tests (the trunk-answer regression, the
+  fraud-controller overrides, the sibling-checkout and workspace rows). No test was deleted,
+  loosened or reclassified — independently checked at the stage-4 gate — but the criterion must
+  not be read as "the same numbers as before".
+- **The consumption probe measures a stand-in, not the real skeleton.** `uv`'s resolution and
+  install behaviour is measured against a two-module throwaway library
+  (`docs/production-gaps.md` line **133**, *Consumption probe's stand-in scope*); it says nothing
+  about the extracted code's runtime, which is instead covered by the three layers. The
+  **single-checkout failure** ("clone without the sibling → resolution fails") cannot be a test in
+  a tree that *has* the sibling, so it stays the recorded cost of `REQ-F-032`.
+- **The library's gate does not run in this repository's CI** (`docs/production-gaps.md` line
+  **131**, ADR-0009 decision 8): a library change can pass here while failing the library's own
+  gate. Recorded, not fixed in P10.
+- **No CI at all, in either repository** (`docs/production-gaps.md` line **134**): the library has
+  no remote and has never been pushed, so its workflow has never run and this repository's jobs
+  could not clone it. Kind 3 is therefore absent for every P10 item — see §3.
+- **`ACC-P10-006`'s seam assertions are a deliberate tripwire that P11 rewrites.** P11 adds TLS and
+  Redis behind the seams, which is exactly what those two tests forbid today; the rewrite is
+  planned work, not a defect, and the library's seam tests are named as P11's first edit.
+- **Neither repository's `mypy` covers `tests/`.** Pre-existing configuration (both manifests list
+  only their `src/` packages), not introduced by P10; recorded at the stage-4 gate and **escalated
+  to the maintainer** as a gate-scope question — widening a repository-wide gate is not a stage's
+  decision.
+- **One stage-4 test is "redundant but not vacuous".**
+  `test_the_peer_status_key_never_renders_the_internal_hop_name` is a strict subset of
+  `test_the_peer_status_key_is_the_address_and_port`; it was **kept** (the maintainer's ruling and
+  the P9 stage-4 precedent) because it records an independent intent, and removing the override
+  does fail it.
+- **The requirements' status rows were deliberately left at `planned`.** The git history decides
+  this, and it does not show the acceptance stage flipping them: for P9, `REQ-F-025…028` were still
+  `planned` in `f68ed27 docs(p9): add the P9 acceptance items and their evidence` and were flipped
+  to `done` only in `06f8ed9 chore(p9): close the item — SRS, demo docs, version 0.7.0 and
+  CHANGELOG`, which is a descendant of both acceptance commits (`f68ed27`, `4d3e924`) and performs
+  the item close of `docs/phase2-plan.md` §5.4. `REQ-NF-016…018` flipped in the same commit. So
+  `REQ-F-029…033` and `REQ-NF-019…021` are **not** flipped here; they flip at the item close, and
+  the decision to do so is the parent's.
+- **The requirements' text is frozen and one delta is carried instead.** `REQ-F-023` still names
+  `src/as_app/errors.py`; after the extraction the mechanism is the library's and the family lives
+  in `src/anti_fraud_as/errors.py` — recorded in the SRS traceability note, not reworded
+  (`docs/production-gaps.md` line **132**). P10 added no new requirement text.
+- **The `-s` traces carry sippy's mock-teardown traceback noise.** A `TypeError` from the mock's
+  UAS ring buffer after the transaction manager is stopped appears at the end of a `-s` run; it is
+  teardown noise, not a test failure (see §2), and it is disclosed rather than trimmed.
+
+### Definition of Done (AGENT.md section 16)
+
+This section was added at P10's **item close** (`docs/phase2-plan.md` §5.4 step 1, `AGENT.md` §15
+closing ritual, item 1), **after** the stage-5 read-only review gate had already run over the
+acceptance record — the close is not a §5.1 stage, so it has no review gate of its own (§5.2 sets a
+gate per stage only). It is therefore **not** part of what that gate reviewed: stage 5's `git diff
+--name-only d57c309..225a851` → two files is a statement about those commits and still holds; this
+section post-dates them.
+
+The commands below were **re-run in this working tree on 2026-09-20** and these are this run's
+numbers, not the acceptance-record figures copied forward. §16's checklist, item by item:
+
+| # | §16 item | Result |
+| --- | --- | --- |
+| 1 | Feature works end to end; `make demo` passes from a clean checkout | **Passed, with a recorded caveat** — `make demo` exits `0` and prints `demo result: call answered and released; number translation applied on the wire`. The "from a clean checkout" wording is now "from **two** sibling checkouts": this run was made in this working tree **with the library present at `../as_platform`**, and a checkout without the sibling cannot resolve the `path` dependency. That is the accepted cost of `REQ-F-032` (ADR-0009 decision 8), not a single-clone rehearsal — see the honest declaration below. |
+| 2 | Unit + integration + e2e tests added and green | **Passed** — `210 passed` / `36 passed` / `9 passed` (`255` total). The counts are **above** the pre-extraction baseline because the implementation and tests stages *added* tests; no test was deleted, loosened or reclassified (ACC-P10-003 and the accepted limitations above). |
+| 3 | `ruff format`, `ruff check`, `mypy` clean | **Passed** — `96 files already formatted`, `All checks passed!`, `Success: no issues found in 29 source files`. |
+| 4 | Console reflects the new capability (from M3 onward) | **Not applicable as a new capability** — P10 is a pure refactor, so the console shows nothing new. It stays wired to the same internal API over the library's `internal_api` shell, and `src/console/` is untouched by every P10 commit (`git diff --name-only phase2...HEAD -- src/console/` is empty), which is the point of the item. |
+| 5 | README and the affected documents updated | **Passed** — `AGENT.md` §5/§10, the `README.md` quickstart and the structural documents were updated in the implementation stage (`2848f34`); this close adds the two demo documents (§0 quickstart) and this record. |
+| 6 | Requirement IDs, acceptance items and CHANGELOG updated for the behaviour change | **Passed** — `REQ-F-029…033` / `REQ-NF-019…021` set to `done`; `ACC-P10-001…008` accepted with evidence; the `[0.8.0]` CHANGELOG node opened — all in this close. |
+| 7 | New POC shortcuts registered in `docs/production-gaps.md` | **Passed** — the four P10 rows are present (`Library gate not in this repository's CI` :131, the `REQ-F-023` location delta :132, `Consumption probe's stand-in scope` :133, `CI second checkout (new dependency)` :134), added in `2848f34`. |
+| 8 | `AGENT.md` and `docs/README.md` updated if anything structural changed | **Passed** — the sibling library repository is in `AGENT.md` §5 and in the `docs/README.md` map, and the ADR index range reaches `ADR-0009` (`2848f34`). |
+| 9 | Acceptance items for the milestone carried out with evidence per §4.8 | **Passed** — `ACC-P10-001…008` carry kinds 1, 2 and 4 as evidence or as an explicit honest declaration, and kind 3 is declared **not producible in either repository** (§3). |
+| 10 | Version bumped (the tag is the maintainer's step; agents do not tag) | **Passed** — `VERSION` / `pyproject.toml` / `uv.lock` bumped together to **`0.8.0`** and the editable install re-synced. The **library** keeps `VERSION` `0.1.0` with no new node; the reason is in `docs/phase2-plan.md` §3 P10 (its `[0.1.0]` node already describes the whole extraction, which was never released or tagged). **No tag is created** (`AGENT.md` §13/§15). |
+| 11 | No secrets, certificates or real traffic captures committed | **Passed** — the private-key scan returns no match (exit `1`), `.env` is absent and `git status --porcelain` is empty. |
+
+The raw output of this run:
+
+```text
+$ make lint
+uv sync
+Resolved 51 packages in 1ms
+Checked 50 packages in 0.47ms
+uv run ruff format --check .
+96 files already formatted
+uv run ruff check .
+All checks passed!
+uv run mypy
+Success: no issues found in 29 source files
+
+$ uv run pytest tests/unit -m unit -q
+210 passed in 1.05s
+$ uv run pytest tests/integration -m integration -q
+36 passed in 29.88s
+$ uv run pytest tests/e2e -m e2e -q
+9 passed in 4.27s
+
+$ make demo                       # exit 0; transcript trimmed to its key lines
+scenario    : office-to-mobile
+rule        : R-MOB-CM-40
+translation : called number -> 013800138000
+status      : 200
+released    : True
+demo result: call answered and released; number translation applied on the wire
+
+$ uv run python tools/path_dependency_probe.py ; echo $?
+cases measured : 8
+expectations   : all held
+0
+
+$ git grep -nE "BEGIN (RSA|EC|DSA|OPENSSH|PRIVATE) KEY" -- . ; echo $?
+1
+$ test ! -e .env && echo ".env absent"
+.env absent
+$ git status --porcelain
+                                  # empty
+```
+
+**Honest declaration.** `make demo` was run **in this working tree, with the sibling library
+repository present at `../as_platform`** — it is **not** a single-clean-checkout rehearsal. After
+P10 the §16 item-1 wording "from a clean checkout" is really "from **two** sibling checkouts": the
+`path` dependency cannot resolve without the sibling, so that is the **accepted cost of
+`REQ-F-032`** (an explicit recorded exception, ADR-0009 decision 8), and this record does not
+present it as more than it is. Nothing is pushed and nothing is tagged (`AGENT.md` §13/§15).

@@ -2,8 +2,19 @@ name: CI
 
 # Quality gates in layers, as required by AGENT.md section 4.7:
 # lint -> type check -> unit -> integration -> e2e.
-# The dependency lock is verified: every job runs `uv sync --frozen`, which fails when
-# uv.lock is not in sync with pyproject.toml.
+# The dependency lock is verified for REGISTRY dependencies: every job runs `uv sync
+# --frozen`, which fails when uv.lock is not in sync with pyproject.toml. It does NOT
+# guard the `as-platform` path dependency (ADR-0009 decision 6): a `path` source has no
+# version to resolve against, so `--frozen` accepts a version skew silently and leaves
+# the lock stale. That path dependency is why every job below clones the platform
+# library repository beside this one before `uv sync` — a single checkout cannot resolve
+# `../as_platform`.
+#
+# HONESTY: the library repository has NO remote configured yet and has never been pushed,
+# so the clone URL below is an ASSUMPTION about where it will be published (the clone
+# needs the library at `<owner>/as_platform`). Until it is published there, a fresh clone
+# of this repository cannot resolve `../as_platform` and CI is NOT green. See the P10
+# section of docs/production-gaps.md and ADR-0009 decision 6.
 
 on:
   # Documentation-only changes skip the gates: there is no code, dependency or
@@ -26,6 +37,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# OCR-R06 TODO: every job clones as_platform with `--depth 1` + default HEAD,
+# which means the clone drifts silently over time. Pin a concrete ref via
+# repo variable `AS_PLATFORM_REF` when as_platform is published.
+
 env:
   PYTHON_VERSION: "3.10"
   UV_VERSION: "0.12.15"
@@ -34,8 +49,12 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Clone the platform library beside this repository
+        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
       - name: Set up Python
@@ -50,8 +69,12 @@ jobs:
   type-check:
     name: type
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Clone the platform library beside this repository
+        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
       - name: Set up Python
@@ -65,8 +88,12 @@ jobs:
     name: unit
     runs-on: ubuntu-latest
     needs: [lint, type-check]
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Clone the platform library beside this repository
+        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
       - name: Set up Python
@@ -80,8 +107,12 @@ jobs:
     name: integration
     runs-on: ubuntu-latest
     needs: [unit]
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Clone the platform library beside this repository
+        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
       - name: Set up Python
@@ -95,8 +126,12 @@ jobs:
     name: e2e
     runs-on: ubuntu-latest
     needs: [integration]
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Clone the platform library beside this repository
+        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
       - name: Set up Python

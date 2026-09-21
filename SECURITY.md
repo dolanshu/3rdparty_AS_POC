@@ -10,7 +10,7 @@ deployed on a network that carries real subscriber traffic.
 The following are known gaps, registered in `docs/production-gaps.md` and in ADR-0003 /
 ADR-0006. Do not imply in documentation, logs or demos that they exist:
 
-- **No TLS.** The trunk is UDP only; SIP over TLS is not implemented.
+- **No production TLS on the trunk.** The demo stack is UDP only. The platform library (`../as_platform`, P11, ADR-0010) ships a `TlsTransport` that terminates TLS at the library's `Transport` seam, independently of sippy. A production deployment that terminates TLS at the AS boundary is not in this repository's scope (no real certificate management, no cipher policy, no OCSP).
 - **No SIP Digest authentication.** The only peer check is the source address allowlist
   configured with `ALLOWED_PEERS`.
 - **No DoS protection.** No rate limiting, no call admission control, no black or white

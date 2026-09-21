@@ -38,6 +38,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RULES_FILE = REPO_ROOT / "config" / "routing_rules.yaml"
+SCREENING_FILE = REPO_ROOT / "config" / "caller_screening.yaml"
 
 #: Loopback address the trunk is exercised on.
 TRUNK_ADDRESS = "127.0.0.1"
@@ -141,6 +142,37 @@ class TrunkPair:
         self._stopped = True
 
 
+@dataclass
+class ChainedPair(TrunkPair):
+    """Two AS instances in series plus the mock, wired on loopback UDP.
+
+    The chain of ``docs/architecture/lld.md`` section 10 is
+    ``emulated S-CSCF -> AS-1 (anti-fraud) -> AS-2 (number translation) -> emulated core``.
+    ``as_stack`` (inherited) is **AS-1**, the trunk entry and the anti-fraud instance;
+    :attr:`second_as` is **AS-2**, the number-translation instance. ``place_call``,
+    ``outcome_for`` and ``run_until`` are inherited unchanged: the mock is still the only
+    trunk peer, so the chain is transparent to them.
+
+    Attributes:
+        second_as: AS-2's signalling stack, already bound.
+    """
+
+    second_as: Any = None
+
+    def stop(self) -> None:
+        """Release every port the pair holds, both AS instances included.
+
+        AS-2 shares the process-wide ``ED2`` loop with AS-1 and the mock, so a chain that
+        stopped only the inherited pair would leave AS-2's transactions and loop-owned
+        timers armed for later tests.
+        """
+        if self._stopped:
+            return
+        if self.second_as is not None:
+            self.second_as.stop()
+        super().stop()
+
+
 def _free_udp_port() -> int:
     """Reserve a free UDP port on loopback.
 
@@ -150,6 +182,252 @@ def _free_udp_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.bind((TRUNK_ADDRESS, 0))
         return int(probe.getsockname()[1])
+
+
+@pytest.fixture(scope="session")
+def shipped_screening_file() -> Path:
+    """Return the path of the shipped sample screening data.
+
+    Returns:
+        Path of ``config/caller_screening.yaml``.
+    """
+    return SCREENING_FILE
+
+
+@pytest.fixture
+def screening_file(shipped_screening_file: Path, tmp_path: Path) -> Path:
+    """Return an editable copy of the shipped screening data.
+
+    The anti-fraud AS reloads its data file when it changes, so a test that exercises the
+    reload has to edit a file rather than the shipped one. The copy lives in the per-test
+    temporary directory, so ``config/`` is never written to by a test.
+
+    Args:
+        shipped_screening_file: Path of the shipped screening data.
+        tmp_path: Per-test temporary directory.
+
+    Returns:
+        Path of the per-test copy.
+    """
+    target = tmp_path / "caller_screening.yaml"
+    target.write_text(shipped_screening_file.read_text(encoding="utf-8"), encoding="utf-8")
+    return target
+
+
+@pytest.fixture
+def fraud_pair_factory(screening_file: Path):
+    """Return a factory that binds the anti-fraud AS and the mock on loopback UDP.
+
+    The second AS needs its own fixture rather than a copy of ``trunk_pair``: its stack is a
+    different class with its own settings model, its own data file and a process-level state
+    store a test may want to inject a clock into. What *is* shared is :class:`TrunkPair`,
+    which is stack-agnostic (``place_call``, ``outcome_for``, ``run_until``, ``stop``), so it
+    is reused rather than duplicated.
+
+    Args:
+        screening_file: Screening data the AS loads, editable by the test.
+
+    Yields:
+        A callable that binds one pair; every pair it built is stopped afterwards.
+    """
+    from anti_fraud_as.bootstrap import FraudAsSettings
+    from anti_fraud_as.main import FraudAsStack
+    from as_app.observability.metrics import MetricsRegistry
+    from as_app.observability.tracing import SipMessageRecorder, TraceRecorder
+    from s_sbc_mock.main import MockConfig, SMockApplication
+
+    built: list[TrunkPair] = []
+
+    def build(
+        *,
+        screening_path: Path | None = None,
+        caller_state: Any = None,
+        allowed_peers: list[str] | None = None,
+        peer_port: int | None = None,
+    ) -> TrunkPair:
+        """Bind one anti-fraud AS and one mock on ephemeral ports.
+
+        Args:
+            screening_path: Screening data file to load; defaults to the fixture's copy.
+            caller_state: Process-level state store to inject; the stack builds its own
+                from the screening data when omitted.
+            allowed_peers: Trunk peers accepted; defaults to loopback.
+            peer_port: Next hop the AS relays an allowed INVITE to. Defaults to the mock's
+                core port; pass an unbound port to exercise a peer that never answers.
+
+        Returns:
+            A bound :class:`TrunkPair`.
+        """
+        as_port, core_port, trunk_port, api_port = (
+            _free_udp_port(),
+            _free_udp_port(),
+            _free_udp_port(),
+            _free_udp_port(),
+        )
+        settings = FraudAsSettings(
+            _env_file=None,
+            fraud_sip_listen_address=TRUNK_ADDRESS,
+            fraud_sip_listen_port=as_port,
+            fraud_sbc_peer_address=TRUNK_ADDRESS,
+            fraud_sbc_peer_port=peer_port or core_port,
+            fraud_allowed_peers=list(allowed_peers or [TRUNK_ADDRESS]),
+            fraud_screening_file=screening_path or screening_file,
+            fraud_internal_api_address=TRUNK_ADDRESS,
+            fraud_internal_api_port=api_port,
+            log_payloads=False,
+        )
+        # Fresh registry and recorder per pair: the process-wide singletons would make the
+        # counters accumulate across tests and hide a miscount.
+        messages = SipMessageRecorder()
+        stack = FraudAsStack(
+            settings,
+            caller_state=caller_state,
+            metrics=MetricsRegistry(),
+            tracer=TraceRecorder(),
+            sip_logger=messages,
+        )
+        stack.start()
+        mock = SMockApplication(
+            MockConfig(
+                listen_address=TRUNK_ADDRESS,
+                listen_port=core_port,
+                as_address=TRUNK_ADDRESS,
+                as_port=as_port,
+            ),
+            sip_logger=SipMessageRecorder(),
+            uac_local_port=trunk_port,
+        )
+        mock.start()
+        pair = TrunkPair(stack, mock, as_port, core_port, trunk_port, messages)
+        built.append(pair)
+        return pair
+
+    try:
+        yield build
+    finally:
+        for pair in built:
+            pair.stop()
+
+
+@pytest.fixture
+def fraud_trunk_pair(fraud_pair_factory) -> TrunkPair:
+    """Return an anti-fraud AS and a mock S-SBC wired to each other on the loopback.
+
+    Args:
+        fraud_pair_factory: Factory that binds and later releases the pair.
+
+    Returns:
+        A bound :class:`TrunkPair` using the shipped screening data.
+    """
+    return fraud_pair_factory()
+
+
+@pytest.fixture
+def chained_pair_factory(screening_file: Path, rules_file: Path, tmp_path: Path):
+    """Return a factory that binds both AS instances and the mock on loopback UDP.
+
+    The chain of ``docs/architecture/lld.md`` section 10 is wired **by configuration only**
+    (REQ-F-026): AS-1's configured next hop (``fraud_sbc_peer_*``) is set to AS-2's listen
+    address, and AS-2 selects its next hop from the routing catalogue. Both hops therefore
+    have to be built here — the peer knob on one side and the rewritten catalogue on the
+    other — and the two stacks each get their own ``MetricsRegistry`` / ``TraceRecorder``,
+    because both default to process-wide singletons and a shared recorder would mix the two
+    instances' traces (ADR-0008).
+
+    Args:
+        screening_file: Screening data AS-1 loads, editable by the test.
+        rules_file: Rule catalogue AS-2 loads, whose next-hop ports are rewritten.
+        tmp_path: Per-test temporary directory for the rewritten catalogue.
+
+    Yields:
+        A callable that binds one chain; every chain it built is stopped afterwards.
+    """
+    from anti_fraud_as.bootstrap import FraudAsSettings
+    from anti_fraud_as.main import FraudAsStack
+    from as_app.bootstrap import AsSettings
+    from as_app.main import AsStack
+    from as_app.observability.metrics import MetricsRegistry
+    from as_app.observability.tracing import SipMessageRecorder, TraceRecorder
+    from s_sbc_mock.main import MockConfig, SMockApplication
+
+    built: list[ChainedPair] = []
+
+    def build(
+        *,
+        screening_path: Path | None = None,
+        allowed_peers: list[str] | None = None,
+    ) -> ChainedPair:
+        """Bind AS-1, AS-2 and one mock on ephemeral ports.
+
+        Args:
+            screening_path: Screening data AS-1 loads; defaults to the fixture's copy.
+            allowed_peers: Trunk peers accepted by both AS instances; defaults to loopback.
+
+        Returns:
+            A bound :class:`ChainedPair`.
+        """
+        as1_port, as2_port, core_port, trunk_port = (
+            _free_udp_port(),
+            _free_udp_port(),
+            _free_udp_port(),
+            _free_udp_port(),
+        )
+        # AS-2's next hop is a catalogue entry, so the shipped demo ports have to be
+        # rewritten onto the mock's core port; AS-1's next hop is the peer knob below.
+        second_rules = _rewrite_next_hops(rules_file, tmp_path, core_port)
+        as1_messages = SipMessageRecorder()
+        as1 = FraudAsStack(
+            FraudAsSettings(
+                _env_file=None,
+                fraud_sip_listen_address=TRUNK_ADDRESS,
+                fraud_sip_listen_port=as1_port,
+                fraud_sbc_peer_address=TRUNK_ADDRESS,
+                fraud_sbc_peer_port=as2_port,
+                fraud_allowed_peers=list(allowed_peers or [TRUNK_ADDRESS]),
+                fraud_screening_file=screening_path or screening_file,
+                log_payloads=False,
+            ),
+            metrics=MetricsRegistry(),
+            tracer=TraceRecorder(),
+            sip_logger=as1_messages,
+        )
+        as2 = AsStack(
+            AsSettings(
+                _env_file=None,
+                sip_listen_address=TRUNK_ADDRESS,
+                sip_listen_port=as2_port,
+                sbc_peer_address=TRUNK_ADDRESS,
+                sbc_peer_port=core_port,
+                allowed_peers=list(allowed_peers or [TRUNK_ADDRESS]),
+                rules_file=second_rules,
+                log_payloads=False,
+            ),
+            metrics=MetricsRegistry(),
+            tracer=TraceRecorder(),
+            sip_logger=SipMessageRecorder(),
+        )
+        mock = SMockApplication(
+            MockConfig(
+                listen_address=TRUNK_ADDRESS,
+                listen_port=core_port,
+                as_address=TRUNK_ADDRESS,
+                as_port=as1_port,
+            ),
+            sip_logger=SipMessageRecorder(),
+            uac_local_port=trunk_port,
+        )
+        as1.start()
+        as2.start()
+        mock.start()
+        pair = ChainedPair(as1, mock, as1_port, core_port, trunk_port, as1_messages, second_as=as2)
+        built.append(pair)
+        return pair
+
+    try:
+        yield build
+    finally:
+        for pair in built:
+            pair.stop()
 
 
 @pytest.fixture(scope="session")

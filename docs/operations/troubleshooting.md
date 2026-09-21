@@ -45,6 +45,19 @@ Symptom → cause → action. Every entry names the error code you would see in 
 | `AS-PEER-003 request ... could not be parsed` | Malformed Request-URI, or a URI without a user part | Capture and inspect the message |
 | `AS-PEER-002 next hop peer did not answer` | The next hop is down or a firewall drops UDP | Check the peer; check the pcap |
 
+## Screening (anti-fraud AS, P8)
+
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| A caller is answered `608 Rejected` and `AS-FRAUD-001` / `-002` / `-003` | The screening verdict rejected the call: on the block list, over the call-rate window, or under the reputation threshold | Intended. The trace `verdict` event names the deciding signal and the matched list entry; adjust `config/caller_screening.yaml` if the party must be delivered. The three codes share the `608` status, so the **code** says which signal fired |
+| A caller that used to be allowed is rejected after a burst of calls | The call-rate window (or the reputation penalty a rejection applies) is still in force | Expected: the penalty decays towards `reputation.default_score` with `reputation.half_life_seconds`. Wait for the half-life, raise `window.max_calls`, or add the party to `allow_list` |
+| `AS-FRAUD-004 screening data file cannot be read` | `FRAUD_SCREENING_FILE` points at a missing or unreadable file | Fix the path; the process fails fast at startup and keeps the previous data on a reload |
+| `AS-FRAUD-005 screening data file violates the schema` | A broken edit: an entry with both `number` and `prefix` (or neither), a duplicate, a value in both lists, or an unusable window/reputation value | Run `uv run python -m anti_fraud_as.main --self-check-only` to see the validation error; the previous data stays active until the file is valid |
+| A rejected call logged `sip_608_declared=false` | The INVITE did not declare `sip.608` in `Feature-Caps` (RFC 8688 section 3.3) | The AS still answers `608` (section 3.4), but the section 3.4 announcement obligation is unmet — a registered gap, not a defect. Expected for a UAC that does not declare it |
+| `AS-CFG-003 signalling port cannot be bound` when starting the anti-fraud AS | Its trunk port collides with the number-translation AS, which defaults to `5060` | The anti-fraud AS defaults to `5062`; set `FRAUD_SIP_LISTEN_PORT` (and `FRAUD_INTERNAL_API_PORT`) to free ports |
+| The console's Rules view is empty when pointed at `8082` | The anti-fraud AS has no rule set | Expected: use the **Screening** view or the Configuration view, both of which read `/api/v1/screening` |
+| `/healthz` on `8082` reports `degraded` | No screening data is active | Check `FRAUD_SCREENING_FILE` and the startup log |
+
 ## Tooling
 
 | Symptom | Cause | Action |

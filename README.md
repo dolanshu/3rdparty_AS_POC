@@ -2,7 +2,9 @@
 
 A proof of concept of a **third-party IMS/SIP Application Server (B2BUA)** that lives
 outside the operator's network and is reached over a SIP trunk from the operator's
-Service-SBC. It performs number translation and intelligent routing for an enterprise.
+Service-SBC. Two use cases, each its own process: **number translation and intelligent
+routing** for an enterprise, and an **anti-fraud screen** that inspects the calling party
+and answers unwanted calls with `608 Rejected` (RFC 8688).
 **Signalling only** — no media, no RTP.
 
 Read `AGENT.md` first: it defines the delivery standards, the layout and the rules of
@@ -28,26 +30,40 @@ engagement for this repository.
   be pointed at a real S-SBC by changing configuration only.
 - We are a **B2BUA and only a B2BUA**: terminate the incoming INVITE, translate the
   number, originate a new INVITE back. Redirect mode (`302`) is **not** implemented.
+- The **anti-fraud AS** is a second, separate process: it inspects the **calling** party and
+  either relays the INVITE unchanged or answers `608 Rejected` (RFC 8688). Its reject path is
+  **UAS only** — it originates no second leg — which is the documented deviation from
+  "B2BUA only", limited to that path (`REQ-F-021`).
 - Headers and SDP are **passed through verbatim**; only the Request-URI and the number
-  format are rewritten.
-- Routing rules are **declarative data** and read-only on the console.
+  format are rewritten, and only by the number-translation AS.
+- Routing rules and screening data are **declarative data** under `config/`, read-only on
+  the console.
 
 ## Quickstart
 
 ```bash
-git clone https://github.com/dolanshu/3rdparty_AS_POC.git
+# Clone both repositories side by side: the platform library first, then this one.
+git clone https://github.com/dolanshu/as_platform.git        # the platform library (sibling checkout)
+git clone https://github.com/dolanshu/3rdparty_AS_POC.git    # this repository
 cd 3rdparty_AS_POC
 pip install uv          # uv 0.12.15 is what the toolchain was verified with
-uv sync                 # creates .venv from the committed uv.lock
+uv sync                 # creates .venv from the committed uv.lock and links ../as_platform
 
 make lint               # ruff format --check + ruff check + mypy
 make test               # unit + integration + e2e
-make demo               # places a real call and narrates it (see below)
+make demo               # places a real call and narrates the translation (see below)
+make demo-fraud         # screens two real calls: one allowed, one answered 608 Rejected
+make demo-chained       # chains both AS instances: SBC -> anti-fraud -> translation -> core
 ```
 
+`uv sync` resolves the `as-platform` dependency from `../as_platform` (a `path` source with
+`editable = true`, ADR-0009 decision 6), so the two directories must be siblings; a checkout
+of this repository alone does not resolve it.
+
 Fallback without `uv` (maintainer-approved): `python3 -m venv .venv`, activate it, then
-`pip install sippy==2.4.2 pydantic pydantic-settings pyyaml pytest ruff mypy fastapi
-uvicorn`.
+`pip install -e ../as_platform` (the sibling library that `uv` links through the `path`
+source) followed by `pip install sippy==2.4.2 pydantic pydantic-settings pyyaml pytest ruff
+mypy fastapi uvicorn`.
 
 ### Slow or blocked network (China mirrors)
 
@@ -127,6 +143,61 @@ because the tool reports whether the call was answered. The narrated run-through
 reviewers is `docs/demo-script.md`, and the rule table is still available with
 `make rules`.
 
+**`make demo-fraud` runs the anti-fraud AS on its own ports.** It places two real calls
+through the screening AS — one from a caller the screening data allows, one from a caller on
+the block list — and prints the verdict, the deciding signal, the reputation and the call
+count for each:
+
+```text
+[1/2] call allowed and relayed
+verdict      : allow
+signal       : none
+reason       : no screening signal rejected the call
+final status : 200
+[2/2] call rejected with 608
+verdict      : reject
+signal       : block_list
+list entry   : BL-0001
+final status : 608
+second leg   : none - the AS answered from the UAS side (RFC 8688, no Call-Info)
+```
+
+The rejected call is answered by the AS itself and never reaches the core network: the
+reject path is UAS behaviour and originates no second leg. Nothing is written to the
+repository; the standalone process is `make fraud`.
+
+**`make demo-chained` runs both AS instances in series.** It wires the anti-fraud AS's
+allowed-relay next hop to the number-translation AS's listen address and the number-translation
+AS's next hop to the emulated core, then places an allowed call through the whole chain and a
+blocked one that AS-1 answers `608`:
+
+```text
+[1/2] allowed call relayed through both AS instances
+AS-1 verdict      : allow
+AS-2 rule         : R-MOB-CM-40
+core called number: 013800138000
+final status      : 200
+S-CSCF Call-ID    : 4696dce542819a4c743c5acde2fb43cc
+AS-2 trunk Call-ID: 4696dce542819a4c743c5acde2fb43cc-b2b_1
+core Call-ID      : 4696dce542819a4c743c5acde2fb43cc-b2b_1-b2b_1
+distinct Call-IDs : 3
+ICID preserved    : True
+[2/2] rejected call short-circuits at AS-1
+final status      : 608 (608 Rejected, no second leg)
+AS-2 calls seen   : 0 (the absence is the assertion)
+```
+
+Every leg derives its own dialog `Call-ID`, so the three values differ and cross-AS
+correlation on `Call-ID` is impossible — the `P-Charging-Vector` ICID is on the wire and is
+preserved, but no observability surface is keyed on it (a registered gap). The demo is a
+guard: it exits non-zero if any of those properties fails. It writes nothing.
+
+The console renders **either** AS instance. Each process reports a stable instance identity
+on `/healthz` (`number-translation`, `anti-fraud`), which the page shows in its title, in the
+status bar and as the label of the AS node in the topology view — so it is never ambiguous
+which instance is on screen. Point it at the second one with
+`AS_INTERNAL_API_URL=http://127.0.0.1:8082 make console`.
+
 To verify that the SIP stack really runs:
 
 ```bash
@@ -148,7 +219,12 @@ All configuration is environment based; copy `.env.example` to `.env` and adjust
 | `ALLOWED_PEERS` | `127.0.0.1` | source addresses accepted on the trunk |
 | `RULES_FILE` | `config/routing_rules.yaml` | routing rules |
 | `INTERNAL_API_ADDRESS` / `INTERNAL_API_PORT` | `127.0.0.1` / `8080` | how the console reaches the AS |
-| `LOG_LEVEL`, `LOG_STRUCTURED`, `LOG_PAYLOADS` | `INFO` / `true` / `false` | logging |
+| `FRAUD_SIP_LISTEN_ADDRESS` / `FRAUD_SIP_LISTEN_PORT` | `127.0.0.1` / `5062` | where the **anti-fraud AS** receives the trunk (5062, not 5060, so both instances run on one host) |
+| `FRAUD_SBC_PEER_ADDRESS` / `FRAUD_SBC_PEER_PORT` | `127.0.0.1` / `15061` | next hop an **allowed** INVITE is relayed to |
+| `FRAUD_ALLOWED_PEERS` | `127.0.0.1` | source addresses accepted on the anti-fraud trunk |
+| `FRAUD_SCREENING_FILE` | `config/caller_screening.yaml` | screening data: block/allow lists, window and reputation parameters |
+| `FRAUD_INTERNAL_API_ADDRESS` / `FRAUD_INTERNAL_API_PORT` | `127.0.0.1` / `8082` | how the console reaches the anti-fraud AS |
+| `LOG_LEVEL`, `LOG_STRUCTURED`, `LOG_PAYLOADS` | `INFO` / `true` / `false` | logging (shared by both AS processes) |
 
 Switching from the mock to a real S-SBC is a change of `SBC_PEER_*`, `ALLOWED_PEERS` and the
 next-hop addresses in the active rule set: the AS originates the second leg to the hop the
@@ -159,28 +235,42 @@ rule set selects. Full reference: `docs/architecture/lld.md` section 6 and
 
 ```text
 AGENT.md                 rules of engagement, delivery standards, milestones
-config/                  routing rules (data, hot reloaded)
+config/                  routing rules and screening data (data, hot reloaded)
 deploy/                  docker-compose.yml + one Dockerfile per service
 docs/                    documentation set (see the index below)
+../as_platform/          the platform library (separate repository, checked out beside this one)
+  src/as_platform/       the shared skeleton both AS instances build on: observability,
+                         sip_adapter, hop, error mechanism, bootstrap plumbing, internal-API
+                         shell, controller base, seams (ADR-0009)
 src/as_app/              the third-party AS (sippy application)
-  main.py                entry point: settings, self-check, sippy event loop
-  bootstrap.py           AsSettings, startup self-check, graceful shutdown
-  call_controller.py     Call Control Logic — the business hook
-  sip_adapter.py         thin wrapper around sippy primitives
-  errors.py              AS-* error model mapped to SIP status codes
+  main.py                entry point: AsStack over the library's BaseAsStack
+  bootstrap.py           AsSettings, startup self-check; plumbing re-exported from the library
+  call_controller.py     Call Control Logic — the business hook (decide() over the library base)
+  sip_adapter.py         re-export facade over the library's sippy adapter
+  errors.py              the AS-RULE-* / AS-ROUTE-* family over the library's error mechanism
   routing/rules.py       YAML rule model, loading, reload detection
   routing/engine.py      pure translation and routing decisions
-  observability/         structured logging, counters, per-Call-ID tracing
-  internal_api.py        payloads for the console API
+  observability/         re-export facades over the library's logging, counters and tracing
+  internal_api.py        routes and payloads over the library's internal-API shell
+src/anti_fraud_as/       the second AS: caller screening, 608 Rejected (ADR-0007)
+  main.py                entry point: FraudAsStack over the library's BaseAsStack
+  call_controller.py     the verdict seam, allow relay, UAS-only 608 reject
+  screening.py           pure verdict function (no sockets, no clock)
+  caller_state.py        process-level call-rate window and reputation decay
+  screening_data.py      screening data model, validation, reload
+  internal_api.py        routes and payloads over the library's internal-API shell
 src/console/             FastAPI + plain HTML/CSS/JS, separate process
 src/s_sbc_mock/          mock S-SBC: UAC (S-CSCF trigger) + UAS (core network)
 tests/{unit,integration,e2e}/
-tools/                   sippy probe, rule viewer, capture helper
+tools/                   sippy probe, 608 probe, rule viewer, capture helper, demos
 ```
 
 Rules of the layout: `src/as_app` never imports from `src/s_sbc_mock`; routing decisions
-live in `routing/engine.py` as pure functions; sippy interaction is confined to
-`sip_adapter.py` and `call_controller.py`.
+live in `routing/engine.py` as pure functions; sippy interaction is confined to the sip
+adapter and the call controllers. The shared skeleton of the two AS packages now lives in
+the **platform library** (`../as_platform`, ADR-0009): both `src/as_app` and
+`src/anti_fraud_as` build on it, and the library never imports either — they are two
+concrete AS instances, not a framework (ADR-0007).
 
 ## Non-goals
 
@@ -191,7 +281,7 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 - No performance or capacity work, no benchmarking claims.
 - No production HA, multi-tenancy or auditing.
 - No charging (no CDRs, no RADIUS).
-- No transport beyond UDP: no TCP, no TLS, no SIP Digest.
+- No production-grade transport on the trunk; demo stack is UDP-only. The platform library (`../as_platform`, ADR-0010) ships a pluggable `Transport` seam with `TlsTransport` behind it — TCP is still out of scope, SIP Digest is still out of scope.
 - No production deployment beyond a local `docker compose` demo.
 
 ## Documentation index
@@ -202,25 +292,30 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 | `docs/requirements/functional-and-nonfunctional.md` | `REQ-F-*` / `REQ-NF-*` capability list |
 | `docs/architecture/hld.md` | context, deployment and interface views, message flows |
 | `docs/architecture/lld.md` | modules, data structures, state machines, error codes, log fields |
-| `docs/architecture/adr/` | ADR-0001 … ADR-0006 |
+| `docs/architecture/adr/` | ADR-0001 … ADR-0010: 0007 anti-fraud AS / `608 Rejected`, 0008 chained topology / per-leg `Call-ID`, 0009 platform library extraction / `path` consumption, 0010 P11 TLS + Redis + capacity harness verification |
+| `../as_platform/` (the platform library) | the shared skeleton both AS instances build on, in its own repository checked out beside this one, with its own gate and its library-standard documents (API reference, integration guide, compatibility matrix) |
 | `docs/specs/index.md`, `docs/specs/message-samples/` | normative references and real message samples; the generated samples are gitignored, only the folder `README.md` is tracked |
 | `docs/operations/deployment.md` | topology, port matrix, health checks |
-| `docs/operations/runbook.md` | start, stop, reload rules, inspect state |
+| `docs/operations/runbook.md` | start, stop, reload rules and screening data, inspect state |
 | `docs/operations/troubleshooting.md` | symptom → cause → action |
 | `docs/acceptance/criteria.md` | `ACC-*` items with verification commands |
 | `docs/acceptance/report.md` | results and evidence |
 | `docs/demo-script.md` | the 5–10 minute narrated demo |
 | `docs/glossary.md` | IMS/SIP terminology |
 | `docs/production-gaps.md` | every POC shortcut and what production would require |
-| `docs/roadmap.md` | milestone status, handover notes, open items |
+| `docs/roadmap.md` | milestone status, handover notes, open items — live status board |
+| `docs/phase2-plan.md` | Phase 2 (P8 anti-fraud, P9 chained demo, P10 platform extraction, P11 TLS/Redis/harness): decisions, work sequence, acceptance |
+| `docs/post-phase2-directions.md` | post-phase2 direction candidates (multi-tenancy, STIR/SHAKEN, HA, …) |
 
 ## Development
 
 ```bash
-make dev          # run the AS locally
+make dev          # run the number-translation AS locally
+make fraud        # run the anti-fraud AS locally (separate process, port 5062)
 make lint         # ruff format --check + ruff check + mypy
 make test         # unit + integration + e2e
-make docker-up    # as + s-sbc-mock + console
+make demo-fraud   # screen two real calls and narrate the verdicts
+make docker-up    # as + anti-fraud-as + s-sbc-mock + s-sbc-mock-fraud + console
 ```
 
 See `CONTRIBUTING.md` for the working rules, `SECURITY.md` for what is deliberately not

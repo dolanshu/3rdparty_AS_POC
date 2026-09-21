@@ -21,13 +21,14 @@ from typing import Any
 
 import pytest
 
-from as_app.errors import AsError, AsErrorCode
+from as_app.errors import AsError, SkeletonErrorCode
 from as_app.routing.rules import NextHop
 from as_app.sip_adapter import (
     build_request_uri,
     cancel_transaction_timers,
     extract_called_number,
     is_allowed_peer,
+    outbound_call_id,
 )
 
 pytestmark = pytest.mark.unit
@@ -67,7 +68,7 @@ def test_missing_user_part_is_rejected() -> None:
     """A Request-URI without a user part reports AS-PEER-003."""
     with pytest.raises(AsError) as excinfo:
         extract_called_number("sip:10.0.0.1")
-    assert excinfo.value.code is AsErrorCode.PEER_MALFORMED_REQUEST
+    assert excinfo.value.code is SkeletonErrorCode.PEER_MALFORMED_REQUEST
 
 
 def test_outbound_request_uri_carries_host_port_and_transport() -> None:
@@ -136,3 +137,16 @@ def test_peer_allowlist_accepts_configured_and_rejects_others() -> None:
     """Only configured trunk peers are accepted (AGENT.md section 9)."""
     assert is_allowed_peer("127.0.0.1", ["127.0.0.1", "10.0.0.1"]) is True
     assert is_allowed_peer("192.0.2.1", ["127.0.0.1"]) is False
+
+
+def test_outbound_call_id_is_derived_from_and_distinct_from_the_trunk_one() -> None:
+    """The outbound leg derives its own dialog identity, never the trunk Call-ID.
+
+    The controllers depend on this pure contract: a controller that reused the trunk
+    value, or derived the same one, is caught here instead of only by a socket test
+    (REQ-NF-016, LLD section 10.2).
+    """
+    trunk_call_id = "a5f3c2e1-0001@example.invalid"
+    outbound = outbound_call_id(trunk_call_id)
+    assert outbound == f"{trunk_call_id}-b2b_1"
+    assert outbound != trunk_call_id

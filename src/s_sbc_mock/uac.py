@@ -51,6 +51,7 @@ __all__ = [
     "CallScenario",
     "CallOutcome",
     "DEFAULT_SDP_OFFER",
+    "FEATURE_CAPS_608",
     "IMS_DOMAIN",
     "SIP_USER_AGENT_NAME",
     "TrunkUac",
@@ -60,6 +61,14 @@ _LOGGER = logging.getLogger(__name__)
 
 #: User agent name the mock reports on the trunk.
 SIP_USER_AGENT_NAME = "3rd-party AS POC mock S-SBC"
+
+#: ``Feature-Caps`` the UAC declares so the anti-fraud AS may answer with ``608 Rejected``
+#: without playing an announcement. RFC 8688 section 3.4 requires the announcement only
+#: when the UAC has *not* declared ``sip.608``; declaring it keeps the signalling-only AS
+#: media-free (``docs/phase2-plan.md`` decision D5, ADR-0006). The header is not one sippy
+#: has a dedicated class for, so it is rendered by the generic header class and its on-wire
+#: spelling is asserted by the integration tests, not assumed.
+FEATURE_CAPS_608 = "Feature-Caps: *;+sip.608"
 
 #: Documentation-only IMS domain used in the mock identities (RFC 2606, RFC 6761).
 IMS_DOMAIN = "ims.example.invalid"
@@ -313,6 +322,8 @@ class TrunkUac:
             SipHeader(s=f"Subject: {scenario.name}"),
             SipHeader(s=f"Organization: {scenario.name}"),
             SipHeader(s="Priority: normal"),
+            # Declares 608 support so the AS may reject without an announcement (D5).
+            SipHeader(s=FEATURE_CAPS_608),
         )
 
     def _on_event(self, event: Any, ua: Any, scenario: CallScenario) -> None:

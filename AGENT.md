@@ -64,11 +64,14 @@ Production Gap Register (§3).
 - **No real IMS core.** No S-CSCF, I-CSCF, HSS, MRF or real S-SBC; the mock only has to
   behave like one on the trunk.
 - **No media.** No RTP handling, no transcoding, no DTMF, no MRF interaction.
-- **No performance or capacity work.** No calls-per-second targets, no load tests, no
-  benchmarking claims.
+- **No published performance or capacity figures.** No calls-per-second targets and no
+  benchmarking claims. **Amended 2026-09-19** (`docs/phase2-plan.md` §8 item 1, maintainer
+  approval): a **capacity harness** is permitted — P9.5 and P11 build load and observation
+  to find where the boundary is — but any published figure remains out of scope (D10).
+  The harness reports constraints, never a headline number.
 - **No production-grade HA, multi-tenancy or auditing.**
 - **No charging.** No CDRs, no RADIUS, no settlement.
-- **No transport beyond UDP.** TCP and TLS are not implemented.
+- **No production-grade transport on the trunk.** Demo stack is UDP-only. The platform library (`../as_platform`) ships a pluggable `Transport` seam with `TlsTransport` behind it (P11, ADR-0010). TCP and SIP Digest remain out of scope.
 - **No production deployment concerns** beyond a local `docker compose` demo.
 
 ## 3. Production Gap Register
@@ -133,10 +136,17 @@ rendered images that cannot be reviewed in a diff.
 
 ### 4.3 Code presentation standards
 
-- **Error code system.** One authoritative error model in `src/as_app/errors.py`:
-  internal codes (for example `AS-CFG-001`, `AS-RULE-002`, `AS-ROUTE-003`,
-  `AS-PEER-004`) mapped to SIP status codes and log messages. The mapping is documented
-  in the LLD and in the interface specification. No ad-hoc exceptions with bare strings.
+- **Error code system.** One authoritative error model, split by **family** over one
+  **mechanism** (ADR-0009 decision 3). The mechanism — the memberless `ErrorCode` base,
+  `SIP_PHRASES`, `sip_status_for` and `AsError` — lives in the platform library
+  (`as_platform/errors.py`). Each family is a subclass in the package that owns its
+  vocabulary: the skeleton codes (`AS-CFG-*`, `AS-PEER-*`, `AS-INT-*`) are
+  `SkeletonErrorCode` in the library, the number-translation codes (`AS-RULE-*`,
+  `AS-ROUTE-*`) are `AsErrorCode` in `src/as_app/errors.py`, and the anti-fraud codes
+  (`AS-FRAUD-*`) are `FraudErrorCode` in `src/anti_fraud_as/errors.py`. Every code, SIP
+  status and log message is byte-identical to before the split. Codes map to SIP status
+  codes and log messages; the mapping is documented in the LLD and in the interface
+  specification. No ad-hoc exceptions with bare strings.
 - **Structured logging.** Every log line carries `timestamp`, `level`, `module`,
   `call_id`, `direction`, `peer`, and an event message. Call-ID threads the whole call
   across both legs. The field set is documented in the LLD and never changed silently.
@@ -214,23 +224,37 @@ AGENT.md  README.md  CHANGELOG.md  VERSION  CONTRIBUTING.md
 CODE_OF_CONDUCT.md  SECURITY.md  NOTICE  LICENSE  Makefile  .env.example
 config/                       routing rules and environment samples
 src/as_app/                   the third-party AS (sippy application)
-  main.py                     SipConf + SipTransactionManager + ED2.loop()
-  bootstrap.py                startup self-check, signal handling, graceful shutdown
-  call_controller.py          custom Call Control Logic — the business hook
-  sip_adapter.py              thin wrapper around sippy primitives
-  errors.py                   error model and code -> SIP status mapping
+  main.py                     AsStack over the library's BaseAsStack (SipConf + manager + ED2.loop())
+  bootstrap.py                AsSettings and the startup self-check; plumbing re-exported
+  call_controller.py          Call Control Logic — the business hook (decide() over the library base)
+  sip_adapter.py              re-export facade over the library's sippy adapter
+  errors.py                   the AS-RULE-* / AS-ROUTE-* family; mechanism re-exported
   routing/rules.py            YAML rule loading and hot reload
   routing/engine.py           pure functions: translate and route
-  observability/logging.py    structured logging
-  observability/metrics.py    counters and dispositions
-  observability/tracing.py    per-Call-ID trace and console event feed
-  internal_api.py             internal REST + WebSocket for the console
+  observability/logging.py    re-export facade over the library's structured logging
+  observability/metrics.py    re-export facade over the library's counters and dispositions
+  observability/tracing.py    re-export facade over the library's per-Call-ID trace feed
+  internal_api.py             routes and bindings over the library's internal-API shell
+src/anti_fraud_as/            the second AS: caller screening, 608 Rejected (P8, ADR-0007)
+  main.py                     FraudAsStack over the library's BaseAsStack
+  bootstrap.py                FraudAsSettings, startup self-check
+  call_controller.py          the verdict seam, allow relay, UAS-only 608 reject
+  screening.py                pure verdict function (no sockets, no global state, no clock)
+  caller_state.py             process-level call-rate window and reputation decay
+  screening_data.py           caller_screening.yaml model, validation, reload
+  internal_api.py             routes and bindings over the library's internal-API shell
 src/console/                  FastAPI + plain HTML/CSS/JS (separate process)
 src/s_sbc_mock/               UAC (emulates S-CSCF trigger) + UAS (emulates core)
 deploy/                       docker-compose.yml + per-service Dockerfiles
 tools/                        capture, message generation and probe scripts
 tests/unit/ tests/integration/ tests/e2e/
 docs/                         see §4.2
+../as_platform/               the platform library — a separate repository checked out
+                              beside this one (ADR-0009 decision 1)
+  src/as_platform/            the shared skeleton both AS instances build on:
+                              observability, sip_adapter, hop, the errors mechanism,
+                              bootstrap plumbing, internal-API shell, the controller base,
+                              version, Transport/UdpTransport, StateStore/InMemoryStateStore
 ```
 
 **Rules for the layout:**
@@ -248,6 +272,12 @@ docs/                         see §4.2
   package-absolute (`from as_app.observability.logging import ...`) and
   `src/as_app/observability/` must never be placed on `sys.path`. Renaming it is a
   structural change and requires the maintainer. See `docs/architecture/lld.md` §8.
+- The shared skeleton lives in the **platform library repository** (`as_platform`),
+  checked out **beside this one** at `../as_platform`, not in this repository. This
+  repository is the library's **reference implementation and first user**: it consumes the
+  library through the `path` source in `pyproject.toml` (`editable = true`, ADR-0009
+  decision 6). The library must **never** import `as_app` or `anti_fraud_as` — that
+  one-way direction is asserted by the library's own suite (`REQ-F-030`).
 - Adding, moving or renaming a directory or a configuration field is a **structural
   change** and must update this file, `README.md` and `docs/README.md` in the same
   commit (§12).
@@ -262,7 +292,7 @@ Pinned; do not upgrade without asking.
   step, no third-party front-end libraries**
 - `uv` for environment and dependency management (`pyproject.toml` + `uv.lock`)
 - pytest · `ruff` (format + lint) · `mypy`
-- `docker compose` for the three-service demo
+- `docker compose` for the local demo stack (both AS instances, two mocks and the console)
 
 Constraints that shape the design:
 
@@ -304,6 +334,21 @@ Key knobs (finalised in M0, kept in sync with `README.md` and the deployment gui
 - `INTERNAL_API_ADDRESS/PORT` — how the console reaches the AS
 - `LOG_LEVEL`, payload logging switch
 
+The **anti-fraud AS** (P8, ADR-0007) is a second process with its own knobs. Its
+instance-identifying variables are prefixed so one `.env` cannot configure the wrong
+process; the observability and runtime knobs are shared with the AS above because they
+describe the process, not the instance:
+
+- `FRAUD_SIP_LISTEN_ADDRESS`, `FRAUD_SIP_LISTEN_PORT` — where the anti-fraud AS receives the
+  trunk (default port `5062`, deliberately not `5060`, so both AS instances can run on one
+  host)
+- `FRAUD_SBC_PEER_ADDRESS`, `FRAUD_SBC_PEER_PORT` — next hop an **allowed** INVITE is
+  relayed to
+- `FRAUD_ALLOWED_PEERS` — source addresses accepted on the anti-fraud trunk
+- `FRAUD_SCREENING_FILE` — path to the declarative screening data file
+- `FRAUD_INTERNAL_API_ADDRESS`, `FRAUD_INTERNAL_API_PORT` — how the console reaches it
+  (default port `8082`)
+
 **Switching from mock to a real S-SBC must be a configuration change only.**
 
 ## 9. Security & Credentials
@@ -320,17 +365,26 @@ Key knobs (finalised in M0, kept in sync with `README.md` and the deployment gui
 ## 10. Development Workflow
 
 ```bash
-uv sync                  # install / sync the locked environment
-make dev                 # run AS + mock locally
-docker compose up        # as + s-sbc-mock + console
-make demo                # one command: place a call, show the translated INVITE
+# Requires the platform library checked out beside this repository (../as_platform) — see §5.
+uv sync                  # install / sync the locked environment and link ../as_platform
+make dev                 # run the number-translation AS locally (+ make mock, make console)
+make fraud               # run the anti-fraud AS locally, on its own ports (P8)
+docker compose up        # as + anti-fraud-as + both mocks + console
+make demo                # one call through the number-translation AS, narrated
+make demo-fraud          # two calls through the anti-fraud AS: one allowed, one 608
+make demo-chained        # two B2BUAs in series (SBC -> anti-fraud -> number translation -> core)
 make lint                # ruff format --check + ruff check + mypy
 make test                # unit + integration + e2e
 ```
 
 - Every dependency goes through `uv` and is committed with `uv.lock`.
-- Code must run from a clean checkout: clone -> `uv sync` -> `make demo`. If that breaks,
-  fixing it outranks adding features.
+- Code must run from a clean checkout: **clone both repositories side by side**
+  (`as_platform` beside this one) -> `uv sync` -> `make demo`. If that breaks, fixing it
+  outranks adding features. This is an **explicit, recorded exception** to the earlier
+  single-clone guarantee (`REQ-F-032`, ADR-0009 decision 8), not a silent weakening: the
+  library is consumed through a `path` source (`../as_platform`) that a single checkout
+  cannot resolve, so the sibling checkout is part of the guarantee rather than an optional
+  extra.
 - M0 includes an explicit verification step that sippy and its dependencies install and
   run on Python 3.10 in this environment. If that fails, stop and escalate instead of
   silently changing versions.

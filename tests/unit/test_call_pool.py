@@ -274,3 +274,21 @@ async def test_snapshot_reflects_runtime_state() -> None:
     snap_after = pool.snapshot()
     assert snap_after["active_calls"] == 3
     await pool.stop()
+
+
+# ---------------------------------------------------------------------------
+# Public is_running property (P12)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pool_is_running_property_reflects_lifecycle() -> None:
+    """Public is_running property toggles with start/stop."""
+    uac = _FakeUac()
+    config = _default_pool_config(target_concurrency=1, call_rate=10.0)
+    pool = CallPool(config, mock_uac=uac)
+    assert pool.is_running is False
+    await pool.start()
+    assert pool.is_running is True
+    await pool.stop()
+    assert pool.is_running is False

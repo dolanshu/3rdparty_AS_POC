@@ -25,11 +25,13 @@ MockSipUac skeleton, and FastAPI REST/WebSocket surface.
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import random
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -213,6 +215,11 @@ class CallPool:
     # Query
     # --------------------------------------------------------------
 
+    @property
+    def is_running(self) -> bool:
+        """Whether the tick loop is active (public for external controllers)."""
+        return self._running
+
     def active_count(self) -> int:
         return self.active_calls
 
@@ -323,45 +330,130 @@ class CallPool:
 
 
 # ======================================================================
-# MockSipUac — standalone SIP UAC (sippy-based, runs on same asyncio loop)
+# MockSipUac — standalone SIP UAC (sippy-based, runs on dedicated thread)
 # ======================================================================
+
+
+#: POC domain used in generator SIP headers (RFC 2606, RFC 6761).
+_IMS_DOMAIN = "ims.example.invalid"
+
+#: Plain G.711 offer shared with the mock S-SBC (tools/call_load_generator.py
+#: imports it so both UAC sides generate the same SDP — pass-through proof).
+DEFAULT_SDP_OFFER = "\r\n".join(
+    [
+        "v=0",
+        "o=- 4101 4101 IN IP4 192.0.2.10",
+        "s=3rd-party AS POC call",
+        "c=IN IP4 192.0.2.10",
+        "t=0 0",
+        "m=audio 40000 RTP/AVP 0 8 101",
+        "a=rtpmap:0 PCMU/8000",
+        "a=rtpmap:8 PCMA/8000",
+        "a=rtpmap:101 telephone-event/8000",
+        "a=fmtp:101 0-15",
+        "a=sendrecv",
+        "",
+    ]
+)
 
 
 class MockSipUac:
     """Sends real SIP INVITEs to an AS and controls far-end behaviour.
 
-    Reuses the :class:`sippy.UA` pattern from ``src/s_sbc_mock/uac.py``
-    but runs as a standalone process (ADR-0012). Duration-class-controlled
-    far-end behaviour is added here — the s_sbc_mock UAC has no concept
-    of "answer then BYE after N seconds" vs "never answer".
+    Runs its own :class:`sippy.SipTransactionManager` on a dedicated daemon
+    thread with :class:`sippy.Core.EventDispatcher.ED2.loop()` (ADR-0012).
+    :meth:`send_invite` runs on the asyncio loop and bridges into sippy's
+    thread via :class:`sippy.Time.Timeout.Timeout`; sippy events bridge back
+    via :func:`asyncio.run_coroutine_threadsafe`.
+
+    Duration-class-controlled far-end behaviour:
+
+    * **D1/D2/D3** — AS answers 200 OK, UAC waits MIDPOINT seconds then sends BYE.
+    * **D4** — AS never answers; no-answer timer expires, UAC tears down via CANCEL.
     """
 
-    #: sippy imports are optional — they're only needed when actually
-    #: driving SIP. Unit tests use :class:`_FakeUac` instead.
-    _sippy_available: bool = False
+    #: sippy imports happen at use-site so tests importing this module don't
+    #: need sippy installed; the generator process always has sippy.
 
-    def __init__(self, as_address: str, as_port: int,
-                 local_address: str = "127.0.0.1", local_port: int = 5099) -> None:
+    def __init__(
+        self,
+        as_address: str,
+        as_port: int,
+        local_address: str = "127.0.0.1",
+        local_port: int = 5099,
+    ) -> None:
         self.as_address = as_address
         self.as_port = as_port
         self.local_address = local_address
         self.local_port = local_port
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._global_config: dict[str, Any] = {}
+        self._tm: Any | None = None  # SipTransactionManager
+        self._thread: Any = None  # threading.Thread running ED2.loop()
+        self._uacs: dict[str, Any] = {}  # call_id → sippy UA
+        self._known_call: dict[str, Callable[[str, str], None]] = {}  # call_id → on_end cb
+
+    # --- lifecycle -------------------------------------------------------
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Capture the asyncio loop for sippy→asyncio bridging."""
         self._loop = loop
 
+    def start_sippy(self) -> None:
+        """Bind the local UDP port and start the sippy event loop thread."""
+        import threading
+
+        from sippy.Core.EventDispatcher import ED2
+        from sippy.SipLogger import SipLogger
+        from sippy.SipTransactionManager import SipTransactionManager
+
+        logger = SipLogger("load-generator-uac")
+        self._global_config = {
+            "nh_addr": (self.as_address, self.as_port),
+            "_sip_address": self.local_address,
+            "_sip_port": self.local_port,
+            "_sip_uaname": "3rd-party AS POC load generator",
+            "_sip_logger": logger,
+        }
+        self._tm = SipTransactionManager(self._global_config)
+        self._global_config["_sip_tm"] = self._tm
+        self._thread = threading.Thread(target=ED2.loop, name="gen-sippy-uac", daemon=True)
+        self._thread.start()
+
+    def stop_sippy(self) -> None:
+        """Release the local UDP port and stop the sippy thread."""
+        from sippy.Core.EventDispatcher import ED2
+
+        if self._tm is not None:
+            self._tm.shutdown()
+            self._tm = None
+        ED2.breakLoop()
+
+    # --- send interface (called from asyncio event loop) ----------------
+
     async def send_invite(
-        self, *, call_id: str, call_type: str,
+        self,
+        *,
+        call_id: str,
+        call_type: str,
         duration_class: str,
         on_call_ended: Callable[[str, str], None],
     ) -> None:
-        """Send one SIP INVITE to the AS (stubbed — full sippy integration
-        deferred to Task 10 e2e).
+        """Schedule a real INVITE onto the sippy thread and track lifecycle.
+
+        Args:
+            call_id: Generator-side call identifier.
+            call_type: One of T1..T6, F1..F4.
+            duration_class: One of D1..D4.
+            on_call_ended: Called when the call ends with ``(call_id, reason)``.
+                This is a plain callable (the CallPool bridge is thread-safe).
         """
-        if self._sippy_available:
-            self._send_invite_real(call_id, call_type, duration_class, on_call_ended)
-        # Stubbed — Task 10 implements real sippy UAC creation and SIP send.
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+        # Capture sippy objects locally to avoid closure rebinds
+        self._send_invite_real(
+            call_id, call_type, duration_class, on_call_ended
+        )
 
     # ------------------------------------------------------------------
     # Number selection per call type
@@ -370,33 +462,195 @@ class MockSipUac:
     def numbers_for(self, call_type: str) -> tuple[str, str]:
         """Return ``(called, caller)`` for a call type (HLD §12.3)."""
         table: dict[str, tuple[str, str]] = {
-            "T1": ("+8613800138000", "1001"),          # E.164 → translation
-            "T2": ("02112345678", "1001"),              # national
-            "T3": ("0014155551234", "1001"),            # international
-            "T4": ("1234", "1001"),                     # short code → 404
-            "T5": ("+8613900139000", "1001"),           # reachable next hop
-            "T6": ("+8613700137000", "1001"),           # unreachable next hop
-            "F1": ("+8613800138000", "1001"),           # allow-listed
-            "F2": ("+8613800138000", "1999"),           # block-listed → 608
-            "F3": ("+8613800138000", "1998"),           # high-rate window → 608
-            "F4": ("+8613800138000", "1001"),           # missing PAI → fail-open
+            "T1": ("+8613800138000", "1001"),
+            "T2": ("02112345678", "1001"),
+            "T3": ("0014155551234", "1001"),
+            "T4": ("1234", "1001"),
+            "T5": ("+8613900139000", "1001"),
+            "T6": ("+8613700137000", "1001"),
+            "F1": ("+8613800138000", "1001"),
+            "F2": ("+8613800138000", "1999"),
+            "F3": ("+8613800138000", "1998"),
+            "F4": ("+8613800138000", "1001"),
         }
         if call_type not in table:
             raise ValueError(f"Unknown call type: {call_type}")
         return table[call_type]
 
     # ------------------------------------------------------------------
-    # Real sippy UAC send (stubbed — activated when sippy is available)
+    # Real sippy UAC send — schedules onto ED2.loop() via sippy.Timeout
     # ------------------------------------------------------------------
 
-    def _send_invite_real(self, call_id: str, call_type: str,
-                           duration_class: str,
-                           on_end: Callable[[str, str], None]) -> None:
-        raise NotImplementedError(
-            "Full sippy UAC send deferred to Task 10 (e2e integration). "
-            f"Numbers selected: {self.numbers_for(call_type)}, "
-            f"duration_class={duration_class}."
+    def _send_invite_real(
+        self,
+        call_id: str,
+        call_type: str,
+        duration_class: str,
+        on_end: Callable[[str, str], None],
+    ) -> None:
+        """Create UA + send INVITE on the sippy thread.
+
+        Uses :class:`sippy.Time.Timeout.Timeout` which IS sippy's way of
+        scheduling callbacks onto ``ED2.loop()`` from any thread.
+        """
+        from sippy.Time.Timeout import Timeout
+
+        def _on_sippy_thread() -> None:
+            self._actually_send(call_id, call_type, duration_class, on_end)
+
+        Timeout(_on_sippy_thread, 0.001, 1)
+
+    def _actually_send(
+        self,
+        call_id: str,
+        call_type: str,
+        duration_class: str,
+        on_end: Callable[[str, str], None],
+    ) -> None:
+        """Synchronous sippy UA creation + INVITE send (runs on ED2 thread)."""
+        from sippy.CCEvents import CCEventTry
+        from sippy.MsgBody import MsgBody
+        from sippy.SipAddress import SipAddress
+        from sippy.SipConf import SipConf
+        from sippy.SipContact import SipContact
+        from sippy.SipURL import SipURL
+        from sippy.Time.Timeout import Timeout
+        from sippy.UA import UA
+
+        if self._tm is None:
+            return  # sippy not bound yet
+
+        called, caller = self.numbers_for(call_type)
+        self._known_call[call_id] = on_end
+
+        event = CCEventTry(
+            (None, caller, called, MsgBody(content=DEFAULT_SDP_OFFER), None, None)
         )
+        event.extra_headers = self._isc_headers(caller)
+
+        ua = UA(
+            self._global_config,
+            self._event_handler(call_id, duration_class),
+            nh_address=(self.as_address, self.as_port),
+            nh_transport=SipConf.my_transport,
+        )
+        ua.lContact = SipContact(
+            address=SipAddress(
+                url=SipURL(
+                    host=self.local_address,
+                    port=self.local_port,
+                    transport=SipConf.my_transport,
+                )
+            )
+        )
+        ua.local_ua = str(self._global_config.get("_sip_uaname", ""))
+        with _sippy_identity(self._global_config):
+            ua.recvEvent(event)
+        self._uacs[call_id] = ua
+
+        # D4 — no-answer timer (scheduler on ED2 thread)
+        if duration_class == "D4":
+            Timeout(
+                lambda: self._on_d4_timeout(call_id),
+                DurationModel.MIDPOINTS["D4"],
+                1,
+            )
+
+    # --- ISC headers (mirror s_sbc_mock/uac.py) -------------------------
+
+    def _isc_headers(self, caller: str) -> tuple[Any, ...]:
+        """Build ISC-flavoured context headers like the mock S-SBC."""
+        from sippy.SipHeader import SipHeader
+
+        return (
+            SipHeader(s=f"P-Asserted-Identity: <sip:{caller}@{_IMS_DOMAIN}>"),
+            SipHeader(s="Feature-Caps: *;+sip.608"),
+            SipHeader(s="Subject: gen-call"),
+        )
+
+    # --- sippy event handler (runs on ED2 thread) ----------------------
+
+    def _event_handler(
+        self, call_id: str, duration_class: str
+    ) -> Callable[[Any, Any], None]:
+        """Build the per-call sippy event callback."""
+
+        def handler(event: Any, ua: Any) -> None:
+            self._on_sippy_event(event, ua, call_id, duration_class)
+
+        return handler
+
+    def _on_sippy_event(
+        self, event: Any, ua: Any, call_id: str, duration_class: str
+    ) -> None:
+        """Handle one sippy event on the ED2 thread."""
+        from sippy.CCEvents import CCEventConnect, CCEventDisconnect, CCEventFail
+
+        if isinstance(event, CCEventConnect):
+            # 200 OK — schedule BYE after duration MIDPOINT
+            from sippy.Time.Timeout import Timeout
+
+            midpoint = DurationModel.MIDPOINTS[duration_class]
+            Timeout(
+                lambda: self._send_bye(call_id, "bye"),
+                midpoint,
+                1,
+            )
+            return
+        if isinstance(event, CCEventDisconnect):
+            self._cleanup_call(call_id, "bye")
+            return
+        if isinstance(event, CCEventFail):
+            # AS answered reject (e.g., 4xx/5xx) — tear down, no BYE needed
+            self._cleanup_call(call_id, "rejected")
+            return
+
+    def _on_d4_timeout(self, call_id: str) -> None:
+        """Cancel a D4 call that got no answer within 3 s."""
+        ua = self._uacs.pop(call_id, None)
+        if ua is not None:
+            ua.disconnect()
+        self._cleanup_call(call_id, "cancel")
+
+    def _send_bye(self, call_id: str, reason: str) -> None:
+        """Send BYE on a connected call."""
+        ua = self._uacs.pop(call_id, None)
+        if ua is not None:
+            ua.disconnect()
+        self._cleanup_call(call_id, reason)
+
+    def _cleanup_call(self, call_id: str, reason: str) -> None:
+        """Notify CallPool the call has ended (thread-safe, called on ED2 thread).
+
+        CallPool's ``_on_call_ended`` callable handles the asyncio→thread bridge
+        internally via :func:`asyncio.run_coroutine_threadsafe`, so we just call it.
+        """
+        on_end = self._known_call.pop(call_id, None)
+        self._uacs.pop(call_id, None)
+        if on_end is not None:
+            on_end(call_id, reason)  # pool handles the bridge
+
+    # --- internal state (instance-level, shared across threads) ---------
+
+
+# --------------------------------------------------------------------------
+# Identity pinning context (mirror tools/s_sbc_mock/uac.py)
+# --------------------------------------------------------------------------
+
+
+@contextmanager
+def _sippy_identity(global_config: dict[str, Any]) -> Iterator[None]:
+    """Pin the process-wide sippy identity to this UAC while messages generate."""
+    from sippy.SipConf import SipConf
+
+    saved = (SipConf.my_address, SipConf.my_port, SipConf.my_uaname)
+    SipConf.my_address = str(global_config.get("_sip_address", SipConf.my_address))
+    SipConf.my_port = int(global_config.get("_sip_port", SipConf.my_port))
+    SipConf.my_uaname = str(global_config.get("_sip_uaname", SipConf.my_uaname))
+    try:
+        yield
+    finally:
+        SipConf.my_address, SipConf.my_port, SipConf.my_uaname = saved
 
 
 # ======================================================================
@@ -462,6 +716,8 @@ if FASTAPI_AVAILABLE:
         async def start_load():
             if pool_controller:
                 result = pool_controller("start", None)
+                if asyncio.iscoroutine(result):
+                    result = await result
                 return {"status": "started", "detail": result}
             return {"status": "started"}
 
@@ -469,6 +725,8 @@ if FASTAPI_AVAILABLE:
         async def stop_load():
             if pool_controller:
                 result = pool_controller("stop", None)
+                if asyncio.iscoroutine(result):
+                    result = await result
                 return {"status": "stopped", "detail": result}
             return {"status": "stopped"}
 
@@ -482,9 +740,11 @@ if FASTAPI_AVAILABLE:
                     enabled_call_types=enabled,
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
             if pool_controller:
-                pool_controller("config", config)
+                result = pool_controller("config", config)
+                if asyncio.iscoroutine(result):
+                    await result
             return {"status": "configured", "config": req.model_dump()}
 
         @app.websocket("/ws/pool")
@@ -505,3 +765,96 @@ if FASTAPI_AVAILABLE:
                 pass
 
         return app
+
+
+# ======================================================================
+# Process entry point
+# ======================================================================
+
+
+async def _amain(args: argparse.Namespace) -> int:
+    """Async entry point: sippy thread + CallPool + uvicorn on one loop."""
+    import uvicorn
+
+    # 1. Wire up the SIP UAC (starts its own sippy ED2 daemon thread)
+    uac = MockSipUac(
+        args.as_address, args.as_port,
+        local_address=args.local_address, local_port=args.local_port,
+    )
+    uac.set_loop(asyncio.get_running_loop())
+    uac.start_sippy()
+
+    # 2. Build initial pool config
+    default_types = frozenset(sorted(CallModel.ALL_TYPES))
+    initial_config = PoolConfig(
+        args.target_concurrency, args.call_rate, default_types,
+    )
+    pool = CallPool(initial_config, mock_uac=uac)
+
+    # 3. Async controller bridge — FastAPI endpoints call these through the
+    #    pool_controller hook; CallPool.start/stop/set_config are coroutines.
+    async def _controller(action: str, config: PoolConfig | None) -> Any:
+        if action == "start":
+            if not pool.is_running:
+                await pool.start()
+            return {"pool": pool.snapshot()}
+        if action == "stop":
+            if pool.is_running:
+                await pool.stop()
+            return {"pool": pool.snapshot()}
+        if action == "config" and config is not None:
+            await pool.set_config(config)
+            return {"pool": pool.snapshot()}
+        return None
+
+    app = build_generator_app(
+        pool_state_getter=pool.snapshot,
+        pool_controller=_controller,
+    )
+
+    # 4. Start uvicorn as a task on this loop
+    server_config = uvicorn.Config(
+        app, host=args.http_address, port=args.http_port,
+        log_level="info", access_log=False,
+    )
+    server = uvicorn.Server(server_config)
+    uvicorn_task = asyncio.create_task(server.serve())
+
+    # 5. Wait for shutdown (uvicorn handles SIGINT/SIGTERM)
+    try:
+        await uvicorn_task
+    finally:
+        uac.stop_sippy()
+        if pool.is_running:
+            await pool.stop()
+
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point — ``python tools/call_load_generator.py [OPTIONS]``."""
+    parser = argparse.ArgumentParser(
+        description="Call Load Generator — P12 standalone SIP load driver",
+    )
+    parser.add_argument("--as-address", default="127.0.0.1",
+                        help="AS SIP listen address (default 127.0.0.1)")
+    parser.add_argument("--as-port", type=int, default=5060,
+                        help="AS SIP listen port (default 5060)")
+    parser.add_argument("--local-address", default="127.0.0.1",
+                        help="Generator local SIP address (default 127.0.0.1)")
+    parser.add_argument("--local-port", type=int, default=5099,
+                        help="Generator local SIP port (default 5099)")
+    parser.add_argument("--http-address", default="127.0.0.1",
+                        help="Generator REST/WebSocket HTTP bind address")
+    parser.add_argument("--http-port", type=int, default=8765,
+                        help="Generator REST/WebSocket HTTP bind port (default 8765)")
+    parser.add_argument("--target-concurrency", type=int, default=10,
+                        help="Initial pool target concurrency (default 10)")
+    parser.add_argument("--call-rate", type=float, default=3.0,
+                        help="Initial call rate per second (default 3.0)")
+    args = parser.parse_args(argv)
+    return asyncio.run(_amain(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

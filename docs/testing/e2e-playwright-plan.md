@@ -17,9 +17,9 @@
 | **M-5** | `test_console_dashboard.py` L46-79 | `_reset_gen` 区分不可达（立刻 fail）与超时（带诊断 fail） | ✅ **已修复** 2026-09-23 | 手动 kill generator 进程 → pytest.fail 给出清晰错误信息 |
 | **R2-P2-3** | `conftest.py` L79 | 删 conftest 死副本 `_reset_gen` | ✅ **已修复** 2026-09-23 | conftest 无同名死代码；dashboard 文件那份是唯一版本 |
 | **R2-P2-4 / N-2 / N-3** | `conftest.py` L113-154 | 4 进程日志落 per-session tmpdir、句柄 teardown 时关 | ✅ **已修复** 2026-09-23 | pytest session 结束后无 `/tmp/e2e-*` 残留；无 `PosixPath.close` teardown 错 |
-| **R3-P0-1** | 本文件 §5.1 | binding-constraint 配方方向修正：`call_rate` 越大越 `"concurrency"`；PUT 响应不含该字段需再 GET | **待补测试** | 新 REST 级 E2E：`{10, 0.1} → "rate"`；`{10, 2.0} → "concurrency"` |
-| **R3-P1-2a** | 本文件 §5.1 | DOM 唯一性 `#vw-{view}.count() == 1` | **待补测试** | 人为插入第二份 `#vw-rules` → 测试红 |
-| **R3-P1-2b** | 本文件 §5.1 | WS 离线重连（`page.context().set_offline`） | **待补测试** | `#wsEv: live → offline → live` |
+| **R3-P0-1** | `test_console_dashboard.py` TestBindingConstraint | binding-constraint 配方方向纠正：`call_rate` 越大越 `"concurrency"`；PUT 响应不含该字段需再 GET | ✅ **已补测试** commit `68d189a`（36 测试 → 8 新增） | 新 REST 级 E2E：`{10, 0.1} → "rate"`；`{10, 2.0} → "concurrency"` |
+| **R3-P1-2a** | `test_console_dashboard.py` TestDomUniqueness | DOM 唯一性 `#vw-{view}.count() == 1` | ✅ **已补测试** commit `68d189a` | 5 视图 parametrize；人为插第二份 `.vw-rules` → 测试红 |
+| **R3-P1-2b** | `test_console_dashboard.py` TestWsOfflineReconnect | WS 离线重连（`set_offline True → False`） | ✅ **已补测试** commit `68d189a` | `#wsEv/#wsLd: live → offline → recover → live` |
 | **R3-P1-4** | generator L105 + ADR-0013 L79 + HLD §12.4 + unit-plan + 2 处单测注释 | **9.5 vs 10.4 escalate to maintainer**——这是 ADR-0013 + HLD 共同确认的设计常量，不是某处注释写错；同步五处并改 `test_duration_model_avg_duration_constant` 为断言字面量 | **待裁决** | 五处数值一致；单测改为 `assert AVG_DURATION_SECONDS == 10.4` |
 | **R3-P0-3 / B-3** | `Makefile` L65 + `pyproject.toml` + `.github/workflows/ci.yml` | **CI 接入方式待 maintainer 拍板**：正式接入（dev 组加 deps + `playwright install chromium`）vs 显式豁免（拆 `make e2e-ui` 进 gap register） | **待决策** | `ci.yml` 行为与本文档一致 |
 | **R3-P2-3 / M-8** | `docs/production-gaps.md` | 登记端口硬编码 / `kill -9` / 浏览器依赖三条 | **待登记** | register 三行可追溯到本计划 |

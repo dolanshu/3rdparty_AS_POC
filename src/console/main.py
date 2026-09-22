@@ -221,7 +221,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 "use strict";
 var AS_URL = "__AS_API_URL__", LD_URL = "__LOAD_API_URL__";
 var W_EV = AS_URL.replace(/^http/, "ws") + "/ws/p12/events";
-var W_LD = LD_URL.replace(/^http/, "ws") + "/ws/load";
+var W_LD = LD_URL.replace(/^http/, "ws") + "/ws/pool";
 
 // --- state ---------------------------------------------------------------
 var cv = "dashboard", hd = null, md = null, rd = null, sd = null;
@@ -415,7 +415,21 @@ function ewsEv(){E("wsEv").textContent="event ws: offline";E("wsEv").className="
 
 function connLd(){
   try{wsLd = new WebSocket(W_LD)}catch(e){ewsLd();return}
-  wsLd.onopen = function(){E("wsLd").textContent="load ws: live";E("wsLd").className="si ws live"};
+  wsLd.onopen = function(){
+    E("wsLd").textContent="load ws: live";E("wsLd").className="si ws live";
+    // Immediately unlock controls (pool is idle on startup, so Start = enabled)
+    E("btnStart").disabled = false; E("btnStop").disabled = true;
+    E("tgtSlider").disabled = false; E("rateSlider").disabled = false;
+    // Also fetch initial status via REST in case the generator has no WebSocket push yet
+    fetch(LD_URL+"/load/status").then(function(r){return r.json()}).then(function(s){
+      if(s){targetConc=s.target_concurrency||targetConc;callRate=s.call_rate||callRate;
+        activeCalls=s.active_calls||0;poolRunning=s.running||false;
+        E("tgtSlider").value=targetConc;E("tgtVal").textContent=targetConc;
+        E("rateSlider").value=callRate;E("rateVal").textContent=callRate;
+        E("btnStart").disabled=poolRunning;E("btnStop").disabled=!poolRunning;
+        updateGauge();updateTopology();}
+    }).catch(function(){});
+  };
   wsLd.onmessage = function(m){try{var d=JSON.parse(m.data);if(d.type==="pool_status_update"||d.active_calls!==undefined)onPoolStatus(d)}catch(e){}};
   wsLd.onclose = function(){ewsLd()}; wsLd.onerror = function(){wsLd.close()};
 }

@@ -233,10 +233,6 @@ class SimplePublisher:
         self._connections.discard(ws)
 
     async def broadcast(self, message: str) -> None:
-        """Send one message to every connected WebSocket.
-
-        Dead connections are pruned lazily on send failure.
-        """
         if not self._connections:
             return
         dead: list[WebSocket] = []
@@ -345,10 +341,16 @@ class InternalApiServer(_InternalApiServer):
         def _daemon_run() -> None:
             import asyncio as _asyncio
 
+            # CRITICAL: uvicorn.Server.run() internally calls asyncio.run() which
+            # ALWAYS creates a fresh event loop — it ignores any set_event_loop()
+            # we do here. So we bypass uvicorn.run() entirely and drive the loop
+            # ourselves so that app.state._loop = this_loop (one and the same)
+            # and run_coroutine_threadsafe() submissions actually execute.
+            #
+            # See: https://github.com/encode/uvicorn/issues/1627
             loop = _asyncio.new_event_loop()
             _asyncio.set_event_loop(loop)
             self._loop = loop
-            # Expose the loop on app.state so call controllers can find it.
             self.app.state._loop = loop
 
             config = uvicorn.Config(
@@ -359,7 +361,11 @@ class InternalApiServer(_InternalApiServer):
                 access_log=False,
             )
             self._server = uvicorn.Server(config)
-            self._server.run()
+
+            try:
+                loop.run_until_complete(self._server.serve())
+            finally:
+                loop.close()
 
         self._thread = threading.Thread(
             target=_daemon_run, name=self.provider.thread_name, daemon=True

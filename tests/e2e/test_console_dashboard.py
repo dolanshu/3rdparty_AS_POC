@@ -561,3 +561,123 @@ class TestConcurrentViewSwitchAndGenerator:
                 break
             time.sleep(0.5)
         assert drained, f"post-nav-stop did not drain: {_gen_status(demo_stack['gen'])}"
+
+
+# ===========================================================================
+# HY4 新增测试 —— 填补三轮 review 发现的覆盖缺口
+# ===========================================================================
+
+class TestBindingConstraint:
+    """HY4 R3-P0-1 — binding_constraint 翻转 REST E2E.
+
+    compute_binding_constraint() 判定（generator L238）:
+        call_rate × AVG_DURATION_SECONDS(10.4) >= target_concurrency → "concurrency"
+        否则 → "rate"
+    ⚠️ call_rate 越大越倾向于 "concurrency"（HY4 B-1 指出前版配方方向反了）.
+
+    PUT /load/config 响应体**不含** binding_constraint 字段（generator L776 只 echo
+    config），所以 PUT 后必须再 GET /load/status 读取。
+    """
+
+    _VALID_TYPES = ["T1", "T2", "T3", "T5", "T6", "F1", "F2", "F3", "F4"]
+
+    def test_rate_bound(self, demo_stack):
+        """{target_concurrency:10, call_rate:0.1} → 'rate'.
+
+        0.1 × 10.4 = 1.04 < 10 → rate-bound.
+        """
+        _reset_gen(demo_stack["gen"])
+        _put_config(demo_stack["gen"], {
+            "target_concurrency": 10,
+            "call_rate": 0.1,
+            "enabled_call_types": self._VALID_TYPES,
+        })
+        s = _gen_status(demo_stack["gen"])
+        assert s["binding_constraint"] == "rate", (
+            f"expected 'rate' for {{target=10, rate=0.1}} "
+            f"(0.1×10.4=1.04<10), got '{s['binding_constraint']}': {s}"
+        )
+
+    def test_concurrency_bound(self, demo_stack):
+        """{target_concurrency:10, call_rate:2.0} → 'concurrency'.
+
+        2.0 × 10.4 = 20.8 >= 10 → concurrency-bound.
+        """
+        _reset_gen(demo_stack["gen"])
+        _put_config(demo_stack["gen"], {
+            "target_concurrency": 10,
+            "call_rate": 2.0,
+            "enabled_call_types": self._VALID_TYPES,
+        })
+        s = _gen_status(demo_stack["gen"])
+        assert s["binding_constraint"] == "concurrency", (
+            f"expected 'concurrency' for {{target=10, rate=2.0}} "
+            f"(2.0×10.4=20.8>=10), got '{s['binding_constraint']}': {s}"
+        )
+
+
+class TestDomUniqueness:
+    """HY4 M-3 / R3-P1-2a — 每个 #vw-{view} 必须全局唯一.
+
+    locator.evaluate / classList.contains 只作用于首个匹配元素。若未来 .vw
+    div 又被复制（正是 B3 历史根因——两份 .vw-rules 导致切 dashboard 不可见），
+    28 个现有测试照样全绿。这里补 count()==1 断言堵这个漏。
+    """
+
+    _VIEWS = ["dashboard", "call-trace", "rules", "screening", "statistics"]
+
+    @pytest.mark.parametrize("view", _VIEWS)
+    def test_view_wrapper_unique(self, page, demo_stack, view):
+        _open_console(page, demo_stack)
+        # Each #vw-{view} must exist exactly once in the document
+        n = page.locator(f"#vw-{view}").count()
+        assert n == 1, (
+            f"#vw-{view} appears {n} times — expected exactly 1 "
+            f"(B3 regression: .vw divs duplicated caused invisible views)"
+        )
+
+
+class TestWsOfflineReconnect:
+    """HY4 M-3 / R3-P1-2b — WS 离线重连（零额外进程成本）.
+
+    Console JS 实现了 ewsEv()/ewsLd() 3s 重连 + fh() catch 分支把 #aSt
+    置 'unreachable'. 用 page.context().set_offline() 做纯前端测试。
+    """
+
+    def test_offline_shows_unreachable_then_recovers(self, page, demo_stack):
+        _open_console(page, demo_stack)
+
+        # Sanity: both WS were live at open
+        assert _wait_ws(page, "ev", timeout_ms=5000), "#wsEv not live before offline"
+        assert _wait_ws(page, "ld", timeout_ms=5000), "#wsLd not live before offline"
+
+        # pytest-playwright may expose context as property or callable — be defensive
+        ctx = page.context if not callable(page.context) else page.context()
+
+        # -- Take browser offline --
+        ctx.set_offline(True)
+        # Give the WS error handler time to fire (console JS has 3s reconnect)
+        page.wait_for_timeout(3500)
+
+        status_txt = page.locator("#aSt").inner_text()
+        assert "unreachable" in status_txt.lower() or "disconnected" in status_txt.lower() or "closed" in status_txt.lower(), (
+            f"#aSt did not reflect offline state, got: '{status_txt}' "
+            f"(expected 'unreachable' or similar)"
+        )
+
+        # -- Bring browser back online --
+        ctx.set_offline(False)
+        # Wait for WS reconnect + live status
+        deadline = time.time() + 10
+        recovered = False
+        while time.time() < deadline:
+            try:
+                ev_txt = page.locator("#wsEv").inner_text().lower()
+                ld_txt = page.locator("#wsLd").inner_text().lower()
+                if "live" in ev_txt and "live" in ld_txt:
+                    recovered = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.3)
+        assert recovered, f"WS did not recover after back online — ev={ev_txt!r} ld={ld_txt!r}"

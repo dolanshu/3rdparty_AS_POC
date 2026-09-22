@@ -177,6 +177,7 @@ class CallPool:
         self._config = config
         self._mock_uac = mock_uac
         self._lock = asyncio.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
         self.active_calls: int = 0
         self.active_instances: dict[str, CallInstance] = {}
         self._rate_budget: float = config.call_rate
@@ -190,11 +191,18 @@ class CallPool:
 
     async def start(self) -> None:
         """Start the tick loop. First tick fires after TICK_INTERVAL ms."""
+        self._loop = asyncio.get_running_loop()
         self._running = True
         self._tick_task = asyncio.create_task(self._tick_loop())
 
     async def stop(self) -> None:
-        """Stop the tick loop. Active calls are not force-terminated."""
+        """Stop the tick loop and force-terminate all active calls.
+
+        The tick loop is cancelled first so no new INVITEs go out, then
+        every in-flight call on the MockSipUac is told to BYE immediately.
+        Active calls drain to zero over the next 1–2 pool_status_update
+        ticks as the BYEs round-trip through AS and the far-end core mock.
+        """
         self._running = False
         if self._tick_task is not None:
             self._tick_task.cancel()
@@ -203,6 +211,10 @@ class CallPool:
             except asyncio.CancelledError:
                 pass
             self._tick_task = None
+        # Force BYE every in-flight call — bridges to the sippy ED2 thread
+        # internally, so this is safe to call from the asyncio loop.
+        if self._mock_uac is not None:
+            self._mock_uac.force_disconnect_all()
 
     async def set_config(self, config: PoolConfig) -> None:
         """Apply new config on the next tick; already-running calls unaffected."""
@@ -310,17 +322,17 @@ class CallPool:
         (e.g. sippy's internal callback thread). Bridge safely to the
         loop via :func:`asyncio.run_coroutine_threadsafe`.
         """
+        loop = self._loop
+        if loop is None:
+            return  # loop not ready — shouldn't happen in production
+        # run_coroutine_threadsafe is safe from any thread, including
+        # the ED2 thread that has no asyncio loop of its own.
         try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            return  # no event loop — shouldn't happen in production
-        if asyncio.get_running_loop() is loop:
-            # Already on the loop thread — schedule a task
-            loop.create_task(self._async_on_call_ended(call_id, reason))
-        else:
             asyncio.run_coroutine_threadsafe(
                 self._async_on_call_ended(call_id, reason), loop
             )
+        except RuntimeError:
+            return  # loop closed during bridge
 
     async def _async_on_call_ended(self, call_id: str, reason: str) -> None:
         async with self._lock:
@@ -612,6 +624,22 @@ class MockSipUac:
         if ua is not None:
             ua.disconnect()
         self._cleanup_call(call_id, "cancel")
+
+    def force_disconnect_all(self) -> None:
+        """Send BYE on every currently-connected call.
+
+        Thread-safe — uses sippy's ``Timeout`` to hop onto the ED2 thread,
+        the same pattern as :meth:`_send_invite_real`. Safe to call from
+        the asyncio loop thread (which is where CallPool.stop() runs).
+        """
+        from sippy.Time.Timeout import Timeout
+
+        def _on_sippy_thread() -> None:
+            # Snapshot because _send_bye pops from _uacs while iterating
+            for call_id in list(self._uacs.keys()):
+                self._send_bye(call_id, "pool_stopped")
+
+        Timeout(_on_sippy_thread, 0.001, 1)
 
     def _send_bye(self, call_id: str, reason: str) -> None:
         """Send BYE on a connected call."""

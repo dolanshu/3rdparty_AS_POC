@@ -31,6 +31,10 @@ class _FakeUac:
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
 
+    def force_disconnect_all(self) -> None:
+        """No-op — tests drive call completion manually via the callbacks."""
+        pass
+
     async def send_invite(
         self,
         *,

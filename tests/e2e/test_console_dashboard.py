@@ -13,29 +13,74 @@ from __future__ import annotations
 import json
 import time
 from urllib import request as urlrequest
+from urllib.error import HTTPError, URLError
+
+import pytest  # P0-3 fix: was missing, caused NameError at L436
+
+# Marker — must match pyproject.toml --strict-markers and Makefile `pytest tests/e2e -m e2e`
+pytestmark = pytest.mark.e2e
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _reset_gen(gen_base: str) -> None:
-    """Force generator idle — POST /load/stop + poll until running=false."""
-    import json as _json
+def _put_config(gen_base: str, body: dict) -> dict:
+    """PUT /load/config with body, validate HTTP 200, return parsed JSON.
+
+    Replaces the previous ``requests.put`` which silently swallowed every
+    failure (missing dep, connection error, 400/422 all indistinguishable).
+    Uses stdlib only — no extra dependency required.
+    """
+    data = json.dumps(body).encode()
+    req = urlrequest.Request(
+        f"{gen_base}/load/config", data=data, method="PUT",
+        headers={"Content-Type": "application/json"},
+    )
     try:
-        urlrequest.urlopen(f"{gen_base}/load/stop", data=b"", timeout=3).read()
-    except Exception:
-        pass
+        with urlrequest.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+    except HTTPError as e:
+        body_text = e.read().decode() if e.fp else ""
+        pytest.fail(f"PUT /load/config returned HTTP {e.code}: {body_text}")
+    except URLError as e:
+        pytest.fail(f"generator unreachable at {gen_base}: {e.reason}")
+
+
+def _reset_gen(gen_base: str) -> None:
+    """Force generator idle — POST /load/stop + poll until running=false & active_calls==0.
+
+    Distinguishes two failure modes (M-5):
+      - generator unreachable → immediate pytest.fail (not a timeout)
+      - poll timeout → pytest.fail with elapsed diagnostics
+    """
+    # Fail fast if generator is completely unreachable (not just slow)
+    try:
+        _gen_status(gen_base)
+    except (URLError, ConnectionError) as e:
+        pytest.fail(f"generator REST unreachable at {gen_base}: {e.reason}")
+
+    # POST /load/stop
+    try:
+        req = urlrequest.Request(f"{gen_base}/load/stop", data=b"", method="POST")
+        urlrequest.urlopen(req, timeout=3).read()
+    except HTTPError:
+        pass  # already stopped → 400 is fine
+    except (URLError, ConnectionError) as e:
+        pytest.fail(f"generator unreachable on /load/stop: {e.reason}")
+
+    # Poll until idle
     deadline = time.time() + 10
+    last_state = None
     while time.time() < deadline:
         try:
-            with urlrequest.urlopen(f"{gen_base}/load/status", timeout=2) as r:
-                s = _json.loads(r.read())
-                if not s.get("running", True) and s.get("active_calls", 1) == 0:
-                    return
+            last_state = _gen_status(gen_base)
+            if not last_state.get("running", True) and last_state.get("active_calls", 1) == 0:
+                return
         except Exception:
             pass
         time.sleep(0.3)
+    pytest.fail(f"generator did not become idle within 10s — last state: {last_state}")
 
 
 def _click_visible(page, selector: str) -> None:
@@ -299,77 +344,84 @@ class TestGeneratorLifecycle:
         """
         _open_console(page, demo_stack)
 
+        # === Save original generator config so we restore it after this test ===
+        # M-4: previous version never restored → polluted TestDashboardLive
+        # and TestConcurrent (both inherit T4-disabled state across session).
+        orig_cfg = _gen_status(demo_stack["gen"])
+        orig_cfg_body = {
+            "target_concurrency": orig_cfg.get("target_concurrency", 10),
+            "call_rate": orig_cfg.get("call_rate", 3.0),
+            "enabled_call_types": orig_cfg.get("enabled_call_types", []),
+        }
+
         # Configure generator to avoid AS reject scenarios and ensure
         # active_calls stays > 0 long enough for pool_feed to see it.
         # Only enable call types that the demo routing table actually
         # matches — T4 ("1234") has no route and AS rejects it instantly.
         valid_types = ["T1", "T2", "T3", "T5", "T6", "F1", "F2", "F3", "F4"]
+        _put_config(demo_stack["gen"], {
+            "target_concurrency": 10,
+            "call_rate": 3.0,
+            "enabled_call_types": valid_types,
+        })
+
+        # try/finally ensures config restores even if assertions fail
         try:
-            import requests
-            requests.put(
-                f"{demo_stack['gen']}/load/config",
-                json={
-                    "target_concurrency": 10,
-                    "call_rate": 3.0,
-                    "enabled_call_types": valid_types,
-                },
-                timeout=5,
-            )
-        except Exception:
-            pass
+            _click_visible(page, "#btnStart")
 
-        _click_visible(page, "#btnStart")
-
-        # Assertion 1: generator REST active_calls rises above 0
-        deadline = time.time() + 20
-        saw_active = False
-        while time.time() < deadline:
-            s = _gen_status(demo_stack["gen"])
-            if s["running"] and s["active_calls"] > 0:
-                saw_active = True
-                break
-            time.sleep(0.5)
-        assert saw_active, f"generator never had active_calls>0: {_gen_status(demo_stack['gen'])}"
-
-        # Assertion 2: console gauge shows non-zero at least once
-        # (gauge reads generator WS which can lag behind REST)
-        deadline = time.time() + 20
-        gauge_saw_nonzero = False
-        while time.time() < deadline:
-            try:
-                txt = page.locator("#gaugeVal").inner_text()
-                if not txt.startswith("0 /"):
-                    gauge_saw_nonzero = True
+            # Assertion 1: generator REST active_calls rises above 0
+            deadline = time.time() + 20
+            saw_active = False
+            while time.time() < deadline:
+                s = _gen_status(demo_stack["gen"])
+                if s["running"] and s["active_calls"] > 0:
+                    saw_active = True
                     break
-            except Exception:
-                pass
-            time.sleep(0.5)
-        assert gauge_saw_nonzero, "console gauge never showed non-zero — WS link broken?"
+                time.sleep(0.5)
+            assert saw_active, f"generator never had active_calls>0: {_gen_status(demo_stack['gen'])}"
 
-        # Assertion 3: Stop → active_calls drains to 0
-        _click_visible(page, "#btnStop")
-        deadline = time.time() + 15
-        drained = False
-        while time.time() < deadline:
-            s = _gen_status(demo_stack["gen"])
-            if not s["running"] and s["active_calls"] == 0:
-                drained = True
-                break
-            time.sleep(0.5)
-        assert drained, f"generator did not drain on stop: {_gen_status(demo_stack['gen'])}"
+            # Assertion 2: console gauge shows non-zero at least once
+            # (gauge reads generator WS which can lag behind REST)
+            deadline = time.time() + 20
+            gauge_saw_nonzero = False
+            while time.time() < deadline:
+                try:
+                    txt = page.locator("#gaugeVal").inner_text()
+                    if not txt.startswith("0 /"):
+                        gauge_saw_nonzero = True
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5)
+            assert gauge_saw_nonzero, "console gauge never showed non-zero — WS link broken?"
 
-        # Assertion 4: console gauge resets to 0 after drain
-        deadline = time.time() + 10
-        gauge_reset = False
-        while time.time() < deadline:
-            try:
-                if page.locator("#gaugeVal").inner_text().startswith("0 /"):
-                    gauge_reset = True
+            # Assertion 3: Stop → active_calls drains to 0
+            _click_visible(page, "#btnStop")
+            deadline = time.time() + 15
+            drained = False
+            while time.time() < deadline:
+                s = _gen_status(demo_stack["gen"])
+                if not s["running"] and s["active_calls"] == 0:
+                    drained = True
                     break
-            except Exception:
-                pass
-            time.sleep(0.5)
-        assert gauge_reset, "console gauge did not reset after stop"
+                time.sleep(0.5)
+            assert drained, f"generator did not drain on stop: {_gen_status(demo_stack['gen'])}"
+
+            # Assertion 4: console gauge resets to 0 after drain
+            deadline = time.time() + 10
+            gauge_reset = False
+            while time.time() < deadline:
+                try:
+                    if page.locator("#gaugeVal").inner_text().startswith("0 /"):
+                        gauge_reset = True
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5)
+            assert gauge_reset, "console gauge did not reset after stop"
+        finally:
+            # M-4: restore original config regardless of assertion outcome
+            _put_config(demo_stack["gen"], orig_cfg_body)
 
 
 # ===========================================================================

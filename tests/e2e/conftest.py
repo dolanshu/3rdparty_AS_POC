@@ -16,14 +16,13 @@ import pathlib
 import signal
 import socket
 import subprocess
-import sys
-import tempfile
 import time
 from urllib import request as urlrequest
 
 import pytest
 
-PROJECT_ROOT = "/home/shudong/project/3rtparty_AS_POC"
+# R3-P0-2: PROJECT_ROOT de-hardcoded — use pathlib relative to this file
+PROJECT_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
 VENV_PY = os.path.join(PROJECT_ROOT, ".venv", "bin", "python")
 
 
@@ -75,30 +74,23 @@ def _wait_http(url: str, timeout: float = 15.0) -> bool:
 
 STACK_PORTS = [5061, 5060, 8080, 8765, 8081]
 
-
-def _reset_gen(gen_base: str) -> None:
-    """Force generator to idle (POST /load/stop + wait until running=false)."""
-    import json as _json
-    try:
-        urlrequest.urlopen(f"{gen_base}/load/stop", data=b"", timeout=3).read()
-    except Exception:
-        pass
-    deadline = time.time() + 8
-    while time.time() < deadline:
-        try:
-            with urlrequest.urlopen(f"{gen_base}/load/status", timeout=2) as r:
-                if not _json.loads(r.read()).get("running", True):
-                    return
-        except Exception:
-            pass
-        time.sleep(0.3)
+# M-5 / R2-P2-3: The old conftest-local _reset_gen (only checked `running`,
+# 8s deadline) is confirmed DEAD CODE (grep finds only its own definition).
+# The dashboard test file provides a stronger version that also waits for
+# active_calls==0 and distinguishes unreachable vs. timeout.  We keep the
+# dashboard file's version as the canonical one and remove this duplicate.
 
 
 @pytest.fixture(scope="session")
-def demo_stack():
+def demo_stack(tmp_path_factory):
     """Bring up 4 processes once for the whole e2e session."""
     for p in STACK_PORTS:
         _kill_port(p)
+
+    # N-2/N-3: use tmp_path_factory for rules file + per-process logs so
+    # the session directory is cleaned up by pytest and logs don't collide
+    # across parallel or repeated runs.
+    session_tmp = tmp_path_factory.mktemp("e2e-stack")
 
     # ---- Generate a routing rules file that points every next-hop at the
     #      single core-mock UAS (port 5061). The shipped config targets six
@@ -106,7 +98,7 @@ def demo_stack():
     import yaml as _yaml
 
     _rules_src = pathlib.Path(PROJECT_ROOT) / "config" / "routing_rules.yaml"
-    _rules_dst = pathlib.Path(tempfile.mkdtemp(prefix="e2e-rules-")) / "rules.yaml"
+    _rules_dst = session_tmp / "rules.yaml"
     with _rules_src.open() as _f:
         _doc = _yaml.safe_load(_f)
     for _nh in _doc.get("next_hops", []):
@@ -116,14 +108,21 @@ def demo_stack():
 
     env = os.environ.copy()
     procs: list[subprocess.Popen] = []
+    log_files: list = []
+
+    def _log_path(name: str):
+        h = open(session_tmp / f"{name}.log", "w")
+        log_files.append(h)
+        return h
 
     # 1. Core mock UAS  (UDP :5061 UAS, :15060 UAC trunk)
     #    --trunk-port avoids the default "listen_port - 1" = 5060, which would
     #    collide with the AS SIP port below.
+    _core_log = _log_path("core-mock")
     procs.append(subprocess.Popen(
         [VENV_PY, "-m", "s_sbc_mock.main",
          "--listen-port", "5061", "--trunk-port", "15060"],
-        cwd=PROJECT_ROOT, env=env,
+        cwd=PROJECT_ROOT, env=env, stdout=_core_log, stderr=subprocess.STDOUT,
     ))
 
     # 2. Translation AS  (SIP UDP :5060, API HTTP :8080)
@@ -131,23 +130,25 @@ def demo_stack():
     env_as["SBC_PEER_ADDRESS"] = "127.0.0.1"
     env_as["SBC_PEER_PORT"] = "5061"
     env_as["RULES_FILE"] = str(_rules_dst)
-    _as_log = open("/tmp/e2e-as.log", "w")
+    _as_log = _log_path("as")
     procs.append(subprocess.Popen([VENV_PY, "-m", "as_app.main"], cwd=PROJECT_ROOT, env=env_as, stdout=_as_log, stderr=subprocess.STDOUT))
 
     # 3. Load generator  (HTTP :8765, SIP client → AS :5060)
+    _gen_log = _log_path("generator")
     procs.append(subprocess.Popen(
         [VENV_PY, "tools/call_load_generator.py",
          "--as-port", "5060", "--http-port", "8765"],
-        cwd=PROJECT_ROOT, env=env,
+        cwd=PROJECT_ROOT, env=env, stdout=_gen_log, stderr=subprocess.STDOUT,
     ))
 
     # 4. Enhanced console  (HTTP :8081)
+    _console_log = _log_path("console")
     procs.append(subprocess.Popen(
         [VENV_PY, "-m", "console.main",
          "--port", "8081",
          "--as-api-url", "http://127.0.0.1:8080",
          "--load-api-url", "http://127.0.0.1:8765"],
-        cwd=PROJECT_ROOT, env=env,
+        cwd=PROJECT_ROOT, env=env, stdout=_console_log, stderr=subprocess.STDOUT,
     ))
 
     # Wait for health checks
@@ -166,6 +167,8 @@ def demo_stack():
                 p.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 p.kill()
+        for lf in log_files:
+            lf.close()
         raise RuntimeError("demo_stack failed to come up within 20s")
 
     yield {
@@ -187,3 +190,6 @@ def demo_stack():
             p.kill()
     for port in STACK_PORTS:
         _kill_port(port)
+    # N-3: close log handles so tmp_path_factory can clean up
+    for lf in log_files:
+        lf.close()

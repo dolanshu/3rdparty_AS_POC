@@ -50,10 +50,36 @@ wait_port() {
 echo "==> Phase 3 demo stack — $MODE mode"
 echo "    logs: $LOG_DIR/"
 
+# --- Rewrite routing_rules.yaml next_hop ports to point at core mock ---
+# The shipped config has s-sbc-primary..intl-gateway ports 15061-15066, but
+# the core mock only listens on CORE_SIP. conftest.py does this rewrite for
+# pytest; demo script must do it too.
+RULES_FILE="config/routing_rules.yaml"
+if [[ -f "$RULES_FILE" ]]; then
+  echo "[rewrite] routing_rules.yaml next_hop ports -> $CORE_SIP"
+  uv run python -c "
+import yaml, pathlib
+p = pathlib.Path('$RULES_FILE')
+d = yaml.safe_load(p.read_text())
+for nh in d.get('next_hops', []):
+    nh['port'] = $CORE_SIP
+tmp = p.with_suffix('.yaml.bak')
+if not tmp.exists(): p.rename(tmp)
+p.write_text(yaml.safe_dump(d, sort_keys=False))
+"
+else
+  echo "[warn] $RULES_FILE not found — AS may route nowhere"
+fi
+
 # --- core mock (UAS side on UDP) ---
-echo "[0/4] core mock :$CORE_SIP"
+# NOTE: mock has TWO SIP endpoints — UAS (listen-port, defaults to 15061)
+# and UAC (trunk-port, defaults to listen-port minus one). We MUST pin
+# --trunk-port explicitly because --listen-port 5061 would make trunk-port
+# default to 5060, which collides with the translation AS's SIP listen port.
+echo "[0/4] core mock :$CORE_SIP (UAS) trunk :$CORE_UAC (UAC)"
 uv run python -m s_sbc_mock.main \
   --listen-port "$CORE_SIP" \
+  --trunk-port "$CORE_UAC" \
   > "$LOG_DIR/core.log" 2>&1 &
 PIDS+=($!)
 

@@ -349,10 +349,12 @@ function updateTopology(){
 
 // --- event handlers ------------------------------------------------------
 function onPoolStatus(d){
-  targetConc = d.target_concurrency || targetConc;
-  callRate = d.call_rate || callRate;
-  activeCalls = d.active_calls || 0;
-  poolRunning = d.running || false;
+  // WS messages wrap snapshot in {attributes:{...}}; REST returns flat.
+  var s = d.attributes || d;
+  targetConc = s.target_concurrency || targetConc;
+  callRate = s.call_rate || callRate;
+  activeCalls = s.active_calls || 0;
+  poolRunning = !!s.running;
   // Update controls
   E("tgtSlider").value = targetConc; E("tgtVal").textContent = targetConc;
   E("rateSlider").value = callRate; E("rateVal").textContent = callRate;
@@ -430,7 +432,7 @@ function connLd(){
         updateGauge();updateTopology();}
     }).catch(function(){});
   };
-  wsLd.onmessage = function(m){try{var d=JSON.parse(m.data);if(d.type==="pool_status_update"||d.active_calls!==undefined)onPoolStatus(d)}catch(e){}};
+  wsLd.onmessage = function(m){try{var d=JSON.parse(m.data);if(d.event==="pool_status_update"||(d.attributes!==undefined&&d.attributes.active_calls!==undefined))onPoolStatus(d)}catch(e){}};
   wsLd.onclose = function(){ewsLd()}; wsLd.onerror = function(){wsLd.close()};
 }
 function ewsLd(){E("wsLd").textContent="load ws: offline";E("wsLd").className="si ws down";if(!wrLd){wrLd=setTimeout(function(){wrLd=null;connLd()},3000)}}

@@ -231,8 +231,9 @@ class CallPool:
         return "rate"
 
     def snapshot(self) -> dict[str, Any]:
-        """Return a JSON-serialisable snapshot (for ``/load/status``)."""
+        """Return a JSON-serialisable snapshot (for ``/load/status`` and WS)."""
         return {
+            "running": self.is_running,
             "active_calls": self.active_calls,
             "target_concurrency": self._config.target_concurrency,
             "call_rate": self._config.call_rate,

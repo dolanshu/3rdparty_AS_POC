@@ -103,7 +103,7 @@ body{background:var(--bg);color:var(--tx);font-family:"SF Mono","Cascadia Code",
 .toggle-row label.on{color:var(--in);border-color:var(--in)}
 
 /* View — legacy panels */
-.vw{display:none;height:100%;overflow-y:auto;padding:14px}.vw.act{display:block}
+.vw{display:none;height:100%;overflow-y:auto;padding:14px;grid-column:2;grid-row:1}.vw.act{display:block}
 .st2{font-size:14px;font-weight:600;margin-bottom:8px;color:var(--acc)}
 .card{border:1px solid var(--bd);border-radius:6px;background:var(--panel);padding:11px;margin-bottom:12px;overflow-x:auto}
 table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;border-bottom:1px solid var(--bd)}th{color:var(--mut);font-size:11px;text-transform:uppercase}td{font-size:12px;word-break:break-all}
@@ -152,6 +152,35 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 </div>
 </section>
 
+<div class="vw" id="vw-call-trace">
+<div class="st2">Call Trace</div>
+<p class="empty">Switch to the Dashboard view for the live trace panel at the bottom.</p>
+</div>
+
+<div class="vw" id="vw-rules">
+<div class="st2">Routing Rules</div>
+<div class="card" id="rulesCard"><div class="empty">loading...</div></div>
+</div>
+
+<div class="vw" id="vw-screening">
+<div class="st2">Screening</div>
+<div class="card" id="scrCard"><div class="empty">loading...</div></div>
+</div>
+
+<div class="vw" id="vw-statistics">
+<div class="st2">Statistics</div>
+<div class="card" id="statsCard"><div class="empty">loading...</div></div>
+</div>
+
+<div class="vw" id="vw-about">
+<div class="st2">About</div>
+<p style="margin-bottom:8px">A PoC of a third-party SIP Application Server (B2BUA) reached over a SIP trunk from the Service-SBC.</p>
+<p style="margin-bottom:8px">Console: <span style="color:var(--acc)">FastAPI + HTML/CSS/JS + vendored Chart.js</span> (ADR-0011). Runs as a separate process (ADR-0002).</p>
+<p style="margin-bottom:8px">AS API: <span style="color:var(--acc)" id="apiUrl">-</span></p>
+<p>Load generator API: <span style="color:var(--acc)" id="loadUrl">-</span></p>
+<p style="margin-top:8px;color:var(--mut);font-size:11px">Chart.js v4.4.8 — MIT license, vendored under /static/ (see chart.umd.min.js.LICENSE.txt).</p>
+</div>
+
 <aside class="right">
 <div class="sm-card t">
 <div class="chart-h"><span class="t">State Distribution</span><span class="v" id="pieVal">0 calls</span></div>
@@ -184,35 +213,6 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 <span class="ws" id="traceCount">0 calls</span>
 </div>
 <div class="tl" id="tlist"><div class="empty">no calls yet</div></div>
-</div>
-
-<div class="vw" id="vw-call-trace">
-<div class="st2">Call Trace</div>
-<p class="empty">Switch to the Dashboard view for the live trace panel at the bottom.</p>
-</div>
-
-<div class="vw" id="vw-rules">
-<div class="st2">Routing Rules</div>
-<div class="card" id="rulesCard"><div class="empty">loading...</div></div>
-</div>
-
-<div class="vw" id="vw-screening">
-<div class="st2">Screening</div>
-<div class="card" id="scrCard"><div class="empty">loading...</div></div>
-</div>
-
-<div class="vw" id="vw-statistics">
-<div class="st2">Statistics</div>
-<div class="card" id="statsCard"><div class="empty">loading...</div></div>
-</div>
-
-<div class="vw" id="vw-about">
-<div class="st2">About</div>
-<p style="margin-bottom:8px">A PoC of a third-party SIP Application Server (B2BUA) reached over a SIP trunk from the Service-SBC.</p>
-<p style="margin-bottom:8px">Console: <span style="color:var(--acc)">FastAPI + HTML/CSS/JS + vendored Chart.js</span> (ADR-0011). Runs as a separate process (ADR-0002).</p>
-<p style="margin-bottom:8px">AS API: <span style="color:var(--acc)" id="apiUrl">-</span></p>
-<p>Load generator API: <span style="color:var(--acc)" id="loadUrl">-</span></p>
-<p style="margin-top:8px;color:var(--mut);font-size:11px">Chart.js v4.4.8 — MIT license, vendored under /static/ (see chart.umd.min.js.LICENSE.txt).</p>
 </div>
 
 </div>
@@ -334,17 +334,24 @@ function updateGauge(){
 
 function updateTopology(){
   // 3 links: l1 (SBC→anti-fraud), l2 (anti-fraud→translation), l3 (translation→core)
-  var intensity = Math.min(8, 1 + activeCalls * 0.6);
+  // Intensity from live active, but also reflect that traffic HAS flown via
+  // cumulative counters — so a burst of 50 D1 calls that never overlap still
+  // thickens the links and shows the console is alive.
+  var instantActive = Math.max(activeCalls || 0, counters.active || 0);
+  var totalTraffic = (counters.completed || 0) + (counters.rejected_608 || 0) + (counters.timeout || 0);
+  var intensity = Math.min(8, 1 + instantActive * 0.6 + Math.min(3, totalTraffic * 0.03));
   var color = "var(--mut)";
   if(counters.rejected_608 > 0) color = "var(--err)";
   else if(counters.timeout > 0) color = "var(--warn)";
-  else if(activeCalls > 0) color = "var(--in)";
+  else if(instantActive > 0 || totalTraffic > 0) color = "var(--in)";
   ["l1","l2","l3"].forEach(function(id){
     var l = E(id);
     l.setAttribute("stroke-width", intensity);
     l.setAttribute("stroke", color);
   });
-  E("topoVal").textContent = activeCalls > 0 ? activeCalls + " active" : "idle";
+  if(instantActive > 0) E("topoVal").textContent = instantActive + " active";
+  else if(totalTraffic > 0) E("topoVal").textContent = totalTraffic + " calls total";
+  else E("topoVal").textContent = "idle";
 }
 
 // --- event handlers ------------------------------------------------------

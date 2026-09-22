@@ -339,7 +339,6 @@ class CallPool:
             if call_id in self.active_instances:
                 del self.active_instances[call_id]
                 self.active_calls -= 1
-            # Task 4 will emit generator-side call_ended and pool_status_update here.
 
 
 # ======================================================================

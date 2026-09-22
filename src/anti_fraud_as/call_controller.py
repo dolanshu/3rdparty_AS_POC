@@ -236,6 +236,13 @@ class FraudCallController(BaseCallController):
         }
         try:
             msg = _json.dumps(event_dict, default=str)
+        except (TypeError, ValueError) as exc:
+            _LOGGER.warning(
+                "P12 emit serialization failed",
+                extra={"event": event, "call_id": event_dict["call_id"], "error": str(exc)},
+            )
+            return
+        try:
             try:
                 running = _asyncio.get_running_loop()
             except RuntimeError:
@@ -245,7 +252,7 @@ class FraudCallController(BaseCallController):
             else:
                 _asyncio.run_coroutine_threadsafe(self._emit_app.state.broadcast(msg), loop)
         except (RuntimeError, AttributeError):
-            pass
+            pass  # asyncio bridge not ready — drop silently
 
     # --- P12 apply_call_policy / record_disposition overrides ---------------
 

@@ -46,5 +46,9 @@ docs_cn/
 # TRAE workspace artefacts (machine-local plans, session state)
 .trae/
 
+# Session workspace helper directories
+.slidep/
+.workbuddy/
+
 # Office temporary lock files
 ~$*

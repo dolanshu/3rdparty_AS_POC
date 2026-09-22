@@ -61,11 +61,11 @@ class _FakeUac:
 
 
 def _default_pool_config(**overrides: Any) -> PoolConfig:
-    cfg: dict[str, Any] = dict(
-        target_concurrency=5,
-        call_rate=10.0,
-        enabled_call_types=frozenset(CallModel.ALL_TYPES),
-    )
+    cfg: dict[str, Any] = {
+        "target_concurrency": 5,
+        "call_rate": 10.0,
+        "enabled_call_types": frozenset(CallModel.ALL_TYPES),
+    }
     cfg.update(overrides)
     return PoolConfig(**cfg)
 

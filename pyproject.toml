@@ -112,7 +112,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["D104"]
+"tests/**/*.py" = ["D"]
+"tools/call_load_generator.py" = ["D", "SIM105"]
 "src/as_app/observability/logging.py" = ["A001", "A005"]
 # The console page template is inline HTML/CSS/JS with intentionally long lines.
 "src/console/main.py" = ["E501"]

@@ -8,6 +8,58 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-22 — P13 Enhanced Console (Phase 3, v1.0 release)
+
+### Added
+
+- **P13 Enhanced Console** — the M3 console is upgraded to a full Dashboard as the new default
+  view, with a CSS Grid layout (nav | centre | right | bottom trace) and three live Chart.js
+  charts:
+
+  - **Rolling call-count line chart** (REQ-F-045): 30-second window, 500 ms ticks, driven by
+    AS `call_started` / `call_ended` events and generator `pool_status_update` events.
+  - **State distribution pie/doughnut chart** (REQ-F-046): active / completed / rejected_608 /
+    timeout, updated on every per-call AS event.
+  - **Capacity gauge** (REQ-F-047): semi-circular doughnut showing active / target concurrency,
+    driven by `pool_status_update`.
+
+- **Dynamic SVG topology** (REQ-F-048): 4 nodes (S-CSCF → Anti-fraud AS → Translation AS → core)
+  with 3 link lines whose thickness scales with active call count and whose colour indicates the
+  dominant state (green / red / orange).
+
+- **Load generator controls** (REQ-F-049): target-concurrency slider (1–50), call-rate slider
+  (0.1–10), Start / Stop buttons, and 10 call-type toggles (T1–T6, F1–F4). Controls call the
+  generator REST API (`POST /load/start|stop`, `PUT /load/config`) and update from
+  `pool_status_update` events to prevent UI drift.
+
+- **Vendored Chart.js UMD bundle** (REQ-F-050, ADR-0011): Chart.js 4.4.8 UMD (~16 KB, MIT
+  license) committed under `src/console/static/` with its license file. Served via a
+  `StaticFiles` mount at `/static/`. No CDN, no npm, no build step.
+
+- **ADR-0011 — Vendored charting library exception.** Documents the controlled exception to
+  `AGENT.md` §4.4's "no third-party front-end libraries" rule: exactly one charting library may
+  be vendored locally (Chart.js 4.x UMD, MIT, ~16 KB), requires an ADR, and no CDN / npm / build
+  step is allowed.
+
+### Changed
+
+- **`AGENT.md` §4.4** updated from "No third-party front-end libraries" to a controlled
+  exception: exactly one charting library may be vendored locally under the conditions of
+  ADR-0011.
+
+- **Console `create_app()`** now accepts a `load_api_url` parameter (env `LOAD_API_URL`, CLI
+  `--load-api-url`, default `http://127.0.0.1:8765`) and mounts `/static/` for vendored assets.
+
+- **`test_console_page_has_no_third_party_front_end_libraries`** replaced with
+  `test_console_page_has_only_vendored_static_scripts` (all `<script src>` must start with
+  `/static/`), plus a new `test_console_page_has_chartjs_canvases` test.
+
+### Removed
+
+- The old "Configuration" navigation entry (was a placeholder never fully implemented in the
+  single-page console). All configuration is done through the load generator controls and the
+  Rules / Screening views.
+
 ## [0.10.0] - 2026-09-22 — P12 Call Load capability (Phase 3)
 
 ### Added

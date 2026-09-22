@@ -176,8 +176,15 @@ The console is a product surface, not a debug page:
 - Centre panel: live message flow with direction and colour coding, Call-ID filter,
   payload viewer, and highlighting of the rule that matched.
 - Small inline **SVG topology view** showing S-SBC <-> AS with the current call path.
-- **No third-party front-end libraries**; plain HTML/CSS/JS only, so the demo works
-  offline.
+- **Vendored front-end libraries** (amended by ADR-0011 for P13):
+  - Default rule: no third-party front-end libraries — plain HTML/CSS/JS only.
+  - Exception: exactly **one** charting library may be vendored locally under
+    `src/console/static/` for the P13 Enhanced Console.
+  - Current vendored inventory: `chart.umd.min.js` (Chart.js 4.x, MIT license,
+    ~16 KB minified, UMD bundle) + `chart.umd.min.js.LICENSE.txt`.
+  - Adding a new library requires a new ADR and an update to this list.
+  - No CDN references, no npm, no build step. The bundle is committed to the
+    repository and served from `/static/`.
 
 ### 4.5 Architecture decision records
 

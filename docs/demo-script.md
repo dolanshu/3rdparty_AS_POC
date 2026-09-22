@@ -186,7 +186,112 @@ topology. No third-party front-end libraries, so it works offline.
 `make demo` (section 4) runs its own AS and mock on ephemeral ports, so those calls do not
 appear in a console pointed at the long-running AS — use `make dev` + `make mock` here.
 
-## 7. Closing line
+## 7. Phase 3 — Live-load dashboard (3 minutes)
+
+**Duration.** 3 minutes for the simple variant, 5–6 with the full chained topology.
+**Preparation.** Start the mock core, translation AS (or full chain), load generator and
+enhanced console — see `docs/demo-steps.md` Part 3 for the exact commands.
+
+### 7a. Start the stack (2–3 minutes before the audience arrives)
+
+Four terminals + browser:
+
+```bash
+make core                                            # terminal 0: core mock on :5061
+# terminal 1: translation AS on :5060, API on :8080
+SBC_PEER_ADDRESS=127.0.0.1 SBC_PEER_PORT=5061 \
+  uv run python -m as_app.main
+make gen                                             # terminal 2: load generator on :8765
+uv run python -m console.main --port 8081 \
+  --load-api-url http://127.0.0.1:8765             # terminal 3: enhanced console
+```
+
+Full chain variant (5 terminals): start anti-fraud AS on :5062 as AS-1, then the rest.
+
+Open **http://127.0.0.1:8081**. Wait until both WS indicators show **live** (green).
+
+### 7b. Idle state (30 seconds)
+
+> "This is the enhanced Dashboard view. Everything is wired up but idle — no calls yet.
+> The event WebSocket connects to the AS, the load WebSocket connects to the generator.
+> The charts are driven purely from WebSocket events, not polling."
+
+Point at the four panels: line chart (flat at 0), pie chart (all zero), gauge (0/10),
+topology (4 nodes, thin grey lines).
+
+### 7c. Start the load (1 minute)
+
+Click **Start** in the Load Generator panel. Or:
+
+```bash
+curl -X POST http://127.0.0.1:8765/load/start
+```
+
+> "Watch what happens. The generator is an **external tool** — it doesn't import any AS
+> code. It drives the AS with real SIP INVITEs, just like a real S-CSCF would. The generator
+> sees the AS as a black box; the AS sees the generator as a black box. That boundary is
+> deliberate."
+
+**Point at each panel as it changes:**
+
+- **Line chart** ramps up. "This is a rolling 30-second window. Every tick, every 500 ms,
+  the console pushes the current active-call count. If you look closely, you can see the
+  generator's leaky-bucket fill rate — it takes about one second to reach the plateau."
+- **Gauge** moves. "10 target, so the needle sits at 10/10. The gauge is driven by
+  `pool_status_update` events from the generator, so the UI never drifts from what the
+  generator thinks."
+- **Topology** lines thicken. "Line thickness is proportional to active calls on that
+  hop. Green means all good — calls are completing normally."
+- **Trace panel** fills. "Every call shows up here, keyed by Call-ID. You can filter for
+  a specific one."
+- **Status bar**: `active` counter rises, `calls` total increments.
+
+### 7d. Adjust the load (30 seconds)
+
+> "The generator is interactive — you can change the target concurrency **at runtime**
+> without restarting anything."
+
+Drag the Target slider to 20, then to 50, then back to 10.
+
+> "See how the charts chase the new target? The line chart rises when we increase, drops
+> when we decrease. The generator drains gracefully — in-flight calls complete normally."
+
+### 7e. Fraud scenario — full chain only (1 minute)
+
+> "Now let's turn on some fraud call types. The anti-fraud AS will start rejecting calls
+> with SIP 608."
+
+Toggle on F1–F4 in the Call Types panel.
+
+> "Watch the pie chart — red slices appear for rejected_608. The topology link l1 might
+> shift toward orange. These are **real** 608s from the anti-fraud AS, not simulated. The
+> AS answers from the UAS side (RFC 8688) so the call never reaches the core."
+
+### 7f. Vendored Chart.js (30 seconds)
+
+> "One last thing. Open browser DevTools → Network tab. Reload the page. You'll see exactly
+> one script file — `chart.umd.min.js` — served from our own `/static/` endpoint. **No CDN,
+> no npm, no build step.** Chart.js 4.4.8 UMD, MIT licensed, committed directly to the
+> repository (ADR-0011)."
+
+Show the About view for the attribution line.
+
+### 7g. Stop the load (30 seconds)
+
+Click **Stop**.
+
+> "When we stop, the generator stops placing **new** calls, but in-flight calls run to
+> completion. The line chart drains over 5–10 seconds as those calls finish. Active
+> counter goes to zero. Back to idle."
+
+### 7h. What this proves
+
+> "Phase 1 proved the AS works for one call. Phase 2 proved it chains and rejects. Phase 3
+> proves it holds **N concurrent calls under load** — a real external tool driving real SIP,
+> visualised live. And everything you see on this page is driven by WebSocket events from
+> the AS and the generator. No polling. No batch jobs."
+
+## 8. Closing line
 
 > "Everything that is deliberately missing — TLS, Digest, media, real HA, charging — is
 > registered in `docs/production-gaps.md` with what production would require. Nothing is

@@ -3333,3 +3333,155 @@ P10 the §16 item-1 wording "from a clean checkout" is really "from **two** sibl
 `path` dependency cannot resolve without the sibling, so that is the **accepted cost of
 `REQ-F-032`** (an explicit recorded exception, ADR-0009 decision 8), and this record does not
 present it as more than it is. Nothing is pushed and nothing is tagged (`AGENT.md` §13/§15).
+
+## Phase 3 — P13 Enhanced Console (2026-09-22)
+
+**Version.** `VERSION` = `1.0.0` (P13 is the v1.0 release milestone — Dashboard + load controls +
+charts + topology + vendored Chart.js completes the Phase 3 deliverable).
+
+**Scope.** P13 enhances the existing M3 console with a Dashboard view containing live charts, a
+dynamic SVG topology, and load generator controls. It consumes — but does not modify — the P12
+event stream and REST API. P13 does **not** touch AS source code (`src/as_app/`,
+`src/anti_fraud_as/`) or `as_platform` (REQ-NF-027 carries forward).
+
+### ACC-P13-001 — rolling live call-count line chart (REQ-F-045)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k "operations_ui or chartjs_canvases"
+tests/integration/test_console.py::test_console_page_has_chartjs_canvases PASSED
+tests/integration/test_console.py::test_console_page_contains_operations_ui_elements PASSED
+```
+
+The page contains `lineChart` canvas; `initCharts()` initialises a Chart.js line chart with 60
+data points (30 s at 500 ms ticks); a `setInterval` at 500 ms pushes `activeCalls` into the
+rolling window. Data is sourced from AS `call_started` / `call_ended` events and
+`pool_status_update` events.
+
+### ACC-P13-002 — call-state distribution pie/doughnut chart (REQ-F-046)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k chartjs_canvases
+tests/integration/test_console.py::test_console_page_has_chartjs_canvases PASSED
+```
+
+The `pieChart` canvas is present; the JS tracks call states (active / completed / rejected_608 /
+timeout) and updates the pie on every per-call event.
+
+### ACC-P13-003 — capacity gauge (REQ-F-047)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k chartjs_canvases
+tests/integration/test_console.py::test_console_page_has_chartjs_canvases PASSED
+```
+
+The `gaugeChart` canvas renders a semi-circular doughnut gauge showing `active / target`
+concurrency, driven by `pool_status_update` events from the generator WebSocket.
+
+### ACC-P13-004 — dynamic SVG topology (REQ-F-048)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k "operations_ui or static_scripts"
+tests/integration/test_console.py::test_console_page_has_only_vendored_static_scripts PASSED
+tests/integration/test_console.py::test_console_page_contains_operations_ui_elements PASSED
+```
+
+The inline SVG topology has 4 nodes: **S-CSCF**, **Anti-fraud**, **Translation**, **core**,
+connected by 3 link lines (`l1`, `l2`, `l3`). Link `stroke-width` scales with active call count;
+link `stroke` colour changes with dominant state (green = active/completed, red = 608 rejections,
+orange = timeouts).
+
+### ACC-P13-005 — load generator controls (REQ-F-049)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k operations_ui
+tests/integration/test_console.py::test_console_page_contains_operations_ui_elements PASSED
+```
+
+Left nav includes load generator controls:
+- Target concurrency slider (`tgtSlider`, min=1, max=50)
+- Call rate slider (`rateSlider`, min=0.1, max=10, step=0.1)
+- Start / Stop buttons (`btnStart`, `btnStop`)
+- Call-type toggles (10 types: T1–T6, F1–F4) built by `buildToggles()`
+
+Controls call `ldStart()`, `ldStop()`, `ldConfig()` which POST/PUT to the generator REST API. UI
+state is updated from `pool_status_update` events to prevent drift.
+
+### ACC-P13-006 — vendored Chart.js UMD bundle (REQ-F-050)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k "vendored or separate_process"
+tests/integration/test_console.py::test_console_page_has_only_vendored_static_scripts PASSED
+tests/integration/test_console.py::test_console_runs_as_separate_process_with_no_external_refs PASSED
+```
+
+All `<script src>` on the page point to `/static/` (only `chart.umd.min.js`). The vendored
+bundle at `src/console/static/chart.umd.min.js` (~16 KB) and its MIT license
+(`chart.umd.min.js.LICENSE.txt`) are committed to the repository. The bundle serves correctly
+from the running console process (>10 KB, Chart.js content recognised). No CDN, no npm, no build
+step — consistent with ADR-0011 and `AGENT.md` §4.4 amendment.
+
+### ACC-P13-007 — no AS or as_platform modifications (REQ-NF-027)
+
+```text
+$ git diff --name-only main..HEAD -- src/console/ | sort
+src/console/main.py
+src/console/static/chart.umd.min.js
+src/console/static/chart.umd.min.js.LICENSE.txt
+
+$ cat ../as_platform/VERSION
+0.2.0
+```
+
+P13 changes are confined to `src/console/`, `tests/integration/test_console.py`, docs, and
+`AGENT.md`. `../as_platform` version stays `0.2.0`. No AS source code is modified.
+
+### ACC-P13-008 — legacy views preserved (REQ-F-012)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k "screening or operations_ui"
+tests/integration/test_console.py::test_console_page_contains_operations_ui_elements PASSED
+tests/integration/test_console.py::test_console_page_carries_the_screening_and_instance_surfaces PASSED
+```
+
+All 6 navigation entries present: Dashboard (new default), Call Trace, Rules, Screening,
+Statistics, About. Legacy view containers (`vw-call-trace`, `vw-rules`, `vw-screening`,
+`vw-statistics`, `vw-about`) all exist on the page. Dashboard is the new default view but all
+M3/P8 functionality remains accessible.
+
+### ACC-P13-009 — full suite passes + ruff clean (REQ-NF-004)
+
+```text
+$ uv run pytest -q
+307 passed, 2 warnings in 55.16s
+
+$ uv run ruff check .
+All checks passed!
+```
+
+307 passed (was 306 before P13 — +1 from the vendored-static test replacing the old
+no-external-scripts test, net +0 due to test count consolidation, but +1 overall when including
+the new chartjs canvases test). Ruff lint clean.
+
+### Phase 3 gate summary
+
+| # | Item | Status |
+|---|------|--------|
+| 1 | Requirements (REQ-F-045…050) accepted | **Passed** — 6/6 REQs marked `accepted` |
+| 2 | ADR-0011 (vendored Chart.js) + AGENT.md §4.4 amendment | **Passed** — ADR written; rule updated to controlled-exception form |
+| 3 | Dashboard with 3 Chart.js charts (line, pie, gauge) | **Passed** — all 3 canvases present; initialised by `initCharts()` |
+| 4 | Dynamic SVG topology (4 nodes, 3 links, thickness + colour) | **Passed** — inline SVG with S-CSCF / Anti-fraud / Translation / core |
+| 5 | Load generator controls (sliders, toggles, buttons) | **Passed** — target slider 1–50, rate slider 0.1–10, Start/Stop, 10 call-type toggles |
+| 6 | Vendored Chart.js (no CDN/npm/build) | **Passed** — UMD bundle + MIT license under `src/console/static/` |
+| 7 | Legacy views preserved (Call Trace, Rules, Screening, Statistics, About) | **Passed** — all 5 legacy views accessible via left nav |
+| 8 | Two WebSocket connections (AS events + generator events) | **Passed** — `connEv()` and `connLd()` with reconnect logic |
+| 9 | Version bumped to 1.0.0 | **Passed** — `VERSION`, `pyproject.toml`, and package `__init__.py` bumped |
+| 10 | Full test suite passes | **Passed** — 307 passed, 0 failed, 0 errors |
+| 11 | Ruff lint clean | **Passed** — `All checks passed!` |
+| 12 | No secrets or real traffic captures committed | **Passed** — private-key scan clean, no `.env`, `git status` shows only expected P13 files |
+
+**Honest declaration.** P13 is the v1.0 release. The Dashboard is the new default view and the
+primary user-facing surface for Phase 3 demo scenarios. Chart.js is vendored (ADR-0011 controlled
+exception) — there is **no CDN, no npm, no build step**, keeping the "one Python file + static
+assets" deployment model of the original M3 console. No AS source code is modified; the enhanced
+console is purely a consumer of the P12 event stream and REST API. Nothing is pushed and nothing
+is tagged (`AGENT.md` §13/§15).

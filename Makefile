@@ -11,7 +11,7 @@ PYTHONPATH_LOCAL := $(CURDIR)/src
 export PYTHONPATH := $(PYTHONPATH_LOCAL)
 
 .DEFAULT_GOAL := help
-.PHONY: help sync dev as mock console fraud lint format type test unit integration e2e demo \
+.PHONY: help sync dev as mock console fraud core gen lint format type test unit integration e2e demo \
         demo-fraud demo-chained probe probe-608 rules capture docker-up docker-down clean
 
 help: ## Show this help
@@ -34,6 +34,12 @@ console: sync ## Run only the console process
 
 fraud: sync ## Run only the anti-fraud AS process (listens on FRAUD_SIP_LISTEN_PORT, 5062)
 	$(RUN) python -m anti_fraud_as.main
+
+core: sync ## Run only the core network mock (UAS side, answers 200 OK on port 5061)
+	$(RUN) python -m s_sbc_mock.main --listen-port 5061
+
+gen: sync ## Run the load generator (P12, REST/WebSocket on 8765)
+	$(RUN) python tools/call_load_generator.py $(ARGS)
 
 lint: sync ## ruff format --check + ruff check + mypy
 	$(RUN) ruff format --check .

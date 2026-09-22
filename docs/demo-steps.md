@@ -21,6 +21,10 @@ own AS and mock on ephemeral ports, does one thing and exits. **Part 2** is the 
 console, which needs long-running processes and a browser. The two parts do not depend on
 each other — run either one without the other.
 
+**Part 3 (Phase 3)** is the live-load dashboard: a long-running AS chain, the load
+generator driving real SIP traffic, and the enhanced console showing live charts and
+topology. It builds on Part 2 by adding the generator and the Dashboard view.
+
 ### Part 1 — One-shot command-line demos
 
 Each command is self-contained: it starts its own AS and mock on ephemeral ports, does one
@@ -310,8 +314,192 @@ message flow with direction colours, a Call-ID filter, a payload viewer, the mat
 highlighted, a statistics dashboard and an SVG topology view — all inline, with no
 third-party front-end libraries, so it works offline.
 
+### Part 3 — Phase 3: Live-load dashboard (long-running, browser)
+
+The enhanced console (P13) plus the load generator (P12) demonstrate real concurrent SIP
+traffic visualised as live charts and a dynamic topology diagram.
+
+Two flavours: **simple** (translation AS only, 3 terminals) and **full** (chained topology
+with both AS instances, 5 terminals). Start with the simple one; add the chain if you want
+to show the full Phase 2 + Phase 3 picture.
+
+#### 3.0 Common prep: start the mock core (UAS side)
+
+The translation AS needs a next hop that answers 200 OK. Use the mock's UAS side as the
+core network:
+
+```bash
+# Terminal A — core network mock (UAS side, answers 200 OK)
+uv run python -m s_sbc_mock.main --listen-port 5061
+```
+
+It listens on `127.0.0.1:5061` and answers every INVITE with 180 → 200 → BYE.
+
+#### 3.1 Simple variant — single translation AS (3 terminals)
+
+Quickest way to show the dashboard.
+
+```bash
+# Terminal 1 — translation AS, SIP on 5060, internal API on 8080, next hop = mock core
+SBC_PEER_ADDRESS=127.0.0.1 SBC_PEER_PORT=5061 \
+SIP_LISTEN_PORT=5060 INTERNAL_API_PORT=8080 \
+  uv run python -m as_app.main
+```
+
+```bash
+# Terminal 2 — load generator, points at translation AS on 5060
+uv run python tools/call_load_generator.py \
+  --as-port 5060 \
+  --http-port 8765 \
+  --target-concurrency 10 \
+  --call-rate 3.0
+```
+
+```bash
+# Terminal 3 — enhanced console on 8081
+uv run python -m console.main \
+  --port 8081 \
+  --as-api-url http://127.0.0.1:8080 \
+  --load-api-url http://127.0.0.1:8765
+```
+
+Open **http://127.0.0.1:8081**.
+
+Then skip to [3.3 Demo flow](#33-demo-flow).
+
+#### 3.2 Full variant — chained topology (5 terminals)
+
+Shows the full Phase 2 + Phase 3 picture: S-CSCF → anti-fraud AS → translation AS → core.
+
+```bash
+# Terminal 1 — anti-fraud AS (AS-1), SIP on 5062, internal API on 8082
+# Next hop = translation AS on 5060
+FRAUD_SIP_LISTEN_PORT=5062 FRAUD_INTERNAL_API_PORT=8082 \
+FRAUD_SBC_PEER_ADDRESS=127.0.0.1 FRAUD_SBC_PEER_PORT=5060 \
+FRAUD_ALLOWED_PEERS=127.0.0.1 \
+  uv run python -m anti_fraud_as.main
+```
+
+```bash
+# Terminal 2 — translation AS (AS-2), SIP on 5060, internal API on 8080
+# Next hop = mock core on 5061
+SBC_PEER_ADDRESS=127.0.0.1 SBC_PEER_PORT=5061 \
+SIP_LISTEN_PORT=5060 INTERNAL_API_PORT=8080 \
+  uv run python -m as_app.main
+```
+
+```bash
+# Terminal 3 — load generator, points at anti-fraud AS (AS-1 on 5062)
+uv run python tools/call_load_generator.py \
+  --as-port 5062 \
+  --http-port 8765 \
+  --target-concurrency 10 \
+  --call-rate 3.0
+```
+
+```bash
+# Terminal 4 — enhanced console on 8081, connects to AS-2's API + load generator API
+uv run python -m console.main \
+  --port 8081 \
+  --as-api-url http://127.0.0.1:8080 \
+  --load-api-url http://127.0.0.1:8765
+```
+
+Verify everything is healthy before the demo:
+
+```bash
+curl -s http://127.0.0.1:8082/healthz | python -m json.tool    # anti-fraud AS
+curl -s http://127.0.0.1:8080/healthz | python -m json.tool    # translation AS
+curl -s http://127.0.0.1:8765/healthz | python -m json.tool    # load generator
+curl -s http://127.0.0.1:8081/healthz | python -m json.tool    # console
+```
+
+All four should return `{"status": "ok", ...}`.
+
+Open **http://127.0.0.1:8081** in a browser. The Dashboard is the default view.
+
+#### 3.3 Demo flow
+
+**Step 1 — idle state**
+
+Show the Dashboard:
+- Status bar: both WS indicators (event ws, load ws) should show **live** (green).
+- Line chart: flat line at 0 (no calls yet).
+- Pie chart: all zero.
+- Gauge: 0 / 10.
+- Topology: 4 nodes (S-CSCF, Anti-fraud, Translation, core) with thin grey lines.
+- Trace panel: "no calls yet".
+
+**Step 2 — start the load**
+
+In the left-nav Load Generator panel, click **Start**.
+Or from the command line:
+
+```bash
+curl -X POST http://127.0.0.1:8765/load/start
+```
+
+Watch the Dashboard come alive:
+- **Line chart**: ramps up to ~10 active calls (rolling 30-second window).
+- **Pie chart**: fills with active calls; completed calls accumulate over time.
+- **Gauge**: needle moves toward 10 / 10 (target concurrency).
+- **Topology**: links thicken proportionally to active calls; colour shifts to green.
+- **Trace panel**: fills with live calls — filter by Call-ID with the text box.
+- **Status bar**: `active` counter rises, `calls` total increments.
+
+**Step 3 — adjust concurrency**
+
+Drag the **Target** slider to 20 (or 50 for a denser demo), then release.
+Or command line:
+
+```bash
+curl -X PUT http://127.0.0.1:8765/load/config \
+  -H 'Content-Type: application/json' \
+  -d '{"target_concurrency": 20}'
+```
+
+Watch:
+- Gauge needle moves (target jumps to 20, active ramps up to match).
+- Topology links get thicker as more calls flow.
+- Line chart rises to the new plateau.
+
+Then slide it back down to 5 to show the drain side.
+
+**Step 4 — switch call types (full variant only)**
+
+In the Call Types toggles, turn off some normal types and turn on F1–F4 (fraud types).
+Then watch:
+- Anti-fraud AS starts rejecting some calls with 608.
+- Pie chart gains a red "rejected_608" slice.
+- Topology l1 (S-CSCF → Anti-fraud) may show orange/red tint.
+- Trace panel shows `call_rejected_608` events.
+
+**Step 5 — legacy views (optional)**
+
+Click through the left-nav to show the legacy views are still there:
+- **Call Trace** — detailed per-call message flow.
+- **Rules** — routing rules table.
+- **Screening** — block/allow lists.
+- **Statistics** — disposition counters.
+- **About** — version info + vendored Chart.js attribution.
+
+**Step 6 — stop the load**
+
+Click **Stop** in the Load Generator panel.
+Watch active calls drain to zero over ~5–10 seconds as in-flight calls complete.
+
+#### 3.4 What this demonstrates
+
+- **P12**: genuine concurrent SIP load from an external tool, no AS code modification.
+- **P13**: live data visualisation with vendored Chart.js (no CDN, works offline).
+- **Chained topology** (full variant): the call traverses two independent B2BUA
+  processes, each with its own sippy event loop.
+- **Event-driven UI**: the charts and topology update from WebSocket events, not polling.
+
 ## Notes
 
 - `make demo` is repeatable and writes nothing.
 - Capture evidence with `./tools/capture.sh`; never commit the capture.
 - If a command fails, fix the script and the code rather than improvising.
+- The Phase 3 dashboard demo works fully offline once the page is loaded — all assets
+  (including Chart.js) are served from the console process itself.

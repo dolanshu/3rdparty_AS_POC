@@ -14,10 +14,10 @@ mkdir -p "$LOG_DIR"
 
 # Allocate ports (override with env vars if needed)
 CORE_SIP="${CORE_SIP:-5061}"
-CORE_UAC="${CORE_UAC:-5060}"       # mock UAC side — unused; just needs a free port
+CORE_UAC="${CORE_UAC:-5062}"       # mock UAC side — MUST differ from AS_TRANS_SIP below
 AS_TRANS_SIP="${AS_TRANS_SIP:-5060}"
 AS_TRANS_API="${AS_TRANS_API:-8080}"
-AS_FRAUD_SIP="${AS_FRAUD_SIP:-5062}"
+AS_FRAUD_SIP="${AS_FRAUD_SIP:-5063}"
 AS_FRAUD_API="${AS_FRAUD_API:-8082}"
 GEN_HTTP="${GEN_HTTP:-8765}"
 CONSOLE_HTTP="${CONSOLE_HTTP:-8081}"

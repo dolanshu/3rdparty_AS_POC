@@ -1,8 +1,9 @@
 # P13 Dashboard — Playwright E2E 测试计划
 
-> 状态：已实现 · 编写日期：2026-09-22 · 更新日期：2026-09-23
+> 状态：已按 review-20260923 修订 · 编写日期：2026-09-22 · 修订日期：2026-09-23
 > 对应文件：`tests/e2e/test_console_dashboard.py`（28 测试 / 6 类）
 > 目标：用真实浏览器（Chromium headless）完整走通 Enhanced Dashboard 用户旅程生命周期，覆盖事件流每一环。
+> ⚠️ 执行前必加：`pytestmark = pytest.mark.e2e`（当前缺失，见 §2.5 脚注）。
 
 ---
 
@@ -37,6 +38,12 @@ P13 Enhanced Dashboard 在 Phase 3 结束后交付，声称"可运行"但用户�
 | 测试风格 | pytest 风格（非 playwright 原生 config） | 与现有 pytest 测试体系统一 |
 | 启动方式 | 自研 session fixture 起进程 | pytest-playwright 的 `webServer` 只支持单进程，我们是 4 个 |
 | 浏览器 | Chromium headless | 系统已有，够用 |
+| 额外依赖 | `requests` | `test_console_dashboard.py` §T3 用 `requests.put` 禁用 T4 call type。**当前未在 pyproject 显式声明**，依赖系统 python 的已有安装 |
+
+> **已知缺口**（review-20260923 P0-2）：
+> - `pyproject.toml` L81 开了 `--strict-markers`，`Makefile` L65 跑 `pytest tests/e2e -m e2e`，但本文件**未**声明 `pytestmark = pytest.mark.e2e`，导致 `make e2e` / `make test` **静默跳过**这 28 个测试。其余 3 个 E2E 文件（`test_call_flows.py`, `test_chained_call_flows.py`, `test_fraud_call_flows.py`）都有。
+> - `conftest.py` L26 `PROJECT_ROOT = "/home/shudong/project/3rtparty_AS_POC"` 是硬编码绝对路径，换机器或 clone 到别处会炸。应改为 `pathlib.Path(__file__).resolve().parents[2]`。
+> - playwright / requests 依赖未入 pyproject（只有"系统用户级已装"的前提），CI 不可复现。
 
 ### 2.3 Fixture 设计（`tests/e2e/conftest.py`）
 
@@ -61,9 +68,9 @@ def demo_stack():
 
 关键点：
 - **session scope** —— 整个测试会话只启一次进程栈（4 进程启动 ~15s）
-- 端口固定（5061/5060/8080/8765/8081），conftest 启动前会 kill 占用端口的旧进程
+- 端口固定（5061/5060/8080/8765/8081），conftest 启动前会 **`lsof -ti :PORT | kill -9`** 清扫占用端口的任何进程——**不区分进程归属**，在开发机上可能误杀其他服务
 - RULES_FILE 在 conftest 里生成临时文件，把所有 next_hop ports 改成 5061（避免端口冲突）
-- teardown 必须干净，否则第二次跑会端口冲突
+- **完整 teardown 序列**：① 对每个 Popen 发 `SIGTERM` → ② `wait(timeout=5)` 等优雅退出 → 超时则 `kill()` → ③ 最后再 `_kill_port` 清扫 5 个端口确保无残留。conftest L177–189 实现，之前文档只写"terminate + wait"。
 
 ### 2.4 每个测试的 per-test reset
 
@@ -77,13 +84,21 @@ def _open_console(page, demo_stack):
     page.wait_for_timeout(2000)
 ```
 
-generator 的 `active_calls` 有 bursty 特征：duration classes 里 D1=2.5s (30%)、D2=11.5s (50%)、D3=25s (15%)、D4=3s timeout (5%)，加上 generator pool_feed 每秒快照，**短 calls 在两次快照间完全 drain 是正常现象**——测试用 polling（deadline-based）而非 snapshot 断言。
+generator 的 `active_calls` 有 bursty 特征：duration classes 里 **D1=2.5s (30%)、D2=11.5s (50%)、D3=25s (15%)、D4=3s timeout (5%)**。加权平均 9.5s 用于 Little's Law 耦合（`AVG_DURATION_SECONDS = 0.30×2.5 + 0.50×11.5 + 0.15×25 + 0.05×3 = 9.5`），不是运行时观测值。D1 的 2.5s 是 *midpoint*（`DurationModel.MIDPOINTS["D1"]=2.5`），其 WEIGHTS 注释写"~2 s conversation"是描述性口径，数值口径以代码为准。
+
+call load 模型本身把 D1 设得很短是有意设计（模拟客服快速应答就 BYE），**加上 generator pool_feed 每秒快照一次，短 calls 在两次快照间完全 drain 是正常现象**——测试用 polling（deadline-based）而非 snapshot 断言。
 
 ### 2.5 执行命令
 
+> ⚠️ **marker 缺口**（review P0-2）：当前 `test_console_dashboard.py` 没有 `pytestmark = pytest.mark.e2e`，而 `pyproject.toml` 开了 `--strict-markers`。**裸运行是唯一方式**——加 `-m e2e` 会静默跳过这 28 个。加上 marker 后再用 `-m e2e` / `make e2e`。
+
 ```bash
-# 全部 28 测试
+# 全部 28 测试（当前唯一可用方式 —— 不加 -m）
 timeout 360 python3 -m pytest tests/e2e/test_console_dashboard.py -v
+
+# 加上 pytestmark = pytest.mark.e2e 后，以下也能跑：
+python3 -m pytest tests/e2e/ -m e2e -k "console_dashboard" -v
+make e2e   # = pytest tests/e2e -m e2e（加 marker 后才覆盖本文件）
 
 # 单层筛选
 python3 -m pytest tests/e2e/test_console_dashboard.py -v -k "PageLoad"
@@ -102,45 +117,49 @@ python3 -m pytest tests/e2e/test_console_dashboard.py -v -k "Concurrent"
 
 ### 3.1 TestPageLoad（5 个）—— 基础连通性，失败则中止后续
 
-| # | 测试名 | 核心断言 | 为什么重要 |
-|---|--------|----------|------------|
-| 1 | `test_page_loads_without_js_errors` | ① `pageerror` 事件为 0 条 ② `typeof Chart === 'function'` ③ title 包含 "Console" | JS bundle 完整性，Chart.js 不报错 |
-| 2 | `test_all_nav_buttons_present` | 6 个导航按钮（Dashboard / Call Trace / Rules / Screening / Statistics / About）全部可见且可点击 | 导航 UI 结构正确 |
-| 3 | `test_status_bar_renders` | 状态栏 8 个字段（Status / Instance / Uptime / Version / Calls / Active / Target / Load）全部渲染 | 健康检查初始状态 |
-| 4 | `test_both_websockets_connect` | ① `#wsEv.className` 包含 `live` ② `#wsLd.className` 包含 `live` | 两条 WS（AS events + generator pool）都连上 |
-| 5 | `test_initial_dashboard_controls_state` | ① btnStart enabled ② btnStop disabled ③ gaugeVal 显示 `0 / 10` | 页面初始态正确 |
+> ⚠️ 下表断言描述已按 review-20260923 P0-1 对齐到实际代码（不是最初 draft 声称的强度）。
+
+| # | 测试名 | 核心断言（代码实际） | 与 draft 差异 |
+|---|--------|---------------------|----------------|
+| 1 | `test_page_loads_without_js_errors` | ① `page.on("pageerror")` 收集 → 最终 `len=0` ② `page.evaluate("typeof Chart") == "function"` | draft 声称有 title 断言，实际没有 |
+| 2 | `test_all_nav_buttons_present` | ① `.nav button.count() >= 5`（代码写死 >=5，不是==6）② texts 里有 Dashboard + Rules + About（**只校验这三个**，不是 6 个）③ Dashboard 第一个按钮有 `act` class | draft 声称"6 个按钮全部可见且可点击"——可点击未校验；只验了 3 个文本 |
+| 3 | `test_status_bar_renders` | 8 个 DOM id 各存在一个：`aDot, aSt, aInst, aVer, aUp, aCal, aAct, aTgt` | draft 写了"Load"字段——实际没有 Load id |
+| 4 | `test_both_websockets_connect` | `#wsEv` + `#wsLd` 的 inner_text 含 "live"，轮询 ≤ 10s 成功 | 一致 |
+| 5 | `test_initial_dashboard_controls_state` | ① `#btnStop.is_disabled()` 为 True ② `#gaugeVal.inner_text` 以 `"0 /"` 开头 | draft 声称验证 btnStart enabled——代码没验 btnStart（用 Stop disabled 反证 generator idle）|
 
 ### 3.2 TestNavigation（8 个）—— SPA 视图切换
 
-| # | 测试名 | 核心断言 | 为什么重要 |
-|---|--------|----------|------------|
-| 6 | `test_call_trace_view_renders` | 点 Call Trace → `.vw-call-trace.act` 可见，`.vw-rules` 不可见 | 视图切换生效 |
-| 7 | `test_rules_view_renders_and_has_content` | 点 Rules → 找到 ≥ 3 条规则卡片（`#rulesList .rule-card`） | Rules 数据加载成功 |
-| 8 | `test_screening_view_renders` | 点 Screening → `.vw-screening.act` 可见 | 视图渲染 |
-| 9 | `test_statistics_view_renders` | 点 Statistics → `.vw-statistics.act` 可见 | 视图渲染 |
-| 10 | `test_about_view_renders` | 点 About → `.vw-about.act` 可见，文本包含 "third-party" | About 页面渲染 |
-| 11 | `test_nav_stays_visible_after_each_view` | 遍历 5 个非 dashboard 视图 → `nav.col` 始终可见 | 导航不丢（修复后） |
-| 12 | `test_round_trip_rules_to_dashboard` | 点 Rules → 再点 Dashboard → `.centre` 恢复可见 | 往返正常 |
-| 13 | `test_all_views_then_back_to_dashboard` | 遍历 5 个视图 → 每个只允许一个 `.act` → 最后回 Dashboard | 互斥切换 + centre 恢复 |
+| # | 测试名 | 核心断言（代码实际） | 备注 |
+|---|--------|---------------------|------|
+| 6 | `test_call_trace_view_renders` | ① 点 Call Trace → `#vw-call-trace.classList.contains('act')` True ② `.nav` count == 1（没丢）③ `.nav button[data-v="call-trace"].classList.contains('act')` | **不**断言其他视图不可见（只 #13 部分覆盖）。选择器是 `#vw-*` id + `classList.contains('act')`，不是 draft 写的 `.vw-*` class |
+| 7 | `test_rules_view_renders_and_has_content` | ① `#vw-rules.classList.contains('act')` ② `#rulesCard.inner_text` 非空 | draft 声称"找到 ≥ 3 条规则卡片 `.rule-card`"——实际只验 inner_text 非空，无条数、无 `.rule-card` 选择器 |
+| 8 | `test_screening_view_renders` | ① `#vw-screening.classList.contains('act')` ② `#scrCard.count() == 1` | 一致（draft 没提 #scrCard） |
+| 9 | `test_statistics_view_renders` | ① `#vw-statistics.classList.contains('act')` ② `#statsCard.count() == 1` | 一致 |
+| 10 | `test_about_view_renders` | ① `#vw-about.classList.contains('act')` ② inner_text 含 `"third-party"` | 一致 |
+| 11 | `test_nav_stays_visible_after_each_view` | 遍历 5 个非 dashboard 视图 → 每步 `.nav.count() == 1` + 当前按钮有 `act` | 不验证其他按钮的 act 状态（只验证当前点击的那个）|
+| 12 | `test_round_trip_rules_to_dashboard` | ① 点 Rules → `#vw-rules.act` ② 点 Dashboard → `#vw-dashboard.style.display != "none"` + `#vw-rules.classList.contains('act') == False` | draft 写的是"`.centre` 恢复可见"——代码用 `#vw-dashboard.style.display` 检查（两者等价，但实现更精确）|
+| 13 | `test_all_views_then_back_to_dashboard` | 遍历 5 个视图 → 每个 `#vw-{view}.act` 在结束后为 False → `#vw-dashboard.style.display != "none"` | 这是唯一验证"其他视图不可见"的测试 |
 
 ### 3.3 TestGeneratorLifecycle（4 个）—— Start/Stop 生命周期
 
-| # | 测试名 | 核心断言 | 为什么重要 |
-|---|--------|----------|------------|
-| 14 | `test_start_button_hits_rest_endpoint` | 监听浏览器 `response` 事件 → 点 Start → 收到 `POST /load/start` | 按钮 click handler 路径正确 |
-| 15 | `test_active_calls_rise_after_start` | Start → 轮询 generator REST `/load/status` → 看到 `running=true` 且 `active_calls>0` | 真实 calls 在产生 |
-| 16 | `test_stop_button_drains_active_to_zero` | Stop → 等 → `running=false` 且 `active_calls=0`（包括 force_disconnect_all） | generator 正确 drain |
-| 17 | `test_console_gauge_rises_then_falls_with_generator` | 4 阶段：① generator REST active_calls 上升 ② console gauge 显示非零 ③ Stop 后 active_calls=0 ④ gauge 恢复 `0 / 10` | 完整 end-to-end 生命周期（含 T4 call type disable 避免 AS 瞬时 reject） |
+| # | 测试名 | 核心断言（代码实际） | 备注 |
+|---|--------|---------------------|------|
+| 14 | `test_start_button_hits_rest_endpoint` | **点 #btnStart → page.wait_for_timeout(500) → 直接 `_gen_status("/load/status")` 验证 `running=True`** | draft 声称"监听浏览器 response 事件 → 收到 POST /load/start"——**实际没有任何 response 监听**，是点了按钮后直接 REST 轮询 |
+| 15 | `test_active_calls_rise_after_start` | Start → deadline 20s 轮询 REST `/load/status` → 看到 `active_calls > 0`（用 `ever_had` boolean，不假设峰值）| 一致 |
+| 16 | `test_stop_button_drains_active_to_zero` | Stop → deadline 15s → 同时满足 `running=False` 且 `active_calls=0` | 一致 |
+| 17 | `test_console_gauge_rises_then_falls_with_generator` | 4 阶段：① **先** `requests.put /load/config` 禁用 T4（用实际 `requests` 库，imported inline at L308）② generator REST active_calls > 0 至少一次 ③ console `#gaugeVal.inner_text` 非零至少一次 ④ Stop → 两个 drain 断言 | draft 没提 `requests` import；T4 disable 用 inline try/except；gauge 断言用 deadline polling 不是 snapshot |
 
 ### 3.4 TestDashboardLive（5 个）—— 实时图表
 
-| # | 测试名 | 核心断言 | 为什么重要 |
-|---|--------|----------|------------|
-| 18 | `test_line_chart_accumulates_points` | Start → 等 6s → line chart `data.labels.length ≥ 6`（每 500ms 推一次）| 折线图在增长 |
-| 19 | `test_pie_chart_has_nonzero_segments` | Start → 等 → `chart.data[0]` 各段之和 ≥ 3 | 饼图计数器在增长 |
-| 20 | `test_topology_svg_links_change_on_active` | Start → 等 20s → `#l1 stroke-width > 1`（Math.max(activeCalls, counters.active, totalTraffic) 后至少有 totalTraffic 贡献） | 拓扑图链路强度变化 |
-| 21 | `test_trace_panel_accumulates_call_records` | Start → 等 → `#tlist .ti` 子元素 ≥ 5 | Trace 面板在增长 |
-| 22 | `test_trace_filter_narrows_list` | 在 filter 框输入 call_id 片段 → 匹配列表长度减小 | 筛选功能 |
+> 图表用 `_read_chart()` helper（L76-84），走 `Chart.getChart(el)` 读，不是 draft 里的 `el.__chart__`。
+
+| # | 测试名 | 核心断言（代码实际） | 与 draft 差异 |
+|---|--------|---------------------|----------------|
+| 18 | `test_line_chart_accumulates_points` | Start → wait 6s → `Chart.getChart(lineChart).data.labels.length >= 4` | draft 写 `>= 6`，实际代码是 `>= 4` |
+| 19 | `test_pie_chart_has_nonzero_segments` | Start → wait 8s → `sum(pieChart.data.datasets[0].data) >= 3` | 一致（代码结构是 `sum(segments) >= 3`）|
+| 20 | `test_topology_svg_links_change_on_active` | ① 读 idle 态 `#l1.getAttribute('stroke-width')` ② Start → deadline 20s 轮询 → 找到 `active_sw > idle_sw + 0.1` ③ 否则 assert False + dump console 内部 state (activeCalls, counters, topoVal, l1_sw) | 文档 4.3 节描述"Math.max(activeCalls, counters.active, totalTraffic)"是准确的。draft §3 声称"> 1"——实际是浮点比较 `active_sw > idle_sw + 0.1`（idle 基线通常≈1.0，比较增量 0.1）|
+| 21 | `test_trace_panel_accumulates_call_records` | Start → wait 8s → `#tlist .ti` count `>= 3` | draft 写 `>= 5`，实际代码是 `>= 3` |
+| 22 | `test_trace_filter_narrows_list` | ① 取 `total_before = #tlist .ti count` ② **若 0 → `pytest.skip()`** ③ 输入 `"zzzzzzzNoMatchzzzzz"`（必然不匹配的字符串）④ assert `after_nomatch <= total_before` | **pytest.skip 在 L436 调用，但文件头部没 `import pytest`**——若 count==0 会抛 `NameError` 而非 skip（review P0-3 已发现）。另外输入的是必然不匹配字符串，断言的本质是"filter 没让列表变多"，不是真验证"筛选缩小了" |
 
 ### 3.5 TestAsRestEndpoints（4 个）—— AS 后端 REST API
 
@@ -179,8 +198,10 @@ page.wait_for_timeout(2000)  # 额外等 2s 让 JS 初始化完成
 | 来源 | 字段路径 | console 读 | 状态 |
 |------|----------|------------|------|
 | generator WS (`/ws/pool`) | `msg.attributes.active_calls` | `onPoolStatus(d) → s = d.attributes \|\| d → s.active_calls` | ✅ 已修复 |
-| generator REST (`/load/status`) | 扁平 `active_calls` | 同上（fallback 自动处理）| ✅ |
+| generator REST (`/load/status`) | 扁平 `active_calls`, `running` | 同上（fallback 自动处理） | ✅ **真实路径**（pool.snapshot）有 running；**库 fallback**（_default_getter）仍缺 running（§六 B2）|
 | AS WS (`/ws/p12/events`) | `msg.event`, `msg.call_id` | 直接读 `d.event`, `d.call_id` | ✅ |
+
+> **命名漂移**：`phase3-plan.md` 写 `/ws/events` 和 `/ws/load`，实际实现是 `/ws/p12/events` 和 `/ws/pool`（`src/console/main.py` L223-224）。本文档 2.1 / 2.3 / 4.2 都是实际端点名。
 
 ### 4.3 topology stroke-width 计算
 
@@ -200,14 +221,15 @@ CallPool 的 D1 calls 是 2.5s 就 BYE，target_concurrency=10 时 active_calls 
 
 ### 4.5 读 Chart.js 内部状态
 
-Chart.js 4.x 在浏览器里注册为全局 `Chart`，实例挂在 DOM 元素的 `__chart__` 属性上：
+Chart.js 4.x 用全局 `Chart.getChart(el)` 取实例（比 `el.__chart__` 更稳——后者是早期 Chart.js 4.x 还未正式暴露的 API，正式推荐就是 `Chart.getChart`）。测试的 `_read_chart()` helper（L76-84）这样写：
 
 ```python
 labels = page.evaluate("""() => {
-    var c = document.getElementById('lineChart').__chart__;
+    var c = Chart.getChart(document.getElementById('lineChart'));
+    if (!c) return null;
     return c.data.labels.length;
 }""")
-assert labels >= 6
+assert labels >= 4  # 实际阈值，不是 6（见 §3.4 #18）
 ```
 
 ### 4.6 读 generator REST 验证 WS 推送确实生效
@@ -225,15 +247,18 @@ assert _gen_status(gen_base)["running"] is True
 
 ## 五、执行顺序
 
+> §五是**建议的排查 gate 顺序**（快速 smoke → 逐层定位），**不是 pytest 实际执行顺序**。pytest 按文件内 `class` 定义顺序跑，实际是：PageLoad → Navigation → **GeneratorLifecycle** → DashboardLive → **AsRestEndpoints** → Concurrent。要按建议顺序执行必须加 `-k` 显式筛选。
+
 ```
+【建议排查顺序】（与 pytest 实际顺序不同）
 1. 跑 TestPageLoad（5 个）
    └─ 若任何失败 → 修 UI / JS 初始化 → 重跑 → 不进入后续
 2. PageLoad 全绿 → 跑 TestNavigation（8 个）
    └─ 每个失败对应具体导航 bug
 3. Navigation 全绿 → 跑 TestAsRestEndpoints（4 个）
-   └─ 验证 AS API 端到端可达
+   └─ 验证 AS API 端到端可达（REST 不依赖 console 渲染）
 4. 跑 TestGeneratorLifecycle（4 个）
-   └─ generator end-to-end
+   └─ generator end-to-end（T3 → T4 → dashboard 链路）
 5. 跑 TestDashboardLive（5 个）
    └─ 图表在 generator 运行时的数据验证
 6. 跑 TestConcurrent（2 个）
@@ -242,15 +267,30 @@ assert _gen_status(gen_base)["running"] is True
 
 全部 **28 个绿** → 通过。
 
+### 5.1 相对于 phase3-plan.md 的覆盖缺口（review P1-1）
+
+`docs/phase3-plan.md` P13 Stage 4 对 E2E 有明确要求，本 28 测试**未覆盖**的项：
+
+| phase3-plan 出处 | 要求 | 本 28 测试现状 |
+|---|---|---|
+| §P13 Stage 4 E2E step (5)(6) + §6 风险表第 4 行（High） | "slide to 5 → verify chart drops"——slider → REST `/load/config` → pool → WS → gauge chart **完整闭环** | 本文件无任何 slider E2E。#17 用 `requests.put /load/config` 禁用 T4 作为测试前置，但**不**断言 slider UI → REST → pool 响应链路。phase3-plan 将其列为影响 High 风险 |
+| REQ-F-049 | call type toggles E2E | 无 |
+| REQ-F-048 / §P13 Stage 3 step 7 | 拓扑按 hop 颜色（绿/红/橙） | 本文件只测 `#l1 stroke-width`，颜色（stroke CSS var）未测 |
+| §P13 "chained demo compatibility" / D8 | 拓扑为 SBC → anti-fraud → translation → core 四节点链式 | conftest 只起 1 个 AS（translation），无 anti-fraud 进程。拓扑最左两跳在 E2E 栈里不存在。**chained 拓扑覆盖在 `test_chained_call_flows.py`（非浏览器 E2E）和 `test_chained_topology.py`（integration），console dashboard 的拓扑图渲染链式场景未测** |
+
+→ **建议**：至少补一个"slider 改 target_concurrency → gauge/target 读数随 pool_status_update 变化"闭环测试。其余缺口在 `docs/testing/e2e-call-flows-plan.md` 和 `docs/testing/integration-plan.md` 有覆盖，不再此处重列。
+
 ---
 
 ## 六、Bug 历史（已修复）
 
-| # | Bug | 根因 | 修复 commit |
-|---|-----|------|-------------|
+| # | Bug | 根因 | 修复 |
+|---|-----|------|------|
 | B1 | calls 始终显示 0 | console 读 `d.active_calls` 但 generator WS 推 `d.attributes.active_calls` | `onPoolStatus(d) → s = d.attributes \|\| d` |
-| B2 | Stop 按钮永远不可点 | generator `_default_getter()` 无 `running` 字段 | 补上 `"running": ...` |
+| B2 | Stop 按钮永远不可点 | generator 正常运行时，console 读 generator REST 返回值里的 `running` 字段；**正常路径**（`build_generator_app(pool_state_getter=pool.snapshot)`，`snapshot()` L248 有 `"running": self.is_running`）下字段存在；**但库模式 fallback**（`_default_getter()` L729-737）至今**没有** `running` 字段——B2 的"修复"路径不是补 `_default_getter()`，而是真实 generator 进程总用 `pool.snapshot`。测试代码 `_reset_gen` 里 `.get("running", True)` 默认值掩盖了这个缺口（若 generator 进程死了 REST 返回 default，会被误认为 running）| **未完全修**：真实进程 OK，库 fallback 仍缺 `running`。本测试文件每次 reset 都用 REST 验证 running=false 后才开始测试，规避了这个坑 |
 | B3 | Rules 菜单后找不到返回 | `.vw` 视图 div 有两份拷贝（一份在 `.grid` 内、一份在外），切 dashboard `.centre` 被隐藏后非 dashboard 视图不可见 | 移进 grid + 加 `grid-column:2;grid-row:1` |
 | B4 | topology stroke-width 永远 1 | 读 generator WS 的 activeCalls 但 D1 BYE 太快 drain → 快照总是 0 | `Math.max(activeCalls, counters.active, totalTraffic)` |
-| B5 | gauge 永远显示 `0 / 10` | T4 call type 被 AS reject 后 active_calls 永远 ≤ 3，D1 BYE 太快 pool_feed 快照总是 0 | gauge 测试先 PUT `/load/config` 禁用 T4 |
+| B5 | gauge 永远显示 `0 / 10` | T4 call type 被 AS reject 后 active_calls 永远低，D1 BYE 太快 pool_feed 快照总是 0 | gauge 测试先 `PUT /load/config` 禁用 T4 |
 | B6 | CallPool.stop() 不 drain active calls | `_on_call_ended()` 在 ED2 线程调 `asyncio.get_event_loop()` → RuntimeError → active_calls 不减 | 强制 `asyncio.run_coroutine_threadsafe()` + `force_disconnect_all()` |
+
+> **B2 的后续建议**（review P1-3）：顺手给 `_default_getter()` 也加上 `"running": False`（本来就是 idle 默认态），消除库模式 fallback 与生产路径的差异。否则下次有人用库模式写测试会再踩同样的坑。

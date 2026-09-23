@@ -6,37 +6,37 @@ description: Number translation and routing for a Shanghai office with a mobile-
 next_hops:
 - name: s-sbc-primary
   address: 127.0.0.1
-  port: 15061
+  port: 5061
   transport: udp
   priority: 1
   description: Operator Service-SBC, primary trunk (mock in this POC)
 - name: s-sbc-failover
   address: 127.0.0.1
-  port: 15061
+  port: 5061
   transport: udp
   priority: 2
   description: Operator Service-SBC, second trunk used on failover
 - name: office-pbx-primary
   address: 127.0.0.1
-  port: 15061
+  port: 5061
   transport: udp
   priority: 1
   description: Office PBX, internal extensions
 - name: office-pbx-secondary
   address: 127.0.0.1
-  port: 15061
+  port: 5061
   transport: udp
   priority: 2
   description: Office PBX, standby node
 - name: intl-gateway-primary
   address: 127.0.0.1
-  port: 15061
+  port: 5061
   transport: udp
   priority: 1
   description: International gateway, primary
 - name: intl-gateway-secondary
   address: 127.0.0.1
-  port: 15061
+  port: 5061
   transport: udp
   priority: 2
   description: International gateway, standby

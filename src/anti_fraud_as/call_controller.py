@@ -52,7 +52,7 @@ from as_platform.call_controller import (
 )
 from as_platform.hop import NextHop
 from as_platform.observability.logging import LogDirection, get_logger, log_event
-from as_platform.route_header import parse_top_route_target
+from anti_fraud_as.route_header import parse_top_route_target
 from as_platform.observability.metrics import CallDisposition, MetricsRegistry
 from as_platform.observability.tracing import TraceRecorder
 from as_platform.sip_adapter import outbound_call_id

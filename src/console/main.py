@@ -48,7 +48,8 @@ CONSOLE_PAGE = """<!DOCTYPE html>
 <style>
 :root{--bg:#0d1117;--panel:#161b22;--p2:#1c2330;--bd:#30363d;--tx:#c9d1d9;--mut:#8b949e;--acc:#58a6ff;--in:#3fb950;--out:#f0883e;--int:#8b949e;--rule:#d2a8ff;--err:#f85149;--warn:#d29922}
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:var(--bg);color:var(--tx);font-family:"SF Mono","Cascadia Code","Consolas",monospace;font-size:13px;overflow:hidden}
+body{background:var(--bg);color:var(--tx);font-family:"SF Mono","Cascadia Code","Consolas",monospace;font-size:13px;overflow:hidden;overflow-x:hidden}
+html,body{width:100%;height:100%;margin:0;padding:0}
 
 /* Status bar */
 .sb{display:flex;align-items:center;gap:16px;padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--bd);height:38px}
@@ -57,23 +58,23 @@ body{background:var(--bg);color:var(--tx);font-family:"SF Mono","Cascadia Code",
 .ws{font-size:11px;color:var(--mut)}.ws.live{color:var(--in)}.ws.down{color:var(--err)}
 
 /* Main grid: 3 columns — nav / centre / right */
-.grid{display:grid;grid-template-columns:180px 1fr 320px;grid-template-rows:1fr 220px;height:calc(100vh - 38px);gap:0}
-.nav{background:var(--panel);border-right:1px solid var(--bd);padding:8px 0;overflow-y:auto}
+.grid{display:grid;grid-template-columns:200px 1fr 280px;grid-template-rows:1fr 220px;height:calc(100vh - 38px);gap:0;min-width:0;overflow:hidden}
+.nav{background:var(--panel);border-right:1px solid var(--bd);padding:8px 0;overflow-y:auto;min-width:0}
 .nav button{display:block;width:100%;text-align:left;padding:9px 14px;border:none;background:0;color:var(--mut);font:inherit;cursor:pointer;border-left:3px solid transparent}
 .nav button:hover{color:var(--tx);background:var(--p2)}.nav button.act{color:var(--acc);border-left-color:var(--acc);background:var(--p2)}
 .ctl{margin-top:12px;padding:8px 14px;border-top:1px solid var(--bd)}
 .ctl .h{color:var(--mut);font-size:11px;text-transform:uppercase;margin-bottom:6px}
 
 /* Centre panel — charts stacked */
-.centre{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--bd)}
-.chart-card{flex:1;min-height:0;padding:10px 14px;border-bottom:1px solid var(--bd);display:flex;flex-direction:column}
+.centre{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--bd);min-width:0}
+.chart-card{flex:1;min-height:0;min-width:0;padding:10px 14px;border-bottom:1px solid var(--bd);display:flex;flex-direction:column}
 .chart-card:last-child{border-bottom:none}
 .chart-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 .chart-h .t{font-size:12px;font-weight:600;color:var(--acc)}.chart-h .v{font-size:11px;color:var(--mut)}
 .chart-wrap{flex:1;min-height:0;position:relative}
 
 /* Right panel — doughnut + topology */
-.right{display:flex;flex-direction:column;overflow:hidden}
+.right{display:flex;flex-direction:column;overflow:hidden;min-width:0}
 .sm-card{padding:10px 14px;border-bottom:1px solid var(--bd);display:flex;flex-direction:column}
 .sm-card.t{height:55%}
 .sm-card.g{height:45%}
@@ -92,10 +93,10 @@ body{background:var(--bg);color:var(--tx);font-family:"SF Mono","Cascadia Code",
 .ti .st{font-size:11px;width:80px;text-align:right;flex-shrink:0}.st.ok{color:var(--in)}.st.rj{color:var(--err)}.st.to{color:var(--warn)}
 
 /* Controls */
-.ctl-row{display:flex;align-items:center;gap:8px;margin:6px 0}
-.ctl-row label{font-size:11px;color:var(--mut);width:80px;flex-shrink:0}
-.ctl-row input[type=range]{flex:1;accent-color:var(--acc)}
-.ctl-row .val{width:30px;text-align:right;font-size:11px;color:var(--tx)}
+.ctl-row{display:flex;align-items:center;gap:8px;margin:6px 0;min-width:0}
+.ctl-row label{font-size:11px;color:var(--mut);width:70px;flex-shrink:0}
+.ctl-row input[type=range]{flex:1;min-width:0;accent-color:var(--acc)}
+.ctl-row .val{width:30px;text-align:right;font-size:11px;color:var(--tx);flex-shrink:0}
 .btns{display:flex;gap:6px;margin-top:8px}
 .btns button{flex:1;padding:6px;border:1px solid var(--bd);border-radius:4px;background:var(--p2);color:var(--tx);font:inherit;font-size:11px;cursor:pointer}
 .btns button:hover{border-color:var(--acc);color:var(--acc)}.btns button:disabled{opacity:.4;cursor:not-allowed}

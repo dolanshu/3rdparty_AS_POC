@@ -1206,7 +1206,11 @@ now gitignored, reproduced with `make capture`, and only
   `done`), `docs/README.md`, `docs/architecture/hld.md`, `docs/architecture/lld.md`,
   ADR-0002, `docs/operations/deployment.md`, `docs/operations/runbook.md` and
   `docs/specs/message-samples/README.md`; the `SBC_PEER_PORT` default in `README.md`/`lld.md`
-  was corrected from `15061` to the real code default `5061`.
+  was reconciled with the code default `15061`. *(Corrected 2026-09-24: an earlier draft of
+  this line named `5061` as the code default. `5061` is the next-hop port carried by the rule
+  catalogue `config/routing_rules.yaml`; `SBC_PEER_PORT`'s code default is `15061`
+  (`src/as_app/bootstrap.py`), and the knob is only the fallback used when a trunk INVITE
+  carries no top `Route`.)*
 - **`AGENT.md` §4.7 "release notes template" — RESOLVED in M4.** The maintainer chose to drop
   the wording: the phrase was removed from §4.7, and the per-version `CHANGELOG.md` nodes are
   the release notes. No separate template file is required.
@@ -2456,6 +2460,13 @@ Call-ID) and `03-out-invite-core.txt` (same Call-ID plus `-b2b_1`).
 
 ## Phase 2 — P9 chained topology (2026-09-19)
 
+> **Historical record — the wiring below is superseded by P9b / ADR-0014 (2026-09-23).**
+> `FRAUD_SBC_PEER_* → AS-2` (AS-1 trunk-to-trunk into AS-2) no longer ships: AS instances
+> never talk to each other, and each is triggered by its own iFC from the S-CSCF
+> orchestrator in `src/ims_mock/`. A chained call therefore carries **four** AS-leg
+> `Call-ID`s (`X`, `X-b2b_1`, `Z`, `Z-b2b_1`), not the three recorded below — iFC #2 gives
+> AS-2 its own trunk `Call-ID`. Current evidence is in the **P9b** section of this report.
+
 Branch `phase2` (item **P9** in `docs/phase2-plan.md` §3; under the branch model of §4 P9 is
 worked directly on `phase2`). Acceptance items **ACC-P9-001 … ACC-P9-005** in
 `docs/acceptance/criteria.md`; their requirements are `REQ-F-025 … REQ-F-028` and
@@ -3334,6 +3345,20 @@ P10 the §16 item-1 wording "from a clean checkout" is really "from **two** sibl
 `REQ-F-032`** (an explicit recorded exception, ADR-0009 decision 8), and this record does not
 present it as more than it is. Nothing is pushed and nothing is tagged (`AGENT.md` §13/§15).
 
+## Phase 3 — P12 Call Load (executed 2026-09-22) — evidence not recorded here
+
+`docs/acceptance/criteria.md` records P12 as executed on 2026-09-22 with `ACC-P12-001 … 011`.
+**No evidence section for it was written into this report** at the time; this placeholder
+exists so the omission is visible rather than silent. To close it, re-run the P12 gates and
+paste the four evidence kinds here:
+
+```bash
+uv run pytest tests/integration/test_concurrent_load.py -q
+uv run python tools/call_load_generator.py --target-concurrency 10 --call-rate 3.0
+```
+
+Do not mark the row accepted on the strength of `criteria.md` alone (`AGENT.md` §4.8).
+
 ## Phase 3 — P13 Enhanced Console (2026-09-22)
 
 **Version.** `VERSION` = `1.0.0` (P13 is the v1.0 release milestone — Dashboard + load controls +
@@ -3385,8 +3410,12 @@ tests/integration/test_console.py::test_console_page_has_only_vendored_static_sc
 tests/integration/test_console.py::test_console_page_contains_operations_ui_elements PASSED
 ```
 
-The inline SVG topology has 4 nodes: **S-CSCF**, **Anti-fraud**, **Translation**, **core**,
-connected by 3 link lines (`l1`, `l2`, `l3`). Link `stroke-width` scales with active call count;
+The inline SVG topology has 4 nodes: **S-SBC**, **Anti-fraud**, **Translation**, **S-SBC ret**,
+connected by 3 link lines (`l1`, `l2`, `l3`). At v1.0.0 this was **one fixed diagram** — the
+four nodes were always drawn regardless of which AS was actually running, so it is a display
+simplification, not the wire path. P14 (ACC-P14-003) made it mode-aware: `simple` dims the
+Anti-fraud node, `fraud` dims Translation, `chained` switches to the iFC layout. The shipped
+chain (ADR-0014) never puts two AS nodes in a direct SIP hop. Link `stroke-width` scales with active call count;
 link `stroke` colour changes with dominant state (green = active/completed, red = 608 rejections,
 orange = timeouts).
 
@@ -3469,7 +3498,7 @@ the new chartjs canvases test). Ruff lint clean.
 | 1 | Requirements (REQ-F-045…050) accepted | **Passed** — 6/6 REQs marked `accepted` |
 | 2 | ADR-0011 (vendored Chart.js) + AGENT.md §4.4 amendment | **Passed** — ADR written; rule updated to controlled-exception form |
 | 3 | Dashboard with 3 Chart.js charts (line, pie, gauge) | **Passed** — all 3 canvases present; initialised by `initCharts()` |
-| 4 | Dynamic SVG topology (4 nodes, 3 links, thickness + colour) | **Passed** — inline SVG with S-CSCF / Anti-fraud / Translation / core |
+| 4 | Dynamic SVG topology (4 nodes, 3 links, thickness + colour) | **Passed** — inline SVG with S-SBC / Anti-fraud / Translation / S-SBC ret (the fixed v1.0.0 diagram, drawn regardless of the running AS) |
 | 5 | Load generator controls (sliders, toggles, buttons) | **Passed** — target slider 1–50, rate slider 0.1–10, Start/Stop, 10 call-type toggles |
 | 6 | Vendored Chart.js (no CDN/npm/build) | **Passed** — UMD bundle + MIT license under `src/console/static/` |
 | 7 | Legacy views preserved (Call Trace, Rules, Screening, Statistics, About) | **Passed** — all 5 legacy views accessible via left nav |
@@ -3485,6 +3514,16 @@ exception) — there is **no CDN, no npm, no build step**, keeping the "one Pyth
 assets" deployment model of the original M3 console. No AS source code is modified; the enhanced
 console is purely a consumer of the P12 event stream and REST API. Nothing is pushed and nothing
 is tagged (`AGENT.md` §13/§15).
+
+---
+
+## Phase 3 — P14 Phase 3 × P9b alignment (executed 2026-09-23) — evidence not recorded here
+
+`docs/acceptance/criteria.md` records P14 as executed on 2026-09-23 with `ACC-P14-001 … 008`
+(generator `topology=chained`, multi-process `ims_mock` runtime, mode-aware console). **No
+evidence section for it was written into this report.** To close it, re-run
+`scripts/phase3-demo.sh full` and record the generator, console and `make demo-chained`
+output here, then the four evidence kinds per `AGENT.md` §4.8.
 
 ---
 

@@ -199,17 +199,14 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 <div class="topo-hint" id="topoHint" style="display:none">Cross-AS trace: correlate on ICID (P-Charging-Vector), not Call-ID.</div>
 <div class="topo-wrap">
 <svg viewBox="0 0 320 120" xmlns="http://www.w3.org/2000/svg" id="topoSimple">
-<rect x="4" y="48" width="52" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nSsbc"/>
-<text x="30" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">S-SBC</text>
-<line id="l1" x1="56" y1="60" x2="96" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="96" y="48" width="72" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nFraud"/>
-<text x="132" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">Anti-fraud</text>
-<line id="l2" x1="168" y1="60" x2="208" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="208" y="48" width="64" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nTrans"/>
-<text x="240" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">Translation</text>
-<line id="l3" x1="272" y1="60" x2="312" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="312" y="48" width="4" height="24" rx="1" fill="var(--p2)" stroke="var(--bd)"/>
-<text x="318" y="100" text-anchor="middle" fill="var(--mut)" font-size="10">core</text>
+<rect x="4" y="48" width="54" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nSsbc"/>
+<text x="31" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">S-SBC</text>
+<line id="l1" x1="58" y1="60" x2="82" y2="60" stroke="var(--mut)" stroke-width="2"/>
+<rect x="82" y="48" width="90" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nTrans"/>
+<text x="127" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">Translation AS</text>
+<line id="l2" x1="172" y1="60" x2="196" y2="60" stroke="var(--mut)" stroke-width="2"/>
+<rect x="196" y="48" width="70" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nRet"/>
+<text x="231" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">S-SBC ret</text>
 </svg>
 <svg viewBox="0 0 400 120" xmlns="http://www.w3.org/2000/svg" id="topoChained">
 <rect x="2" y="48" width="40" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
@@ -218,13 +215,13 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 <rect x="58" y="48" width="44" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
 <text x="80" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">S-SBC</text>
 <line id="cl2" x1="102" y1="60" x2="118" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="118" y="48" width="56" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
+<rect x="118" y="48" width="56" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="cAS1"/>
 <text x="146" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">Anti-fraud</text>
 <line id="cl3" x1="174" y1="60" x2="190" y2="60" stroke="var(--mut)" stroke-width="2"/>
 <rect x="190" y="48" width="36" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
 <text x="208" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">iFC</text>
 <line id="cl4" x1="226" y1="60" x2="242" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="242" y="48" width="56" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
+<rect x="242" y="48" width="56" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="cAS2"/>
 <text x="270" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">Translation</text>
 <line id="cl5" x1="298" y1="60" x2="314" y2="60" stroke="var(--mut)" stroke-width="2"/>
 <rect x="314" y="48" width="36" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
@@ -369,17 +366,27 @@ function topoIntensity(){
   var instantActive = Math.max(activeCalls || 0, counters.active || 0);
   var totalTraffic = (counters.completed || 0) + (counters.rejected_608 || 0) + (counters.timeout || 0);
   var intensity = Math.min(8, 1 + instantActive * 0.6 + Math.min(3, totalTraffic * 0.03));
-  var color = "var(--mut)";
-  if(counters.rejected_608 > 0) color = "var(--err)";
-  else if(counters.timeout > 0) color = "var(--warn)";
-  else if(instantActive > 0 || totalTraffic > 0) color = "var(--in)";
-  return {intensity: intensity, color: color, instantActive: instantActive, totalTraffic: totalTraffic};
+  // Link color: only active vs idle (no warn/err on links — those are AS-internal states).
+  var linkColor = (instantActive > 0 || totalTraffic > 0) ? "var(--in)" : "var(--mut)";
+  // AS node stroke: warn/err live here, not on links.
+  var nodeStroke = "var(--bd)";
+  if(counters.rejected_608 > 0) nodeStroke = "var(--err)";
+  else if(counters.timeout > 0) nodeStroke = "var(--warn)";
+  else if(instantActive > 0 || totalTraffic > 0) nodeStroke = "var(--in)";
+  return {intensity: intensity, linkColor: linkColor, nodeStroke: nodeStroke, instantActive: instantActive, totalTraffic: totalTraffic};
 }
 
 function paintLinks(ids, intensity, color){
   ids.forEach(function(id){
     var l = E(id);
     if(l){ l.setAttribute("stroke-width", intensity); l.setAttribute("stroke", color); }
+  });
+}
+
+function paintNodes(nodeIds, stroke){
+  nodeIds.forEach(function(id){
+    var n = E(id);
+    if(n){ n.setAttribute("stroke", stroke); }
   });
 }
 
@@ -395,8 +402,6 @@ function setTopologyMode(mode){
   } else {
     if(simple) simple.style.display = "";
     if(chained) chained.style.display = "none";
-    if(E("nFraud")) E("nFraud").style.opacity = topologyMode === "simple" ? "0.25" : "1";
-    if(E("nTrans")) E("nTrans").style.opacity = topologyMode === "fraud" ? "0.25" : "1";
   }
   applyToggleGating();
   updateTopology();
@@ -418,9 +423,11 @@ function applyToggleGating(){
 function updateTopology(){
   var m = topoIntensity();
   if(topologyMode === "chained"){
-    paintLinks(["cl1","cl2","cl3","cl4","cl5"], m.intensity, m.color);
+    paintLinks(["cl1","cl2","cl3","cl4","cl5"], m.intensity, m.linkColor);
+    paintNodes(["cAS1","cAS2"], m.nodeStroke);
   } else {
-    paintLinks(["l1","l2","l3"], m.intensity, m.color);
+    paintLinks(["l1","l2"], m.intensity, m.linkColor);
+    paintNodes(["nTrans"], m.nodeStroke);
   }
   if(m.instantActive > 0) E("topoVal").textContent = m.instantActive + " active";
   else if(m.totalTraffic > 0) E("topoVal").textContent = m.totalTraffic + " calls total";

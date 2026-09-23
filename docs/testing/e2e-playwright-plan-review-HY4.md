@@ -17,7 +17,7 @@
 |---|---|
 | 工程规范 | `AGENT.md` §3（gap register）、§4.2（必备文档集）、§4.4（console 标准）、§4.7（CI 分层）、§4.8（验收证据四类）、§11（三层测试 + 端口可配置）、§12（英文规范）、§13（变更文档链）、§16（DoD） |
 | 需求/验收 | `docs/requirements/functional-and-nonfunctional.md` L56–64、`docs/acceptance/criteria.md` L117–139、`docs/acceptance/report.md` L3347–3459 |
-| 设计 | `docs/architecture/hld.md` §12.4、`docs/architecture/adr/0013-*`（L15–118）、`docs/phase3-plan.md` §P13 Stage 4（L611–659）、§6 风险表（L702–710） |
+| 设计 | `docs/architecture/hld.md` §11.4、`docs/architecture/adr/0013-*`（L15–118）、`docs/phase3-plan.md` §P13 Stage 4（L611–659）、§6 风险表（L702–710） |
 | 配置/门禁 | `pyproject.toml`（L26–87）、`Makefile`（L41–66）、`.github/workflows/ci.yml`（L125–148） |
 | 实现 | `src/console/main.py`（L218–521 JS + L525–598 app）、`tools/call_load_generator.py`（L83–112、L238–252、L699–796）、`tests/e2e/conftest.py`、`tests/unit/test_call_pool.py` L198–221 |
 
@@ -97,7 +97,7 @@ def compute_binding_constraint(self) -> str:
 |---|---|---|
 | 1 | `tools/call_load_generator.py` L105 | 行尾注释 `# = 9.5` |
 | 2 | `docs/architecture/adr/0013-*.md` L74–79 | 同一算式后写 `= 9.5 seconds  # not published, only used internally` |
-| 3 | `docs/architecture/hld.md` §12.4 | 同一算式下写 `= 9.5 seconds`，并声明 "This is a **design constant**, not a runtime measurement (ADR-0013)" |
+| 3 | `docs/architecture/hld.md` §11.4 | 同一算式下写 `= 9.5 seconds`，并声明 "This is a **design constant**, not a runtime measurement (ADR-0013)" |
 | 4 | `docs/testing/unit-plan.md` L291 | `test_duration_model_avg_duration_constant` 描述为 `AVG = 9.5s（加权平均）` |
 | 5 | `tests/unit/test_call_pool.py` L200、L208 | 注释 `10.0 * 9.5 = 95 >= 10`、`1.0 * 9.5 = 9.5 < 50` |
 

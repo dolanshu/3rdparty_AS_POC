@@ -75,7 +75,7 @@ ASs (forward trunk in, return outbound back). Toward the **called party**, signa
 path was a documentation and design error. The S-SBC is the service-side session border for
 trunking to external ASs, not a general IMS egress.
 
-**Consequence.** The mock **core UAS** is **not** hung off the S-SBC return port. It is
+**Consequence.** The mock **terminating UAS** is **not** hung off the S-SBC return port. It is
 reached through a minimal **P-CSCF relay** (or equivalent) after S-CSCF has both AS
 results on the allow path.
 
@@ -263,8 +263,8 @@ point one AS's `*_SBC_PEER_*` at another AS's listen port for chaining.
 
 | Component | Env / config | Points to | Notes |
 | --- | --- | --- | --- |
-| AS-1 listen | `FRAUD_SIP_LISTEN_PORT` | — | e.g. `15062` |
-| AS-2 listen | `SIP_LISTEN_PORT` | — | e.g. `15060` |
+| AS-1 listen | `FRAUD_SIP_LISTEN_PORT` | — | e.g. `5062` |
+| AS-2 listen | `SIP_LISTEN_PORT` | — | e.g. `5060` |
 | S-SBC forward (trunk in) | `CORE_UAC` / trunk listen | AS via orchestrator Route | Orchestrator sets `Route: <sip:as@host:port>` per iFC |
 | S-SBC return | `CORE_SIP` / return listen | `127.0.0.1:CORE_SIP` in Route on trunk INVITE | AS outbound targets top Route |
 | AS-1 fallback peer | `FRAUD_SBC_PEER_ADDRESS` / `FRAUD_SBC_PEER_PORT` | S-SBC **return** (`CORE_SIP`) | Fallback only when trunk has no Route |
@@ -362,7 +362,7 @@ wording over inventing REQ-F-029 for the same behaviour.
 | `ims_mock/chain_config.py` | Ordered iFC list: `[("anti-fraud", host, port), ("translation", host, port)]`. |
 | `ims_mock/orchestrator.py` | S-CSCF state machine: iFC index, session context (ICID, SDP, numbers), trigger forward INVITEs. |
 | `ims_mock/pcscf_relay.py` | Minimal toward-called-party relay after AS-2 outbound reaches S-CSCF. |
-| `ims_mock/terminating_uas.py` | Called-party UAS (reuse `CoreUas` patterns). |
+| `ims_mock/terminating_uas.py` | Called-party UAS (reuse the mock `ReturnUas`). |
 
 **Unit tests** (no sockets): state transitions, 608 short-circuit, iFC order, “no second
 trigger after reject”.

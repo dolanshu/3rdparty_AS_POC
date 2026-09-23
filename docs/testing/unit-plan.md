@@ -54,7 +54,7 @@ Unit 层测试**单个模块**的纯逻辑——不 bind socket、不起进程�
 | 4 | `test_no_forbidden_module_names_in_source` | src/ 里没有 `s_server`, `s_controller`, `s_gateway` 这些被 ADR-0001 禁止的模块名 |
 | 5 | `test_source_files_carry_licence_header_and_docstring` | 每个 .py 文件开头有 Apache 2.0 header + module docstring |
 | 6 | `test_ci_runs_the_gates_in_layers` | CI workflow 里明确分 lint → unit → integration → e2e 层 |
-| 7 | `test_compose_defines_the_three_services` | docker-compose 有 s-sbc-mock、translation-as、anti-fraud-as 三个 service |
+| 7 | `test_compose_defines_the_three_services` | docker-compose 有 `as`、`s-sbc-mock`、`console` 三个 service（compose 实际共 5 个，`anti-fraud-as` 与 `s-sbc-mock-fraud` 是后来加的）|
 | 8 | `test_version_file_matches_the_project_version` | `VERSION` 文件和 `pyproject.toml` version 字段一致 |
 | 9 | `test_runtime_version_matches_the_version_file` | runtime `as_app` 的 `get_version()` 读 `VERSION` 文件 |
 | 10 | `test_runtime_version_is_not_the_unknown_placeholder` | version 不是 "unknown" 或空字符串 |
@@ -63,7 +63,7 @@ Unit 层测试**单个模块**的纯逻辑——不 bind socket、不起进程�
 | 13 | `test_env_example_declares_every_configuration_knob` | `.env.example` 覆盖了 bootstrap / fraud bootstrap 里的所有 Pydantic settings |
 | 14 | `test_as_app_does_not_import_the_anti_fraud_as` | `as_app` 包里没有 `import anti_fraud_as` |
 | 15 | `test_make_demo_chained_is_a_documented_first_class_entry_point` | Makefile 里有 `demo-chained` target |
-| 16 | `test_chaining_added_no_new_configuration_knob` | chain 用 config-only wiring（AS-1 的 next_hop = AS-2 的 listen address），不新增 env var |
+| 16 | `test_chaining_added_no_new_configuration_knob` | 链序在 `ims_mock/chain_config.py`（代码）里，不新增 env var；`*_SBC_PEER_*` 只是无 `Route` 时的 fallback，不指向另一个 AS（ADR-0014）|
 | 17 | `test_the_library_is_consumed_from_the_sibling_checkout` | `anti_fraud_as` 通过 `[tool.uv.sources]` 从 sibling checkout 引用 |
 | 18 | `test_the_library_is_not_a_uv_workspace_member` | `anti_fraud_as` 不在 `uv workspace` 声明里 |
 

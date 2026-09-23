@@ -58,7 +58,7 @@ INVITE is originated.
 | Matched rule | `R-MOB-CM-40` (China Mobile, E.164 in, national out) |
 | Ports | allocated per capture (dynamic, never 5060) |
 | Call-ID (trunk) | generated per capture by the mock's SIP stack |
-| Call-ID (core) | the trunk Call-ID plus the AS suffix `-b2b_1` |
+| Call-ID (outbound / S-SBC return) | the trunk Call-ID plus the AS suffix `-b2b_1` |
 
 Ports differ on every capture because they are allocated dynamically, and the trunk
 Call-ID differs too, because the mock's stack generates it. The two legs do **not** share

@@ -262,8 +262,8 @@ rather than falling back to `Server Internal Error`.
 | --- | --- | --- |
 | `SIP_LISTEN_ADDRESS` | `127.0.0.1` | Address the trunk is received on |
 | `SIP_LISTEN_PORT` | `5060` | UDP port of the trunk |
-| `SBC_PEER_ADDRESS` | `127.0.0.1` | Next hop for the outbound INVITE |
-| `SBC_PEER_PORT` | `15061` | UDP port of the operator S-SBC return hop in the mock matrix (catalogue + logging; wire port from top `Route` when present) |
+| `SBC_PEER_ADDRESS` | `127.0.0.1` | Fallback next hop for the outbound INVITE, used only when the trunk INVITE carries no top `Route` |
+| `SBC_PEER_PORT` | `15061` | UDP port of that fallback (the operator S-SBC **return** hop in the mock matrix). A routed call takes its wire port from the top `Route`; the *hop* itself is selected from the rule catalogue (`127.0.0.1:5061` in `config/routing_rules.yaml`). Also the peer reported by the startup self-check |
 | `ALLOWED_PEERS` | `127.0.0.1` | Comma separated source addresses accepted on the trunk |
 | `RULES_FILE` | `config/routing_rules.yaml` | Routing rules file |
 | `INTERNAL_API_ADDRESS` | `127.0.0.1` | Address the console reaches |
@@ -522,8 +522,9 @@ loop-owned timer with `SCREENING_RELOAD_POLL_SECONDS = 1.0` — never from insid
 callback, because file I/O on the call path would block the whole stack
 (`docs/phase2-plan.md` section 6).
 
-**No addresses in this file.** The next hop comes from the environment
-(`FRAUD_SBC_PEER_*`), so — unlike `config/routing_rules.yaml` and
+**No addresses in this file.** The fallback next hop comes from the environment
+(`FRAUD_SBC_PEER_*`); on a trunk INVITE that carries a top `Route` the outbound leg goes to
+that `Route` (the S-SBC return side) instead. So — unlike `config/routing_rules.yaml` and
 `config/routing_rules.compose.yaml` — the second AS has **no second copy of an address to
 drift from**. That is a deliberate answer to the rule-file-drift trap recorded in
 `docs/phase2-plan.md` section 6: the shortest way to avoid four synchronised copies is not
@@ -643,7 +644,8 @@ missing optional header would break legitimate traffic. It is an accepted gap
 
 ### 9.7 Process model of the second process
 
-`python -m anti_fraud_as.main` is a **fourth process** (section 8.2 of the HLD). It is not
+`python -m anti_fraud_as.main` is a **separate process** — the five of section 8.2 of the
+HLD are `as`, `anti-fraud-as`, `s-sbc-mock`, `s-sbc-mock-fraud` and `console`. It is not
 a thread of `as_app`: sippy's `ED2.loop()` blocks its thread and `AGENT.md` section 6
 forbids sharing it with a web server.
 
@@ -687,7 +689,8 @@ forbids sharing it with a web server.
   a misconfiguration aborts startup rather than stealing traffic.
 - **Rule-file-drift trap avoided.** The screening data file carries no addresses
   (section 9.4), so there is no environment-specific copy to keep in step. The next hop is
-  environment configuration only.
+  environment configuration only (the `FRAUD_SBC_PEER_*` fallback for a trunk INVITE without
+  a `Route`).
 - **No new transaction on the reject path.** Rejected calls originate nothing, so they add
   no retransmission timers; only allowed calls create client transactions, which step 4
   above cancels on shutdown.
@@ -837,7 +840,7 @@ points it at the anti-fraud AS's `FRAUD_SIP_LISTEN_ADDRESS` / `FRAUD_SIP_LISTEN_
 - `deploy/docker-compose.yml` needs a **second mock instance** (or an override of the
   existing one's `as_*` environment) so the compose topology can drive either AS; the port
   matrix in `docs/operations/deployment.md` records which mock talks to which AS.
-- **P8 demonstrates each AS independently.** The chained `SBC → AS-1 → AS-2 → core`
+- **P8 demonstrates each AS independently.** The chained `S-CSCF#1 → S-SBC → AS-1 → S-SBC → S-CSCF#2 → S-SBC → AS-2 → P-CSCF → terminating UAS`
   topology is P9's; nothing here wires the two AS instances in series.
 
 **Console coverage delta (`AGENT.md` section 4.4 / section 16).** The console must show the
@@ -859,6 +862,17 @@ blocked on the UI.
 
 ## 10. The chained topology (P9)
 
+> **Superseded by P9b / ADR-0014 (2026-09-23).** The trunk-to-trunk wiring described in this
+> section — AS-1's `FRAUD_SBC_PEER_*` pointing at AS-2's listen address — is **obsolete and
+> no longer implemented**. The chain that ships has **no AS-to-AS SIP path**: the S-CSCF iFC
+> orchestrator in `src/ims_mock/` applies iFC #1 and iFC #2, each AS receives **its own**
+> trunk INVITE from the S-SBC forward side and returns its outbound INVITE to the top
+> `Route` on the S-SBC return side, and the terminating side is
+> `S-CSCF → P-CSCF → terminating UAS` — **not** the S-SBC return port and never another AS.
+> `*_SBC_PEER_*` is only the fallback peer used when a trunk INVITE carries no `Route`.
+> See `docs/chained-topology-plan.md`, `docs/architecture/hld.md` section 9 and ADR-0014.
+> Sections 10.1–10.5 below are kept as the history of the P9 measurement.
+
 The chain of `docs/architecture/hld.md` section 9, at module and process level. P9 adds **no
 module**: it is the two existing instances connected trunk-to-trunk by configuration, and the
 work of the item is a demo, its documentation and the friction it records (ADR-0008).
@@ -873,8 +887,10 @@ not chaining code: it makes an existing controller obey section 2.3.
 
 | Hop | Decided in code by | Set to |
 | --- | --- | --- |
-| AS-1 → AS-2 | `anti_fraud_as.main.FraudAsStack.start()` builds `global_config['nh_addr']` from `fraud_sbc_peer_*`, and `FraudCallController._originate_allowed` gives it to `uaO.nh_address` | AS-2's SIP listen address |
-| AS-2 → core | `as_app.call_controller.CallController` resolves `decision.next_hops` against the rule set and passes the chosen hop to `uaO` | the core, via the routing catalogue |
+| ~~AS-1 → AS-2~~ *(obsolete)* | ~~`anti_fraud_as.main.FraudAsStack.start()` builds `global_config['nh_addr']` from `fraud_sbc_peer_*`~~ | ~~AS-2's SIP listen address~~ — **removed**; replaced by iFC #2 |
+| AS-1 → S-SBC return | `FraudCallController._originate_allowed` → `parse_top_route_target` (top `Route`), fallback `FRAUD_SBC_PEER_*` | the S-SBC **return** side |
+| AS-2 → S-SBC return | `as_app.call_controller.CallController` resolves `decision.next_hops` against the rule set, then applies the top `Route` | the S-SBC **return** side, via the routing catalogue |
+| S-CSCF → P-CSCF → UAS | the `src/ims_mock/` orchestrator | the terminating UAS (**not** the S-SBC return port) |
 
 The asymmetry is inherited, not introduced: AS-1 has one configured next hop for every
 allowed call, while AS-2's next hop is a property of the **matched rule**, so the chain's tail
@@ -887,14 +903,19 @@ variables alone.
 
 `REQ-NF-016` states that two B2BUAs in series produce different `Call-ID`s and that cross-AS
 correlation is therefore unsolved. **That is the design, and it is what section 2.3 requires
-of each controller.** With the S-CSCF leg's value written `X`, a chained call carries three
-distinct values:
+of each controller.** With the S-CSCF leg's value written `X`, the **implemented** iFC chain
+(ADR-0014 decision 4) carries **four** distinct AS-leg values:
 
 | Leg | `Call-ID` | Derived by |
 | --- | --- | --- |
-| S-CSCF → AS-1 trunk | `X` | the mock UAC |
-| AS-1 → AS-2 (inter-AS) | `X-b2b_1` | `FraudCallController._originate_allowed` |
-| AS-2 → core | `X-b2b_1-b2b_1` | `CallController.apply_call_policy` |
+| S-SBC → AS-1 trunk (iFC #1) | `X` | the iFC orchestrator's first trunk INVITE |
+| AS-1 outbound → S-SBC return | `X-b2b_1` | `FraudCallController._originate_allowed` |
+| S-SBC → AS-2 trunk (iFC #2) | `Z` (≠ `X`) | the orchestrator's **second** trunk INVITE |
+| AS-2 outbound → S-SBC return | `Z-b2b_1` | `CallController.apply_call_policy` |
+
+P9's probe measured **three** (`X`, `X-b2b_1`, `X-b2b_1-b2b_1`) because it assumed AS-1's
+outbound leg landed directly on AS-2's trunk; that wiring is superseded, so the three-value
+row `AS-2 → core | X-b2b_1-b2b_1` is history.
 
 The mechanism is one stack behaviour that has to be worked around, plus a step each controller
 must take (section 2.3; ADR-0008 decision 2):
@@ -915,9 +936,9 @@ UacStateIdle.recvEvent      if cId == None: self.ua.cId = SipCallId()
 
 Consequences for the implementation, stated so they are not rediscovered:
 
-- **A chained call is three independent per-instance traces.** Each instance keys its trace,
-  its structured log and its console feed by the `Call-ID` **it** saw on its trunk leg, and
-  those values differ, so there is no shared key and no correlation to demonstrate. This is
+- **A chained call is one independent per-instance trace per AS.** Each instance keys its
+  trace, its structured log and its console feed by the `Call-ID` **it** saw on its trunk
+  leg, and those values differ, so there is no shared key and no correlation to demonstrate. This is
   the POC gap `REQ-NF-016` registers, and it is registered rather than hidden: the demo
   prints the distinct value each hop saw.
 - **The end-to-end key is on the wire but unused.** The standard correlation key is
@@ -942,8 +963,9 @@ Consequences for the implementation, stated so they are not rediscovered:
 
 ### 10.3 Process model and the port matrix
 
-**In production the chain is three processes** (plus the console): `anti_fraud_as.main`,
-`as_app.main` and the mock. Each keeps its own `SipConf` identity pinning, its own
+**In production the chain is five processes**: `anti_fraud_as.main`, `as_app.main`, the
+`src/ims_mock/` S-CSCF iFC orchestrator (with its S-SBC forward/return sides), the
+P-CSCF relay + terminating UAS, and the console. Each AS keeps its own `SipConf` identity pinning, its own
 `SipTransactionManager` and its own `ED2.loop()` on its own main thread, exactly as sections 5
 and 9.7 state; nothing about the chain relaxes that. The demo, like the other tools, runs both
 stacks in **one interpreter** and therefore gives each stack its own `TraceRecorder` /
@@ -956,9 +978,11 @@ dynamically:
 
 | Process | Role in the chain | Default port |
 | --- | --- | --- |
-| `python -m anti_fraud_as.main` | AS-1, the trunk entry | `5062/udp` trunk, `8082/tcp` internal API |
-| `python -m as_app.main` | AS-2, the middle hop | `5060/udp` trunk, `8080/tcp` internal API |
-| `python -m s_sbc_mock.main` | S-CSCF trigger and core | `15060/udp` UAC, `15061/udp` UAS |
+| `python -m anti_fraud_as.main` | AS-1, triggered by iFC #1 | `5062/udp` trunk, `8082/tcp` internal API |
+| `python -m as_app.main` | AS-2, triggered by iFC #2 | `5060/udp` trunk, `8080/tcp` internal API |
+| `python -m s_sbc_mock.main` | S-SBC forward + return (the operator boundary) | `15060/udp` UAC forward, `15061/udp` UAS return |
+| `src/ims_mock` orchestrator | S-CSCF: applies iFC #1 and #2 | in-process / allocated per run |
+| P-CSCF relay + terminating UAS | the called-party side (**not** the S-SBC return port) | allocated per run |
 | `python -m console.main` | operations UI | `8081/tcp` |
 
 The reject path adds **no** outbound transaction and therefore no new retransmission
@@ -971,10 +995,12 @@ The run command is **`make demo-chained`**, backed by **`tools/demo_chained_call
 mirroring `make demo` / `make demo-fraud` (ADR-0008 decision 6). It is a first-class,
 documented entry point runnable from a clean checkout, and it writes nothing.
 
-- **Wiring.** It points AS-1's `fraud_sbc_peer_address` / `fraud_sbc_peer_port` at AS-2's
-  listen address, and rewrites AS-2's **catalogue** next-hop ports to the core port with
-  `capture_call.rewrite_next_hop_ports` — the two mechanisms of section 10.1, so the demo
-  cannot be written as an environment-only change.
+- **Wiring (superseded by P9b / ADR-0014).** ~~It points AS-1's `fraud_sbc_peer_address` /
+  `fraud_sbc_peer_port` at AS-2's listen address~~ — that wiring is **gone**. The demo now
+  builds the `src/ims_mock/` S-CSCF iFC orchestrator, which triggers AS-1 and AS-2 with two
+  independent trunk INVITEs; `*_SBC_PEER_*` only names the S-SBC return fallback, and
+  `capture_call.rewrite_next_hop_ports` still rewrites AS-2's **catalogue** ports to the
+  dynamically allocated return port.
 - **Ports.** All four ports are allocated dynamically (`capture_call.free_udp_port`), so the
   demo never collides with a running process and never touches `5060` by accident.
 - **One allowed call.** It places a call from a caller the screening data allows and drives the
@@ -983,8 +1009,8 @@ documented entry point runnable from a clean checkout, and it writes nothing.
 - **One rejected call.** It places a call from a blocked caller and shows `608 Rejected` at
   AS-1 with **zero** calls seen by AS-2 and **zero** INVITEs at the core — the short-circuit
   asserted as an absence, not merely as a status code.
-- **The `Call-ID` per hop.** It prints the Call-ID the S-CSCF used, the Call-ID AS-2 saw and
-  the Call-ID the core saw — **three different values** — so the *absent* correlation of
+- **The `Call-ID` per hop.** It prints the four AS-leg Call-IDs — the two trunk values and
+  the two outbound values (`X`, `X-b2b_1`, `Z`, `Z-b2b_1`) — so the *absent* correlation of
   section 10.2 is visible rather than papered over. It asserts that each transition is exactly
   `outbound_call_id()` of the previous one, which is `REQ-NF-016`'s premise made observable and
   is what turns `REQ-F-028`'s "observable per instance" into something a reviewer can read.
@@ -1702,14 +1728,15 @@ All endpoints on the generator's own FastAPI instance (separate from AS's intern
 ```
 Process                  | SIP listen    | REST API      | WebSocket feed
 -------------------------|---------------|---------------|------------------
-translation AS           | 127.0.0.1:5060| —             | /ws/events 5090 (internal)
-anti-fraud AS            | 127.0.0.1:5062| —             | /ws/events 5092 (internal)
-load generator           | — (talks AS)   | 127.0.0.1:5095| /ws/pool 5095
-console (FastAPI)        | —             | 127.0.0.1:5000| consumes AS /ws/events + gen /ws/pool
+translation AS           | 127.0.0.1:5060| 127.0.0.1:8080| /ws/events (same port)
+anti-fraud AS            | 127.0.0.1:5062| 127.0.0.1:8082| /ws/events (same port)
+load generator           | — (talks AS)   | 127.0.0.1:8765| /ws/pool 8765
+console (FastAPI)        | —             | 127.0.0.1:8081| consumes AS /ws/events + gen /ws/pool
 ```
 
-Ports 5090/5092 are the AS's existing internal API ports (already in Phase 2's `.env.example`).
-Port 5095 is new for the generator (Phase 3 `.env.example` delta). Console stays 5000.
+Ports 8080/8082 are the AS's existing internal API ports (`INTERNAL_API_PORT` /
+`FRAUD_INTERNAL_API_PORT`, already in Phase 2's `.env.example`). Port 8765 is new for the
+generator (Phase 3 `.env.example` delta, `make gen`). Console stays 8081.
 
 ### 12.9 What P12 changes in the codebase
 
@@ -1751,7 +1778,7 @@ One implementation stage (no P10-style staged refactor):
 6. Integration tests: 10 concurrent calls through translation AS → verify each independent.
 7. Integration tests: 10 concurrent calls through anti-fraud AS → verify allow/reject isolation.
 8. P8a timer independence test: concurrent unreachable-next-hop calls → verify timer cancellation does not cross-contaminate.
-9. Chained topology e2e: 10 concurrent calls → anti-fraud → translation → core.
+9. Chained topology e2e: 10 concurrent calls through the iFC chain (AS-1 → S-CSCF → AS-2 → P-CSCF → terminating UAS).
 
 Each step leaves the repository building, linting and passing its three test layers.
 

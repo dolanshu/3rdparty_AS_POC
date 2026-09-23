@@ -33,7 +33,7 @@ from ims_mock.orchestrator import OrchestratorFsm, OrchestratorState
 from ims_mock.pcscf_relay import PcscfRelay
 from ims_mock.terminating_uas import TerminatingUas
 from s_sbc_mock.uac import CallOutcome, CallScenario, TrunkUac
-from s_sbc_mock.uas import CoreUas
+from s_sbc_mock.uas import ReturnUas
 
 _DEFAULT_LAZY_SCENARIO = CallScenario(
     name="load-gen",
@@ -233,7 +233,7 @@ class ChainedImsStack:
     as1: Any | None
     as2: Any | None
     mock_uac: TrunkUac
-    mock_uas: CoreUas
+    mock_uas: ReturnUas
     terminating: TerminatingUas
     pcscf: PcscfRelay
     orchestrator: ChainedOrchestrator
@@ -379,7 +379,7 @@ class ChainedImsStack:
     ) -> ChainedImsStack:
         """Construct a wired stack without starting it."""
         chain = ChainConfig.default_two_as(bind_address, as1_port, bind_address, as2_port)
-        mock_uas = CoreUas(
+        mock_uas = ReturnUas(
             bind_address,
             return_port,
             passthrough=True,

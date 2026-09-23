@@ -248,7 +248,9 @@ connected.
 **Handover notes (read this before starting M2):**
 
 - **Ports used.** Nothing hardcodes `5060`. The AS uses `SIP_LISTEN_PORT` (default 5060),
-  `SBC_PEER_ADDRESS`/`SBC_PEER_PORT` for the next hop, `INTERNAL_API_PORT` for health and
+  `SBC_PEER_ADDRESS`/`SBC_PEER_PORT` as the fallback next hop for a trunk INVITE that carries
+  no top `Route` (a routed call takes its wire destination from that `Route`, and the hop
+  itself comes from the rule catalogue), and `INTERNAL_API_PORT` for health and
   counters. The mock uses `--listen-port` for its core (UAS) side and `--trunk-port` for
   its trunk (UAC) side, which defaults to `listen-port - 1` — that is why compose exposes
   `15060/udp` and `15061/udp`. Tests allocate every port dynamically

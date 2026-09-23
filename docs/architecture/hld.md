@@ -124,12 +124,19 @@ sequenceDiagram
 | --- | --- |
 | 0001 | Use sippy as the SIP stack and B2BUA framework |
 | 0002 | Run the console as a separate process, talking over an internal API |
-| 0003 | UDP only |
+| 0003 | UDP only — **superseded for the library's pluggable transport seam by ADR-0010**; the POC trunk itself is still UDP |
 | 0004 | Declarative YAML routing rules with reload |
 | 0005 | Mock the S-SBC on the same stack as the AS |
 | 0006 | Signalling only, no media |
 | 0007 | Anti-fraud AS: use case, `608 Rejected` semantics and cross-call state ownership |
-| 0008 | Chained AS topology: configuration-only chaining and `Call-ID` preservation across two B2BUAs |
+| 0008 | Chained AS topology — **historical**: every B2BUA leg gets its own `Call-ID`; decision 1 (trunk-to-trunk via `FRAUD_SBC_PEER_*`) is **superseded by ADR-0014** |
+| 0009 | Platform library extraction; consumed through a `path` source |
+| 0010 | P11 verification: `TlsTransport`, `RedisStateStore`, capacity harness |
+| 0011 | Vendored Chart.js for the console |
+| 0012 | Load generator is an external process (SIP in, WebSocket out) |
+| 0013 | Two generator controls coupled by Little's Law |
+| 0014 | iFC-orchestrated chained topology (`src/ims_mock/`) — **the chain that ships** |
+| 0015 | Phase 3 × P9b demo alignment (generator topology modes, mode-aware console) |
 
 ## 8. The second AS instance — anti-fraud (P8)
 
@@ -164,10 +171,13 @@ graph LR
 ```
 
 The two AS instances are **independent**: neither imports the other, each has its own
-configuration, data file, ports and lifecycle. The chained topology
-(`SBC → anti-fraud AS → number-translation AS → core`) is P9's, not P8's; D6 builds it
-before the platform work precisely to expose the friction between the two instances
-(section 9).
+configuration, data file, ports and lifecycle. The chained topology is P9's, not P8's; D6
+builds it before the platform work precisely to expose the friction between the two
+instances (section 9). **There is no AS-to-AS SIP hop in that chain**: each AS is triggered
+by its own iFC from S-CSCF over the S-SBC trunk and returns its outbound INVITE to the S-SBC
+return side, so the shape is
+`S-CSCF(iFC#1) → S-SBC → AS-1 → S-SBC → S-CSCF(iFC#2) → S-SBC → AS-2 → S-SBC → S-CSCF → P-CSCF → UAS`,
+never `SBC → anti-fraud AS → number-translation AS → core`.
 
 ### 8.2 Deployment view
 
@@ -493,7 +503,7 @@ two samples, which is both the reason the seams exist and the limit of what they
 section 10's guarantee *"clone → `uv sync` → `make demo`"* becomes **"clone both repositories
 side by side → `uv sync` → `make demo`"** (REQ-F-032, ADR-0009 decision 6). There is **no new
 environment variable, no new port and no new service**: the library is not deployed, and the
-port matrices of sections 8.2 and 9.2 are untouched.
+port matrices of sections 8.2 and 9.5 are untouched.
 
 | Checkout | Path | Role |
 | --- | --- | --- |
@@ -573,7 +583,7 @@ what the system does.
   this repository follows the library in the same piece of work — it is the first user, not a
   consumer at a distance (ADR-0009, *Consequences*; D8).
 
-## 12. Call Load capability (P12)
+## 11. Call Load capability (P12)
 
 Phase 3's first item. Demonstrates that the AS handles N concurrent SIP calls of mixed
 types, mixed durations, and independent lifecycles — not just single-call functional
@@ -592,18 +602,23 @@ neither an AS component nor an `as_platform` consumer (ADR-0012).
 │              │ ──────────────────────────► │ translation AS        │
 │ load         │                            │ (one process, own     │
 │ generator    │   WebSocket /events         │  ED2 loop)            │
-│ (one process)│ ─────────────────────────► └──────────┬───────────┘
-│              │                                        │ SIP INVITE (UDP 5062)
-│              │                                        ▼
-│              │                 ┌──────────────────────────────────┐
-│              │                 │ anti-fraud AS                    │
-│              │                 │ (one process, own ED2 loop)      │
-│              │                 └──────────────────────────────────┘
+│ (one process)│ ─────────────────────────► └──────────────────────┘
+│              │                                        
+│              │   SIP INVITE (UDP 5062)   ┌──────────────────────┐
+│              │ ────────────────────────► │ anti-fraud AS        │
+│              │                           │ (one process, own    │
+│              │                           │  ED2 loop)           │
+│              │                           └──────────────────────┘
 │              │
 │              │   WebSocket /pool (generator-side events)
 │              │ ───────────────────────────► console
 └──────────────┘                              (one process, FastAPI)
 ```
+
+The generator addresses **each AS process directly and independently** — there is no
+`translation AS → anti-fraud AS` SIP hop. In `chained` mode the generator plays the
+subscriber UAC and hands the INVITE to the S-CSCF iFC orchestrator in `src/ims_mock/`, which
+triggers AS-1 and AS-2 in turn (ADR-0014); the two AS processes still never exchange SIP.
 
 Each AS process handles **per-AS concurrent isolation**: multiple CallController instances
 in the same process, each with its own `self.call_id`, its own dialog, its own timer.
@@ -712,10 +727,11 @@ P12 touches deliberately nothing that works:
 - **No routing or translation rule changes.** Rules stay `config/rules.yaml`.
 - **No anti-fraud verdict engine changes.** Per-caller reputation decay, call-rate window,
   block/allow lists — all unchanged.
-- **No chained topology wiring changes.** P9's chain (`anti-fraud → translation → core`)
-  is still configuration only.
+- **No chained topology wiring changes.** The chain stays as P9b / ADR-0014 left it: two
+  iFC-triggered trunk INVITEs driven by the `src/ims_mock/` orchestrator, with
+  `*_SBC_PEER_*` only as the fallback peer for a trunk INVITE that carries no `Route`.
 - **No sippy source modifications.** `AGENT.md section 6` forbids this.
-- **No HLD/LLD changes to sections 1–11.** P12 is additive — delta at the tail, never rewrite.
+- **No HLD/LLD changes to sections 1–10.** P12 is additive — delta at the tail, never rewrite.
 - **No gap closure from the production gap register.** Phase 3 closes zero registered gaps
   (phase3-plan.md §8).
 - **Generator is not launched by `make demo`.** `make demo` stays self-contained. P12 generator

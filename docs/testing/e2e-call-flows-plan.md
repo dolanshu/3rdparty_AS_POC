@@ -4,7 +4,7 @@
 > 对应文件：
 > - `tests/e2e/test_call_flows.py`（5 tests）— Translation AS 完整 + 错误分支
 > - `tests/e2e/test_fraud_call_flows.py`（2 tests）— Anti-Fraud AS 完整 + reject
-> - `tests/e2e/test_chained_call_flows.py`（2 tests）— Chained topology（AS-1 → AS-2 → Core）
+> - `tests/e2e/test_chained_call_flows.py`（2 tests）— Chained topology（iFC 编排：AS-1 → S-SBC → S-CSCF → S-SBC → AS-2 → P-CSCF → UAS）
 > 总计：**9 测试**
 
 ---
@@ -43,7 +43,7 @@ Console dashboard E2E 用的是 Playwright 起 4 个独立进程，覆盖浏览�
 |---------|------|------|-------------|
 | `trunk_pair` | `TrunkPair` | Translation AS + Mock S-SBC（rewrite next-hop ports 到 mock 的 core port）| `test_call_flows.py` |
 | `fraud_trunk_pair` | `TrunkPair` | Anti-Fraud AS + Mock S-SBC | `test_fraud_call_flows.py` |
-| `chained_pair_factory` | factory → `ChainedPair` | AS-1 (Anti-Fraud) + AS-2 (Translation) + Mock S-SBC | `test_chained_call_flows.py` |
+| `chained_pair_factory` | factory → `ChainedPair` | AS-1 (Anti-Fraud) + AS-2 (Translation) + `src/ims_mock` 的 S-CSCF/iFC 编排器 + P-CSCF relay + terminating UAS（**两个 AS 不直连**）| `test_chained_call_flows.py` |
 
 `TrunkPair` 提供三个方法：
 - `place_call(scenario)` → Call-ID（用 `CallScenario` 描述一个 SIP 场景）
@@ -89,7 +89,7 @@ scenario = CallScenario(
 
 | # | 测试名 | 核心断言 | ACC / REQ |
 |---|--------|----------|-----------|
-| 1 | `test_the_complete_chained_call_runs_invite_to_bye` | allowed caller → AS-1 allow relay → AS-2 translate → core answer BYE；每 leg Call-ID 不同（AS-1 用 trunk Call-ID，AS-2 生成新的 outbound Call-ID）| ACC-P9-001 / REQ-F-025 |
+| 1 | `test_the_complete_chained_call_runs_invite_to_bye` | allowed caller → AS-1 allow relay → AS-2 translate → 被叫侧 answer BYE；**四条 AS-leg Call-ID 各不相同**（`X` / `X-b2b_1` / `Z` / `Z-b2b_1`，iFC #2 给 AS-2 一个新的 trunk Call-ID）| ACC-P9-001 / REQ-F-025 |
 | 2 | `test_a_rejected_call_ends_with_608_at_as1_and_reaches_nothing_else` | blocked caller → AS-1 回 608；**AS-2 和 core 侧完全没消息**（短路）| ACC-P9-002 / REQ-F-027 |
 
 ### 3.4 Chain topology 附加验证（test_chained_call_flows.py 内）
@@ -130,7 +130,7 @@ sippy 的 `ED2.loop()` 只能在主线程跑一次。fixture 的 `TrunkPair.run_
 
 ### 5.2 端口 rewrite
 
-demo `config/routing_rules.yaml` 里 next hop 端口是硬编码的（15061, 15062...），测试用 ephemeral 端口所以 fixture 在 `tmp_path` 里生成一份 rewrite 后的 rules file，把所有 `port:` 行替换成 mock 的 core port。
+demo `config/routing_rules.yaml` 里 next hop 端口是硬编码的（六个 hop 全是 `127.0.0.1:5061`），测试用 ephemeral 端口所以 fixture 在 `tmp_path` 里生成一份 rewrite 后的 rules file，把所有 `port:` 行替换成 mock 的 return（UAS）port。
 
 ### 5.3 AS-2 的 trace recorder 必须独立
 

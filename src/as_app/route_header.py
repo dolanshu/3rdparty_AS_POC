@@ -51,7 +51,8 @@ def parse_top_route_target(
     if not bodies:
         return None
     try:
-        top = bodies[0].getCopy() if hasattr(bodies[0], "getCopy") else str(bodies[0])
+        raw = bodies[0].getCopy() if hasattr(bodies[0], "getCopy") else bodies[0]
+        top = str(raw)
     except (AttributeError, TypeError, IndexError):
         return None
     m = _ROUTE_URI_RE.search(top)

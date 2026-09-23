@@ -57,7 +57,7 @@ make lint               # ruff format --check + ruff check + mypy
 make test               # unit + integration + e2e
 make demo               # places a real call and narrates the translation (see below)
 make demo-fraud         # screens two real calls: one allowed, one answered 608 Rejected
-make demo-chained       # iFC chain: SBC -> anti-fraud -> S-CSCF -> SBC -> translation -> UAS
+make demo-chained       # iFC chain: S-CSCF#1 -> S-SBC -> anti-fraud -> S-SBC -> S-CSCF#2 -> S-SBC -> translation -> S-SBC -> S-CSCF -> P-CSCF -> UAS
 ```
 
 `uv sync` resolves the `as-platform` dependency from `../as_platform` (a `path` source with
@@ -136,8 +136,8 @@ translation : called number -> 013800138000
 next hops   : s-sbc-primary -> s-sbc-failover
 served by   : s-sbc-primary
 
-[3/5] next-hop side (after translation)
-core INVITE : INVITE sip:013800138000@127.0.0.1:45644 SIP/2.0
+[3/5] next-hop side (S-SBC return, after translation)
+next-hop INVITE : INVITE sip:013800138000@127.0.0.1:45644 SIP/2.0
 ```
 
 It writes nothing, so it is safe to run repeatedly; `make capture` is the variant that
@@ -186,8 +186,8 @@ final status       : 608
 AS-2 calls seen    : 0
 ```
 
-Every leg derives its own dialog `Call-ID`, so the three values differ and cross-AS
-correlation on `Call-ID` is impossible — the `P-Charging-Vector` ICID is on the wire and is
+Every leg derives its own dialog `Call-ID`, so the four AS-leg values differ (`X`,
+`X-b2b_1`, `Z`, `Z-b2b_1`) and cross-AS correlation on `Call-ID` is impossible — the `P-Charging-Vector` ICID is on the wire and is
 preserved, but no observability surface is keyed on it (a registered gap). The demo is a
 guard: it exits non-zero if any of those properties fails. It writes nothing.
 
@@ -214,7 +214,7 @@ All configuration is environment based; copy `.env.example` to `.env` and adjust
 | Knob | Default | Purpose |
 | --- | --- | --- |
 | `SIP_LISTEN_ADDRESS` / `SIP_LISTEN_PORT` | `127.0.0.1` / `5060` | where the AS receives the trunk |
-| `SBC_PEER_ADDRESS` / `SBC_PEER_PORT` | `127.0.0.1` / `5061` | next hop (mock or real S-SBC); `.env.example` ships `15061` to match the local mock |
+| `SBC_PEER_ADDRESS` / `SBC_PEER_PORT` | `127.0.0.1` / `15061` | fallback next hop (mock or real S-SBC return side) when the trunk INVITE carries no top `Route`; also the peer the startup self-check reports. A routed call takes its wire destination from that `Route` and its hop from the rule catalogue (`127.0.0.1:5061` in `config/routing_rules.yaml`) |
 | `ALLOWED_PEERS` | `127.0.0.1` | source addresses accepted on the trunk |
 | `RULES_FILE` | `config/routing_rules.yaml` | routing rules |
 | `INTERNAL_API_ADDRESS` / `INTERNAL_API_PORT` | `127.0.0.1` / `8080` | how the console reaches the AS |
@@ -277,7 +277,9 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 
 - No real IMS core (no S-CSCF, I-CSCF, HSS, MRF, real S-SBC).
 - No media: no RTP, no transcoding, no DTMF, no MRF.
-- No performance or capacity work, no benchmarking claims.
+- No published performance or capacity figures and no benchmarking claims. (A capacity
+  harness exists to find where the boundary is; it reports constraints, never a headline
+  number — `AGENT.md` §2.)
 - No production HA, multi-tenancy or auditing.
 - No charging (no CDRs, no RADIUS).
 - No production-grade transport on the trunk; demo stack is UDP-only. The platform library (`../as_platform`, ADR-0010) ships a pluggable `Transport` seam with `TlsTransport` behind it — TCP is still out of scope, SIP Digest is still out of scope.

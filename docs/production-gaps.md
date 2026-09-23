@@ -10,7 +10,7 @@ POC behaviour | production requirement | why it differs.
 
 | Area | POC behaviour | Production requirement |
 | --- | --- | --- |
-| Transport | UDP + TLS (pluggable; `TlsTransport` in `../as_platform`, P11, ADR-0010) | UDP + TCP + TLS; TLS mandatory on public-internet trunks |
+| Transport | **UDP only on this POC's trunk** (ADR-0003). The platform library ships a pluggable `Transport` seam with `TlsTransport` behind it (P11, ADR-0010), but no AS in this repository is deployed over TLS | UDP + TCP + TLS; TLS mandatory on public-internet trunks |
 | Peer authentication | Source IP allowlist at most | IP allowlist + SIP Digest + TLS certificate (triple check) |
 | Topology | Single peer, single trunk | Multiple S-SBC peers, failover routing |
 | Core network | Mocked UAC/UAS in one process | Real S-CSCF, iFC triggering, subscription data |
@@ -22,7 +22,7 @@ POC behaviour | production requirement | why it differs.
 | Security | Local mock, dev-only | DoS protection, rate limiting, CAC, black/white lists |
 | Observability | Console + log trace | Centralised collection, retention, alerting |
 | Configuration | Local YAML + `.env.example` | Managed configuration service, secret manager |
-| Capacity | Not measured | SLA-backed throughput and call setup latency |
+| Capacity | Constraints explored by a harness (`tools/capacity_probe.py`, P12 load generator); **no throughput or latency figure is published** (`AGENT.md` §2, D10) | SLA-backed throughput and call setup latency |
 
 ## Additional gaps registered while building M0
 
@@ -138,7 +138,8 @@ this documentation commit changes no file under `src/`.
 ## Notes
 
 - Gaps are never "forgotten features": each one is a decision with an ADR or a row in this
-  table. `ADR-0003` (UDP only), `ADR-0006` (signalling only) and the M3 console gaps
+  table. `ADR-0003` (UDP only on the POC trunk; its transport seam is superseded by
+  ADR-0010), `ADR-0006` (signalling only) and the M3 console gaps
   (poll-based event feed, no browser verification) are the largest.
 - When a milestone closes a gap, move the row out of this table into `CHANGELOG.md` and
   record which acceptance item covers the new behaviour.

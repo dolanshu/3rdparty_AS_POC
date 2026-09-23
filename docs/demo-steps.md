@@ -60,13 +60,13 @@ Expect: the verdict line `minimal SipTransactionManager + ED2.loop() stack: OK`.
 make rules        # uv run python tools/show_rules.py
 ```
 
-Shows: the next hops, the 17-rule table in evaluation order, and the decisions for the
-sample numbers.
+Shows: the next hops, the rule table in evaluation order (18 declared, 17 enabled —
+`R-DEFAULT-99` ships disabled), and the decisions for the sample numbers.
 
 ```text
 next hops
-   1  s-sbc-primary          udp://127.0.0.1:15061            Operator Service-SBC, primary trunk (mock in this POC)
-   2  s-sbc-failover         udp://127.0.0.1:15062            Operator Service-SBC, second trunk used on failover
+   1  s-sbc-primary          udp://127.0.0.1:5061             Operator Service-SBC, primary trunk (mock in this POC)
+   2  s-sbc-failover         udp://127.0.0.1:5061             Operator Service-SBC, second trunk used on failover
    ...
 rules (evaluation order)
    10  R-EMG-01         110, 119, 120, 122                           route -> s-sbc-primary|s-sbc-failover
@@ -182,12 +182,12 @@ make demo-fraud        # two calls through the anti-fraud AS: one allowed, one r
 ```
 
 Shows: the screening verdict for a caller the data allows and for a caller on the block list,
-and that the rejected call never reaches the core.
+and that the rejected call never reaches the S-SBC return side.
 
 ```text
 anti-fraud AS POC - screening demo
-topology   : emulated S-CSCF --UDP--> anti-fraud AS (608 Rejected) --UDP--> emulated core network
-ports      : anti-fraud-as 127.0.0.1:47280, trunk 47064, core 48564
+topology   : S-SBC forward --UDP--> anti-fraud AS (608 or relay) --UDP--> S-SBC return (top Route)
+ports      : anti-fraud-as 127.0.0.1:46592, trunk 47873, return 46573
 screening  : config/caller_screening.yaml
 verdict    : allow list -> block list -> call-rate window -> reputation
 
@@ -200,7 +200,7 @@ sip.608 declared: True
 final status : 200
 released     : True
 
-      expected SIP 200, observed 200; core INVITE delta 1
+      expected SIP 200, observed 200; return INVITE delta 1
 
 [2/2] call rejected with 608
 caller       : +8613400000001
@@ -212,74 +212,73 @@ sip.608 declared: True
 final status : 608
 second leg   : none - the AS answered from the UAS side (RFC 8688, no Call-Info)
 
-      expected SIP 608, observed 608; core INVITE delta 0
+      expected SIP 608, observed 608; return INVITE delta 0
 
-demo result: allow relayed to the core, reject answered 608 by the AS alone
+demo result: allow relayed to the S-SBC return side, reject answered 608 by the AS alone
 ```
 
-Expect: `expected SIP 200, observed 200; core INVITE delta 1` for the allowed call and
-`expected SIP 608, observed 608; core INVITE delta 0` for the rejected one; exit status 0.
+Expect: `expected SIP 200, observed 200; return INVITE delta 1` for the allowed call and
+`expected SIP 608, observed 608; return INVITE delta 0` for the rejected one; exit status 0.
 The blocked caller is the first entry of `config/caller_screening.yaml`; swap it with
 `--blocked-caller` to screen a different number.
 
-#### 1.6 `make demo-chained` — two AS instances in series (Phase 2, P9)
+#### 1.6 `make demo-chained` — two AS instances in series (Phase 2, P9/P9b)
+
+The chain is **P9b / ADR-0014** (2026-09-23): AS instances **never** address each other.
+The S-CSCF iFC orchestrator in `src/ims_mock/` triggers AS-1 and AS-2 in turn over the
+S-SBC trunk; each AS returns its outbound INVITE to the top `Route` on the S-SBC **return**
+side, and the terminating side is `S-CSCF → P-CSCF → terminating UAS`, never the S-SBC
+return port. `*_SBC_PEER_*` is only the fallback for a trunk INVITE that carries no `Route`.
 
 ```bash
-make demo-chained      # SBC -> AS-1 anti-fraud -> AS-2 number translation -> core, wired by config
+make demo-chained      # iFC chain: S-SBC -> AS-1 anti-fraud -> S-CSCF/iFC -> S-SBC -> AS-2 translation -> P-CSCF -> terminating UAS
 ```
 
-Shows: the chain wired by configuration only, an allowed call traversing both B2BUAs and
-translated at AS-2, the three per-leg `Call-ID`s, the preserved ICID, and a `608` reject
-short-circuiting before AS-2 and the core.
+Shows: the chain triggered by iFC, an allowed call traversing both B2BUAs and translated at
+AS-2, the four AS-leg `Call-ID`s, the preserved ICID, and a `608` reject short-circuiting
+before AS-2 and the terminating UAS.
+
+Real transcript (captured 2026-09-24):
 
 ```text
-chained AS POC - two B2BUAs in series, wired by configuration only
-topology   : emulated S-CSCF --UDP--> AS-1 anti-fraud --UDP--> AS-2 number translation --UDP--> emulated core
-ports      : AS-1 127.0.0.1:47451, AS-2 127.0.0.1:47443, trunk 46327, core 48539
-wiring     : AS-1 next hop = AS-2 listen address; AS-2 next hop = the rule set
+chained AS POC - iFC-orchestrated chain (ADR-0014)
+topology   : S-SBC -> AS-1 anti-fraud -> S-CSCF/iFC -> S-SBC -> AS-2 translation -> P-CSCF -> terminating UAS
+ports      : AS-1 48627, AS-2 44788, return 47581, forward 47620, terminating 47678
+wiring     : chain order in ims_mock orchestrator; peer knobs -> S-SBC return only
 
 [1/2] allowed call relayed through both AS instances
 caller            : +86216180001
-called            : +8613800138000
 AS-1 verdict      : allow
-AS-1 signal       : none
 AS-2 rule         : R-MOB-CM-40
-core called number: 013800138000
+terminating called: 013800138000
 final status      : 200
-released          : True
 
-  the dialog Call-ID is regenerated on every leg (three distinct values):
-S-CSCF Call-ID    : dc6cbf77a4ac2255269009915356e621
-AS-2 trunk Call-ID: dc6cbf77a4ac2255269009915356e621-b2b_1
-core Call-ID      : dc6cbf77a4ac2255269009915356e621-b2b_1-b2b_1
-distinct Call-IDs : 3
-Call-ID per leg   : True (each transition is outbound_call_id of the previous one)
-
-  the end-to-end ICID survives the whole chain (one value at every hop):
-S-CSCF ICID       : poc-chained-allow
-AS-2 ICID         : poc-chained-allow
-core ICID         : poc-chained-allow
+  four AS-leg Call-IDs (ADR-0014):
+AS-1 trunk        : 65e1e6030953c32eaf9d8ecd846400f4
+AS-1 outbound     : 65e1e6030953c32eaf9d8ecd846400f4-b2b_1
+AS-2 trunk        : 792433dd594523356d726b29d5996a83
+AS-2 outbound     : 792433dd594523356d726b29d5996a83-b2b_1
+distinct Call-IDs : 4
+Call-ID per leg   : True
 ICID preserved    : True
 
 [2/2] rejected call short-circuits at AS-1
-caller            : +8613400000001
 AS-1 verdict      : reject
-final status      : 608 (608 Rejected, no second leg)
-AS-2 calls seen   : 0 (the absence is the assertion)
-core INVITEs seen : 0 (the absence is the assertion)
+final status      : 608
+AS-2 calls seen   : 0
+terminating INVITEs: 0
 
 --- verdict --------------------------------------------------------
-allowed call completed through two B2BUAs : OK
-608 reject short-circuited before AS-2     : OK
-Call-ID regenerated on every leg           : OK
-three distinct Call-IDs across the chain   : OK
-ICID preserved across every leg            : OK
+allowed call completed through two B2BUAs    : OK
+Call-ID regenerated on every leg             : OK
+four distinct AS-leg Call-IDs                : OK
+ICID preserved across every leg              : OK
+608 reject short-circuited before AS-2       : OK
 ```
 
-Expect: exit status 0 and the five `OK` verdict lines — `allowed call completed through two
-B2BUAs`, `608 reject short-circuited before AS-2`, `Call-ID regenerated on every leg`,
-`three distinct Call-IDs across the chain` and `ICID preserved across every leg`. Ports and
-Call-IDs are ephemeral and vary per run.
+Expect: exit status 0 and the five `OK` verdict lines. Note the four `Call-ID` values are
+**not** one value with suffixes applied twice: `AS-2 trunk` is a **new** value, because iFC
+#2 is a new trunk INVITE. Ports and Call-IDs are ephemeral and vary per run.
 
 ### Part 2 — The console (long-running; independent of Part 1)
 
@@ -323,13 +322,14 @@ Two flavours: **simple** (translation AS only, 3 terminals) and **full** (chaine
 with both AS instances, 5 terminals). Start with the simple one; add the chain if you want
 to show the full Phase 2 + Phase 3 picture.
 
-#### 3.0 Common prep: start the mock core (UAS side)
+#### 3.0 Common prep: start the mock S-SBC return side (UAS)
 
-The translation AS needs a next hop that answers 200 OK. Use the mock's UAS side as the
-core network:
+The translation AS needs a next hop that answers 200 OK: the hop the rule catalogue names
+(`127.0.0.1:5061` in `config/routing_rules.yaml`), which is the **S-SBC return** side the AS
+sends its outbound INVITE to. Start the mock's UAS side there:
 
 ```bash
-# Terminal A — core network mock (UAS side, answers 200 OK)
+# Terminal A — mock S-SBC return side (UAS, answers 200 OK) — `make mock-return` does this
 uv run python -m s_sbc_mock.main --listen-port 5061
 ```
 
@@ -340,7 +340,7 @@ It listens on `127.0.0.1:5061` and answers every INVITE with 180 → 200 → BYE
 Quickest way to show the dashboard.
 
 ```bash
-# Terminal 1 — translation AS, SIP on 5060, internal API on 8080, next hop = mock core
+# Terminal 1 — translation AS, SIP on 5060, internal API on 8080, next hop = S-SBC return
 SBC_PEER_ADDRESS=127.0.0.1 SBC_PEER_PORT=5061 \
 SIP_LISTEN_PORT=5060 INTERNAL_API_PORT=8080 \
   uv run python -m as_app.main
@@ -369,20 +369,25 @@ Then skip to [3.3 Demo flow](#33-demo-flow).
 
 #### 3.2 Full variant — chained topology (5 terminals)
 
-Shows the full Phase 2 + Phase 3 picture: S-CSCF → anti-fraud AS → translation AS → core.
+Shows the full picture: the iFC-orchestrated chain
+`S-SBC → AS-1 anti-fraud → S-CSCF/iFC → S-SBC → AS-2 translation → P-CSCF → terminating UAS`
+plus the live load. **The two AS processes never address each other** — the chain order lives
+in the `src/ims_mock/` orchestrator, not in a peer knob; for the scripted version use
+`scripts/phase3-demo.sh full`.
 
 ```bash
 # Terminal 1 — anti-fraud AS (AS-1), SIP on 5062, internal API on 8082
-# Next hop = translation AS on 5060
+# FRAUD_SBC_PEER_* = fallback peer only (S-SBC return) when the trunk INVITE has no Route.
+# It must NOT point at the other AS — that wiring is obsolete (ADR-0014).
 FRAUD_SIP_LISTEN_PORT=5062 FRAUD_INTERNAL_API_PORT=8082 \
-FRAUD_SBC_PEER_ADDRESS=127.0.0.1 FRAUD_SBC_PEER_PORT=5060 \
+FRAUD_SBC_PEER_ADDRESS=127.0.0.1 FRAUD_SBC_PEER_PORT=15062 \
 FRAUD_ALLOWED_PEERS=127.0.0.1 \
   uv run python -m anti_fraud_as.main
 ```
 
 ```bash
 # Terminal 2 — translation AS (AS-2), SIP on 5060, internal API on 8080
-# Next hop = mock core on 5061
+# Same: fallback peer only; the routed hop comes from the rule catalogue (127.0.0.1:5061)
 SBC_PEER_ADDRESS=127.0.0.1 SBC_PEER_PORT=5061 \
 SIP_LISTEN_PORT=5060 INTERNAL_API_PORT=8080 \
   uv run python -m as_app.main
@@ -427,7 +432,11 @@ Show the Dashboard:
 - Line chart: flat line at 0 (no calls yet).
 - Pie chart: all zero.
 - Gauge: 0 / 10.
-- Topology: 4 nodes (S-CSCF, Anti-fraud, Translation, core) with thin grey lines.
+- Topology: the current mode's path. `simple` shows `S-SBC → Translation → S-SBC ret` with
+  the Anti-fraud node dimmed; `fraud` shows `S-SBC → Anti-fraud → S-SBC ret` with Translation
+  dimmed;
+  `chained` switches to the iFC layout
+  `Gen → S-SBC → Anti-fraud → iFC → Translation → UAS`. Thin grey lines mean no traffic yet.
 - Trace panel: "no calls yet".
 
 **Step 2 — start the load**

@@ -7,7 +7,8 @@ reference is named; see `docs/specs/index.md`.
 | --- | --- | --- |
 | AS (Application Server) | A SIP entity that provides services. Here: the **third-party** AS, outside the operator's IMS network. | 3GPP TS 23.228 |
 | B2BUA (Back-to-Back User Agent) | An entity that terminates a SIP session and originates a new one; both legs are separate dialogs. This AS is a B2BUA and never a redirect server. | RFC 3261 section 6 |
-| Call-ID | SIP header that identifies a call; the correlation key for logs, traces and console events in this project. | RFC 3261 section 8.1.1.4 / 20.8 |
+| Call-ID | SIP header that identifies a dialog. Each B2BUA **leg has its own** (the AS appends `-b2b_1` to the trunk value for its outbound leg), so it correlates one instance's log, trace and console events — never two AS instances. | RFC 3261 section 8.1.1.4 / 20.8 |
+| ICID | The `icid-value` of `P-Charging-Vector`: the end-to-end charging key that survives every hop and is the only cross-AS correlation key on the wire. No observability surface is keyed on it in this POC. | 3GPP TS 24.229 |
 | Called number | The destination number, carried in the user part of the Request-URI; the object of number translation. | RFC 3261 section 19.1 |
 | Calling number | The originating party; on an IMS trunk it is carried in `P-Asserted-Identity`. | 3GPP TS 24.229 |
 | CDR (Call Detail Record) | Charging record per call leg. Not generated in this POC. | — |

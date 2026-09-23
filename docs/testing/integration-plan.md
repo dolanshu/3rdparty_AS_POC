@@ -26,7 +26,7 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 | `trunk_pair` | test_translation, test_signalling_path, test_console, test_concurrent_load | per-test | Translation AS + Mock S-SBC on ephemeral UDP |
 | `fraud_trunk_pair` | test_fraud_screening_path, test_concurrent_load | per-test | Anti-Fraud AS + Mock S-SBC |
 | `fraud_pair_factory` | test_fraud_screening_path | per-test | 工厂，每 test 可 build + stop 多个 pair |
-| `chained_pair_factory` | test_chained_topology, test_concurrent_load | per-test | 工厂，build AS-1 + AS-2 + Mock 的 chain |
+| `chained_pair_factory` | test_chained_topology, test_concurrent_load | per-test | 工厂，build AS-1 + AS-2 + `ims_mock` iFC 编排器 + P-CSCF/UAS 的 chain（AS 之间不直连）|
 | `free_udp_port` | test_startup_self_check | per-test | 一个不被占用的 UDP 端口 |
 | `screening_file` | 多个 | per-test | `shipped_screening_file` 的可编辑副本 |
 | `rule_set` | test_translation | per-test | 加载好的 `RuleSet` 对象（`config/routing_rules.yaml`）|
@@ -39,7 +39,7 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 
 | # | 测试名 | 核心断言 |
 |---|--------|----------|
-| 1 | `test_next_hop_failover_uses_the_second_hop` | 主 hop 不响应 → AS 自动 failover 到 second hop → core 收到 INVITE（rewrite 后的端口全绑同一个 mock core，主 hop 手动 bind 到一个无 socket 的端口）|
+| 1 | `test_next_hop_failover_uses_the_second_hop` | 主 hop 不响应 → AS 自动 failover 到 second hop → S-SBC return 侧收到 INVITE（rewrite 后的端口全绑同一个 mock return UAS，主 hop 手动 bind 到一个无 socket 的端口）|
 | 2 | `test_hot_reload_activates_a_new_rule_set_without_restart` | 修改 rules 文件 → AS reload → 新规则生效（called number 被新规则 translate）|
 | 3 | `test_hot_reload_keeps_previous_rule_set_on_broken_edit` | reload 后规则文件变成无效 YAML → AS 保持旧规则集 |
 | 4 | `test_route_decision_with_no_next_hop_yields_480` | 规则匹配到但 next_hop 列表空 → trunk 收 480 |
@@ -76,7 +76,7 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 | 2 | `test_ten_concurrent_calls_get_distinct_outbound_call_ids` | 每 call 的 outbound Call-ID 都不同（`outbound_call_id(trunk_call_id)` 生成）|
 | 3 | `test_ten_concurrent_calls_emit_p12_events_via_fanout` | `TraceRecorder.calls` 里看到每个 call 的 P12 events（call_started, call_routed, call_ended）|
 | 4 | `test_ten_concurrent_calls_through_anti_fraud_as` | AS-1 版并发，全部 completed 或被正确 reject |
-| 5 | `test_ten_concurrent_calls_through_chained_topology` | AS-1 → AS-2 chain 版并发 |
+| 5 | `test_ten_concurrent_calls_through_chained_topology` | iFC 编排的 AS-1 / AS-2 chain 版并发（两次独立 trunk INVITE）|
 | 6 | `test_ten_concurrent_calls_in_chained_topology_do_not_cross_contaminate` | AS-1 的 counters 和 AS-2 的 counters 不互相污染 |
 | 7 | `test_ten_concurrent_failover_calls_each_try_primary_then_land_on_secondary` | 主 hop 不可达 → 每 call 都 failover 到 secondary |
 
@@ -98,12 +98,12 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 | 12 | `test_the_process_serves_health_and_exits_zero_on_sigterm` | Anti-Fraud AS 的 healthz 端点 + SIGTERM 正确处理 |
 | 13 | `test_the_running_process_reloads_the_screening_file_on_its_own_timer` | 文件 watcher timer 触发 reload（10s 周期）|
 
-### 3.6 test_chained_topology.py（3 tests）—— AS-1 → AS-2 Chain 验证
+### 3.6 test_chained_topology.py（3 tests）—— iFC 编排的 AS-1 / AS-2 Chain 验证
 
 | # | 测试名 | 核心断言 |
 |---|--------|----------|
-| 1 | `test_an_allowed_call_traverses_both_b2bus_and_is_translated` | allowed caller → AS-1 relay → AS-2 translate → core → complete |
-| 2 | `test_every_leg_regenerates_its_call_id_and_each_instance_keys_its_trace` | AS-1 用 trunk Call-ID trace；AS-2 用新 Call-ID trace；两个 trace 分离 |
+| 1 | `test_an_allowed_call_traverses_both_b2bus_and_is_translated` | allowed caller → iFC#1 → AS-1 relay（回到 S-SBC return）→ iFC#2 → AS-2 translate → S-SBC return → P-CSCF → terminating UAS → complete |
+| 2 | `test_every_leg_regenerates_its_call_id_and_each_instance_keys_its_trace` | 四条 AS-leg Call-ID 各自重新生成（`X` / `X-b2b_1` / `Z` / `Z-b2b_1`）；AS-1 用它 trunk 上的 Call-ID 记 trace，AS-2 用它 iFC #2 trunk 上的 Call-ID 记 trace；两个 trace 分离 |
 | 3 | `test_a_reject_at_as1_short_circuits_before_as2_and_the_core` | blocked caller → AS-1 608；AS-2 和 core 都无消息 |
 
 ### 3.7 test_startup_self_check.py（3 tests）—— Process-level Boot / Config Validation

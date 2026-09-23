@@ -19,7 +19,7 @@ ADR-0014). The two bodies of work are **not yet integrated** in the interactive 
 **This document is the single detailed source for closing that gap.** It aligns:
 
 1. **`scripts/phase3-demo.sh`** — `full` mode must run the **P9b chain**, not two AS
-   instances each wired directly to core.
+   instances each wired directly to their own mock return side.
 2. **`tools/call_load_generator.py`** — REQ-F-040's **chained** target must be selectable
    at runtime and reflected in `/load/status`.
 3. **`src/console/main.py`** — the Dashboard topology, event feeds and controls must
@@ -48,9 +48,9 @@ ADR-0014). The two bodies of work are **not yet integrated** in the interactive 
 
 | Area | Current behaviour | Required behaviour |
 | --- | --- | --- |
-| `phase3-demo.sh full` | Anti-fraud AS and translation AS **each peer to core**; generator INVITEs anti-fraud only | Generator → **subscriber ingress** → iFC chain **AS-1 → AS-2 → terminating UAS** (ADR-0014) |
+| `phase3-demo.sh full` | Anti-fraud AS and translation AS **each peer to a mock return side**; generator INVITEs anti-fraud only | Generator → **subscriber ingress** → iFC chain **AS-1 → AS-2 → terminating UAS** (ADR-0014) |
 | `call_load_generator.py` | Only `--as-port`; no topology flag | `--topology simple\|fraud\|chained` + ingress port(s); status exposes active topology |
-| Console SVG | Fixed 4-node diagram `S-CSCF → Anti-fraud → Translation → core`; **always drawn**; 3 links share one colour/width | Mode-aware diagram; **inactive nodes dimmed** in simple mode; **chained layout** shows iFC hop; per-hop link styling where data exists |
+| Console SVG | Fixed 4-node diagram `S-SBC → Anti-fraud → Translation → S-SBC ret`; **always drawn regardless of the running AS**; 3 links share one colour/width | Mode-aware diagram; **inactive nodes dimmed** in simple mode; **chained layout** shows iFC hop; per-hop link styling where data exists |
 | Console WebSockets | **One** AS event stream (`--as-api-url` → translation only) | Chained/full mode: **both** AS instances' `/ws/p12/events` merged into trace + charts |
 | Console health | Single AS health strip | Full/chained: **dual** instance health (fraud + translation) |
 | Integration tests | `chained_pair_factory` uses P9b `ims_mock` (in-process AS) | Demo uses **multi-process AS** + external `ims_mock` wiring — needs new runtime + smoke test |
@@ -79,8 +79,8 @@ at **external** AS-1/AS-2 UDP ports started by the supervisor.
 
 | Mode | Generator ingress | AS processes | Console topology |
 | --- | --- | --- | --- |
-| `simple` | Translation AS SIP port | Translation only + terminating UAS (or core mock) | 3-hop: S-SBC → Translation → core |
-| `fraud` | Anti-fraud AS SIP port | Fraud only + core mock | 3-hop: S-SBC → Anti-fraud → core |
+| `simple` | Translation AS SIP port | Translation only + terminating UAS (or S-SBC return mock) | 3-hop: S-SBC → Translation → S-SBC ret |
+| `fraud` | Anti-fraud AS SIP port | Fraud only + S-SBC return mock | 3-hop: S-SBC → Anti-fraud → S-SBC ret |
 | `chained` | **Orchestrator subscriber / S-SBC forward port** | Fraud + Translation + ims_mock runtime | 5-hop: S-SBC → AS-1 → iFC → AS-2 → UAS |
 
 **Rationale.** REQ-F-040 already names all three targets; P13 shipped a chained-shaped SVG
@@ -155,7 +155,7 @@ P9b-5 remainder) may align it later.
 ┌─────────────┐              ┌──────────────┐       ┌──────────────┐
 │ console     │◄── WS ──────│ anti-fraud   │       │ translation  │
 │ :8081       │   p12/events │ AS process   │       │ AS process   │
-│             │◄── WS ──────│ :5063        │       │ :5060        │
+│             │◄── WS ──────│ :5062        │       │ :5060        │
 └─────────────┘              └──────────────┘       └──────────────┘
        ▲
        └── fraud API :8082 + translation API :8080
@@ -206,8 +206,8 @@ P13 shipped a single Dashboard layout. P14 **extends** it without removing legac
 
 | Mode | Nodes shown | Dimmed |
 | --- | --- | --- |
-| `simple` | S-SBC → Translation → core | Anti-fraud node + iFC node hidden or 30% opacity |
-| `fraud` | S-SBC → Anti-fraud → core | Translation node hidden or dimmed |
+| `simple` | S-SBC → Translation → S-SBC ret | Anti-fraud node + iFC node hidden or 30% opacity |
+| `fraud` | S-SBC → Anti-fraud → S-SBC ret | Translation node hidden or dimmed |
 
 **Layout B — `chained`** (new SVG group `#topoChained`, hidden when not chained):
 
@@ -320,10 +320,10 @@ Client-side validation before `PUT /load/config`; server rejects invalid type se
 
 | Mode | Processes |
 | --- | --- |
-| `simple` | translation AS + core/terminating + generator + console (unchanged ports) |
+| `simple` | translation AS + S-SBC return/terminating + generator + console (unchanged ports) |
 | `full` | supervisor chained stack + generator (`--topology chained`) + console (dual API URLs) |
 
-Remove direct `FRAUD_SBC_PEER_PORT=CORE_SIP` peer-to-core wiring in `full`.
+Remove direct `FRAUD_SBC_PEER_PORT=CORE_SIP` peer-to-return-side wiring in `full`.
 
 **Exit:** `./scripts/phase3-demo.sh full` → console shows `Chained (iFC)`; Start → calls traverse both AS.
 
@@ -343,7 +343,7 @@ Remove direct `FRAUD_SBC_PEER_PORT=CORE_SIP` peer-to-core wiring in `full`.
 | --- | --- |
 | `docs/demo-script.md` §7 | Chained live-load narrative |
 | `docs/demo-steps.md` Part 3 | Commands for `full` + topology |
-| `docs/architecture/hld.md` §12.1 | Diagram: chained ingress via ims_mock |
+| `docs/architecture/hld.md` §11.1 | Diagram: chained ingress via ims_mock |
 | `docs/architecture/lld.md` | New §12.x console topology modes + supervisor |
 | `docs/roadmap.md` | P14 status row |
 | `docs/README.md` | Index row for this plan |

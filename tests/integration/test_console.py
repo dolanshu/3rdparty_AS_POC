@@ -248,7 +248,7 @@ def test_console_page_contains_operations_ui_elements() -> None:
     assert "lineChart" in page, "line chart canvas missing (REQ-F-045)"
     assert "pieChart" in page, "pie/doughnut chart canvas missing (REQ-F-046)"
     assert "gaugeChart" in page, "capacity gauge canvas missing (REQ-F-047)"
-    # SVG topology with 4 nodes (REQ-F-048): S-CSCF, Anti-fraud, Translation, core.
+    # SVG topology with 4 nodes (REQ-F-048): S-SBC, Anti-fraud, Translation, S-SBC ret.
     assert "<svg" in page, "SVG topology not found"
     assert "S-SBC" in page or "S-CSCF" in page, "S-SBC node not found in topology"
     assert "Anti-fraud" in page, "Anti-fraud node not found in topology"

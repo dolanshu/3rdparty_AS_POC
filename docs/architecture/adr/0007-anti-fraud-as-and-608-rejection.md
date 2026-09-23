@@ -196,7 +196,9 @@ with its own SIP listen ports, its own declarative data file under `config/`, it
 console feed and its own lifecycle. It reuses the **existing, use-case-agnostic modules** of
 `as_app` by direct import — the error model, structured logging, counters, tracing, the
 generic parts of `sip_adapter`, and the signal/port plumbing. It introduces **no** registry,
-**no** plugin protocol and **no** shared base class.
+**no** plugin protocol and **no** shared base class. *(Mechanism updated by P10 / ADR-0009:
+those modules now live in the `as_platform` library and `anti_fraud_as` imports them from
+there. The substance of this decision — a second process, not a framework — is unchanged.)*
 
 The interface between the two AS instances is deliberately **not** designed here: the
 extraction into a shared library (P10) needs the friction of the second instance and of the

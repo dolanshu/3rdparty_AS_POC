@@ -29,8 +29,10 @@ and a call it **rejects** is answered by the AS itself and never leaves it:
    return 127.0.0.1:15062/udp <===========  (a reject is answered here: 608 Rejected)
 ```
 
-P8 demonstrates the two AS instances **independently**; the chained
-`SBC -> anti-fraud -> number translation -> core` topology is P9's.
+P8 demonstrates the two AS instances **independently**. The chained topology is **P9b /
+ADR-0014**, not P8's: AS instances never address each other — the S-CSCF iFC orchestrator in
+`src/ims_mock/` triggers AS-1 and AS-2 in turn over the S-SBC trunk, and the terminating
+side is `S-CSCF → P-CSCF → terminating UAS`, never the S-SBC return port.
 
 `docker compose` puts the services on a private trunk network with **fixed** addresses
 (`172.28.0.0/24`, declared in `deploy/docker-compose.yml`), so the address each side
@@ -176,19 +178,23 @@ the active rule set — no code change (`AGENT.md` section 8).
 
 **The rule set carries the trunk addresses.** The AS originates the second leg to the hop the
 *rule set* selects: the routing engine resolves `action.next_hops` against the `next_hops`
-catalogue in the rules file. `SBC_PEER_ADDRESS`/`SBC_PEER_PORT` describe the peer for the
-startup self-check and for logging; they do not rewrite that catalogue. Two rule sets ship
-with the POC:
+catalogue in the rules file. When the inbound trunk INVITE carries a top `Route`, that
+`Route` target — the S-SBC return side — is the wire destination of the outbound leg; the
+selected catalogue hop still decides the hop name and the failover order.
+`SBC_PEER_ADDRESS`/`SBC_PEER_PORT` are the fallback peer used when the trunk INVITE carries
+no `Route`, and they describe the peer for the startup self-check and for logging; they do
+not rewrite that catalogue. Two rule sets ship with the POC:
 
 | Rule set | Next hops | Used by |
 | --- | --- | --- |
-| `config/routing_rules.yaml` | `127.0.0.1:15061` … `15066` | local runs (`make dev` / `make mock`, the tests, `make demo`) |
+| `config/routing_rules.yaml` | `127.0.0.1:5061` — all six hops | local runs (`make dev` / `make mock` / `make mock-return`, the tests, `make demo`) |
 | `config/routing_rules.compose.yaml` | `172.28.0.3:15061` … `15066` | the compose stack (`RULES_FILE` in `deploy/docker-compose.yml`) |
 
-They are the same 17 rules with the same priorities, hop names, ports and translation
-behaviour; only the catalogue addresses differ. `config/routing_rules.yaml` is the source of
-truth for the rule data and the compose file is its deployment variant — keep them in step
-(the duplication is registered in `docs/production-gaps.md`).
+They are the same rules with the same priorities, hop names and translation behaviour — 18
+declared, 17 enabled (`R-DEFAULT-99` ships disabled) — and only the catalogue addresses and
+ports differ. `config/routing_rules.yaml` is the source of truth for the rule data and the
+compose file is its deployment variant — keep them in step (the duplication is registered in
+`docs/production-gaps.md`).
 
 Compose service configuration (the values are in `deploy/docker-compose.yml`):
 

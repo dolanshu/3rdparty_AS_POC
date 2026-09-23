@@ -16,9 +16,9 @@
 
 from __future__ import annotations
 
-from s_sbc_mock.uas import CoreUas, ReceivedInvite
+from s_sbc_mock.uas import ReceivedInvite, ReturnUas
 
 __all__ = ["TerminatingUas", "ReceivedInvite"]
 
 #: Reuse the core-side answer pattern; only the wiring differs (ADR-0014).
-TerminatingUas = CoreUas
+TerminatingUas = ReturnUas

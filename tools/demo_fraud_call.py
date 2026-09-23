@@ -17,9 +17,10 @@
 
 This is the standalone demo of the second AS instance: the same mock S-SBC drives the
 anti-fraud AS on its own ports, once with a caller the screening data allows and once with a
-caller on the block list. The allowed call is relayed to the emulated core and answered; the
-rejected call is answered by the AS itself with ``608 Rejected`` and never reaches the core,
-because the reject path is UAS behaviour and originates no second leg (ADR-0007).
+caller on the block list. The allowed call is relayed to the S-SBC return side and
+answered; the rejected call is answered by the AS itself with ``608 Rejected`` and never
+leaves the AS towards that return side, because the reject path is UAS behaviour and
+originates no second leg (ADR-0007).
 
 Nothing is written to the repository: the demo is a repeatable, read-only transcript. Ports
 are allocated dynamically, so it never collides with a running process and never uses 5060.
@@ -27,7 +28,7 @@ are allocated dynamically, so it never collides with a running process and never
 Usage:
     uv run python tools/demo_fraud_call.py
     uv run python tools/demo_fraud_call.py --blocked-caller +8613400000002
-    uv run python tools/demo_fraud_call.py --as-port 45062 --core-port 45061
+    uv run python tools/demo_fraud_call.py --as-port 45062 --return-port 45061
 """
 
 from __future__ import annotations
@@ -181,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the anti-fraud AS screening demo")
     parser.add_argument("--as-port", type=int, default=None, help="UDP port of the AS")
     parser.add_argument(
-        "--core-port", type=int, default=None, help="UDP port of the mock core side"
+        "--return-port", type=int, default=None, help="UDP port of the mock S-SBC return side"
     )
     parser.add_argument(
         "--trunk-port", type=int, default=None, help="UDP port of the mock trunk side"
@@ -203,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging("ERROR", structured=False)
 
     as_port = args.as_port or free_udp_port()
-    core_port = args.core_port or free_udp_port()
+    return_port = args.return_port or free_udp_port()
     trunk_port = args.trunk_port or free_udp_port()
 
     settings = FraudAsSettings(
@@ -211,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         fraud_sip_listen_address="127.0.0.1",
         fraud_sip_listen_port=as_port,
         fraud_sbc_peer_address="127.0.0.1",
-        fraud_sbc_peer_port=core_port,
+        fraud_sbc_peer_port=return_port,
         fraud_allowed_peers=["127.0.0.1"],
         fraud_screening_file=args.screening_file,
         log_payloads=False,
@@ -222,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     mock = SMockApplication(
         MockConfig(
             listen_address="127.0.0.1",
-            listen_port=core_port,
+            listen_port=return_port,
             as_address="127.0.0.1",
             as_port=as_port,
         ),
@@ -236,7 +237,9 @@ def main(argv: list[str] | None = None) -> int:
         "topology   : S-SBC forward --UDP--> anti-fraud AS (608 or relay) "
         "--UDP--> S-SBC return (top Route)"
     )
-    print(f"ports      : anti-fraud-as 127.0.0.1:{as_port}, trunk {trunk_port}, core {core_port}")
+    print(
+        f"ports      : anti-fraud-as 127.0.0.1:{as_port}, trunk {trunk_port}, return {return_port}"
+    )
     try:
         shown = Path(args.screening_file).expanduser().resolve().relative_to(REPO_ROOT)
     except ValueError:
@@ -273,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
             expected = 200 if position == 1 else 608
             results.append(final.status == expected)
             print(
-                f"      expected SIP {expected}, observed {final.status}; core INVITE delta "
+                f"      expected SIP {expected}, observed {final.status}; return INVITE delta "
                 f"{len(mock.uas.received_invites) - before}"
             )
             print()
@@ -282,7 +285,10 @@ def main(argv: list[str] | None = None) -> int:
         mock.stop()
 
     if all(results):
-        print("demo result: allow relayed to the core, reject answered 608 by the AS alone")
+        print(
+            "demo result: allow relayed to the S-SBC return side, "
+            "reject answered 608 by the AS alone"
+        )
         return 0
     print("demo result: at least one call did not behave as the screening data says it should")
     return 1

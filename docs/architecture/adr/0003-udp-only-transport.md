@@ -1,6 +1,8 @@
 # ADR-0003: UDP only, no TCP and no TLS on the trunk
 
-- **Status:** Accepted
+- **Status:** Accepted for the POC trunk · **Superseded for the library's transport seam by
+  ADR-0010** — the platform library ships a pluggable `Transport` with `TlsTransport` behind
+  it (P11). This POC's own trunk is still UDP only; no TLS or TCP is deployed here.
 - **Date:** 2026-09-15
 - **Deciders:** project maintainer
 - **Related:** `AGENT.md` section 2 and 9, `docs/production-gaps.md`, `docs/specs/index.md`

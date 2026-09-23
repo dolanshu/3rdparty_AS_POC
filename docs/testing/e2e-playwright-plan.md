@@ -327,7 +327,7 @@ assert _gen_status(gen_base)["running"] is True
 | **D6 Little's Law 教育性设计 + ACC-P13-005**（R2-P1-1） | 双滑块（target concurrency 0-20 + call rate 0.1-10）的 Little's Law 交互：改 call_rate → `/load/status.binding_constraint` 从 "concurrency" 翻转为 "rate"；binding-constraint 指示器是 ADR-0013 的标志性演示特性 | **零覆盖**。#17 的 `PUT /load/config` 只改 `target_concurrency` + `enabled_call_types`，**从不碰 `call_rate`**。binding_constraint 字段（`tools/call_load_generator.py` L252）从未在 28 个测试中断言 |
 | REQ-F-049 | call type toggles E2E | 无 |
 | REQ-F-048 / §P13 Stage 3 step 7 | 拓扑按 hop 颜色（绿/红/橙） | 本文件只测 `#l1 stroke-width`，颜色（stroke CSS var）未测 |
-| §P13 "chained demo compatibility" / D8 | 拓扑为 SBC → anti-fraud → translation → core 四节点链式 | conftest 只起 1 个 AS（translation），无 anti-fraud 进程。拓扑最左两跳在 E2E 栈里不存在。**chained 拓扑覆盖在 `test_chained_call_flows.py`（非浏览器 E2E）和 `test_chained_topology.py`（integration），console dashboard 的拓扑图渲染链式场景未测** |
+| §P13 "chained demo compatibility" / D8 | 拓扑为固定四节点 `S-SBC → anti-fraud → translation → S-SBC ret`；P14 起按模式淡化未参与节点（simple 淡化 anti-fraud，fraud 淡化 translation），chained 换用含 iFC + UAS 的图 | conftest 只起 1 个 AS（translation），无 anti-fraud 进程。拓扑最左两跳在 E2E 栈里不存在。**chained 拓扑覆盖在 `test_chained_call_flows.py`（非浏览器 E2E）和 `test_chained_topology.py`（integration），console dashboard 的拓扑图渲染链式场景未测** |
 
 → **建议**（按优先级）：
 1. **最高优先**（R3-P0-1 / ADR-0013 教育性演示）：补一个 **REST 级 E2E**（不需要浏览器断言）来验证 `binding_constraint` 翻转。**配方方向必须按下面写**——`compute_binding_constraint()`（generator L238）判定是 `call_rate × AVG_DURATION_SECONDS(10.4) >= target_concurrency → "concurrency"`，**`call_rate` 越大越倾向于 "concurrency"**，反之才是 "rate"（HY4 B-1 指出原版方向写反）：

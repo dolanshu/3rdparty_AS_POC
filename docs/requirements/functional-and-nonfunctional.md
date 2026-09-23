@@ -51,7 +51,7 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-F-037 | `as_platform` ships a **capacity harness** as a library capability — a load generator that drives an AS stack through its callback interface at increasing offered concurrency levels, together with observation hooks that record the capacity boundary (the highest level where all calls complete within the configured timeout, plus any observable degradation such as event-loop gap growth). The harness is a library component, not an application: it is consumed by this repository (or by any other AS application) and its output is passed back to the caller, written to trace and counters, or discarded at the caller's choice. | done | P11 | ACC-P11-001 |
 | REQ-F-038 | An **interactive load generator** (`tools/call_load_generator.py`) runs outside the AS processes and drives them through SIP INVITEs, maintaining a configurable concurrency pool (1–50) with a closed-loop leaky-bucket tick that fills the pool to the target at every ~500 ms interval and decrements it on each call end (BYE, CANCEL, timeout or 608 reject). The generator is **interactive** — it runs indefinitely, is started and stopped via REST API, and responds to configuration changes without a restart. | accepted | P12 | ACC-P12-001 |
 | REQ-F-039 | The load generator's concurrency pool is coupled to a **call-rate throttle** (0.1–10 calls/sec, per second budget), so the two controls interact via Little's Law (`L = λW`). When `rate × avg_duration > target_concurrency` the pool stabilises at the target (concurrency is binding); when `rate × avg_duration < target_concurrency` it stabilises below target (rate is binding). The current binding constraint is exposed in the status endpoint. | accepted | P12 | ACC-P12-002 |
-| REQ-F-040 | The load generator can be pointed at **either** AS singly (translation or anti-fraud) **or** at the chained topology (`SBC → anti-fraud → translation → core`), selected by configuration. All 10 call types — translation types T1–T6 and anti-fraud types F1–F4 — are drawn per weighted random selection with a per-type **enabled/disabled toggle** from the console, so a demo can show only allow path, only reject path, or any mix. | accepted | P12 | ACC-P12-003 |
+| REQ-F-040 | The load generator can be pointed at **either** AS singly (translation or anti-fraud) **or** at the chained topology (`S-CSCF#1 → S-SBC → anti-fraud → S-SBC → S-CSCF#2 → S-SBC → translation → S-SBC → S-CSCF → P-CSCF → UAS`, ADR-0014), selected by configuration. All 10 call types — translation types T1–T6 and anti-fraud types F1–F4 — are drawn per weighted random selection with a per-type **enabled/disabled toggle** from the console, so a demo can show only allow path, only reject path, or any mix. | accepted | P12 | ACC-P12-003 |
 | REQ-F-041 | The load generator controls **per-call simulated behaviour** of the mock S-CSCF on the far side: four duration classes with fixed weights (D1 fast 30%, D2 medium 50%, D3 long 15%, D4 timeout 5%) — the mock answers 200 OK in each non-timeout class and sends BYE after the class's duration; D4 simulates a silent far end and lets the AS tear down after its 3 s no-answer timer. | accepted | P12 | ACC-P12-004 |
 | REQ-F-042 | Both AS instances emit a **per-call event stream** on the internal API WebSocket — `call_started`, `call_state_changed` (with the new state), `call_ended` (reason: BYE, timeout, CANCEL, 608 reject), and `call_rejected_608` — every event keyed by the Call-ID and enriched with the call type (T1…F4) and the AS decision result. The load generator emits the same event shapes for pool changes (`pool_status_update` with current active/target concurrency and the binding constraint). The two streams are merged at the console into a single event feed that shows every call from generator side and both AS sides. | accepted | P12 | ACC-P12-005 |
 | REQ-F-043 | When N concurrent calls run through the AS (10 recommended for P12 evidence, up to 50 in the generator), each `CallController` instance's lifecycle completes independently: one call's BYE does not terminate another's dialog, and one call's per-call timer (P8a tear-down timer, `REQ-NF-022`-adjacent) cancellation does not affect another's armed timer. This is a **validated architectural property**, not an assumed one — P12's test suite must prove it under load. | accepted | P12 | ACC-P12-006 |
@@ -59,7 +59,7 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-F-045 | The console shows a **live call count over time** as a rolling-window line chart (default 30-second window, updates on every `pool_status_update` event). Implemented with vendored Chart.js (`REQ-F-050`). | accepted | P13 | ACC-P13-001 |
 | REQ-F-046 | The console shows a **call-state distribution** as a pie/doughnut chart: active, completed, rejected_608, timeout. Updates on every per-call event from the AS event stream. | accepted | P13 | ACC-P13-002 |
 | REQ-F-047 | The console shows a **capacity gauge** (active_calls / target_concurrency) — a doughnut-style progress indicator driven by `pool_status_update` events and reflecting the generator's current configuration. | accepted | P13 | ACC-P13-003 |
-| REQ-F-048 | The console shows a **dynamic topology visualization** in SVG: SBC → anti-fraud AS → translation AS → core. Arrow thickness is proportional to active call count on that hop; arrow colour indicates the dominant state on that hop (green = active/completed, red = 608 rejections, orange = timeouts). | accepted | P13 | ACC-P13-004 |
+| REQ-F-048 | The console shows a **dynamic topology visualization** in SVG. P13 shipped one fixed 4-node diagram `S-SBC → anti-fraud AS → translation AS → S-SBC ret`; P14 (ACC-P14-003, ADR-0015) makes it **mode-aware**: `simple` dims the anti-fraud node (`S-SBC → translation AS → S-SBC ret`), `fraud` dims translation (`S-SBC → anti-fraud AS → S-SBC ret`), and `chained` switches to `Gen → S-SBC → anti-fraud AS → iFC → translation AS → UAS` with the generator ingress and the terminating UAS. **There is no "core" node**: the AS's outbound leg always ends at the S-SBC return side, and the called party is the terminating UAS behind P-CSCF. The two AS nodes are never a direct AS-to-AS SIP hop. Arrow thickness is proportional to active call count on that hop; arrow colour indicates the dominant state on that hop (green = active/completed, red = 608 rejections, orange = timeouts). | accepted | P13 | ACC-P13-004 |
 | REQ-F-049 | The console exposes **load generator controls**: a target-concurrency slider (1–50), call-type toggles (T1–T6, F1–F4), and Start/Stop buttons. Controls call the generator's REST API (`PUT /load/config`, `POST /load/start|stop`) and update from `pool_status_update` events so the UI never drifts from generator state. | accepted | P13 | ACC-P13-005 |
 | REQ-F-050 | The console uses a **vendored Chart.js UMD bundle** served from `/static/` — Chart.js 4.x, ~16 KB minified, MIT license, committed to the repository under `src/console/static/`. No CDN reference, no npm, no build step. The license file ships alongside the bundle (ADR-0011, `AGENT.md` §4.4 amendment). | accepted | P13 | ACC-P13-006 |
 | REQ-F-051 | `scripts/phase3-demo.sh full` runs the **P9b iFC chain** with multi-process AS instances and `python -m ims_mock.external_runtime`; both AS peer to the S-SBC return port, not to core directly (ADR-0015). | done | P14 | ACC-P14-001 |
@@ -73,7 +73,7 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | ID | Requirement | Status | Milestone | Acceptance |
 | --- | --- | --- | --- | --- |
 | REQ-NF-001 | Signalling only: no RTP, no media anchoring, no MRF (ADR-0006). | done | M0 | ACC-M0-008 |
-| REQ-NF-002 | UDP is the only transport; TCP and TLS are not implemented (ADR-0003). | done | M0 | ACC-M0-008 |
+| REQ-NF-002 | UDP is the only transport **on this POC's trunk**; TCP and TLS are not deployed here (ADR-0003). The platform library's pluggable `Transport` seam ships a `TlsTransport` (P11, ADR-0010) that no AS in this repository uses. | done | M0 | ACC-M0-008 |
 | REQ-NF-003 | Python 3.10 and sippy 2.4.2, pinned; the stack is verified by running it, not by assumption. | done | M0 | ACC-M0-002 |
 | REQ-NF-004 | Routing and translation are pure functions with no sockets, no global state and no clock, tested by the unit layer; three test layers are green. | done | M0 | ACC-M0-009 |
 | REQ-NF-005 | Every log line and console event is correlated by the SIP Call-ID. | done | M0→M3 | ACC-M0-007, ACC-M3-001 |
@@ -81,7 +81,7 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-NF-007 | The repository reads as a telecom-grade deliverable: skeleton, documentation set, ADRs, acceptance evidence and production gap register (AGENT.md section 4). | done | M0 | ACC-M0-001, ACC-M0-003 |
 | REQ-NF-008 | A clean checkout runs: `uv sync` → `make lint` / `make test`; `make demo` places a real call. | done | M0 | ACC-M0-002, ACC-M0-009, ACC-M4-002 |
 | REQ-NF-009 | No performance or capacity claims: no call rate, latency or capacity target is defined for the POC. | done | M0 | ACC-M0-011 |
-| REQ-NF-010 | Console uses no third-party front-end libraries and no build step. | done | M0 | ACC-M3-001 |
+| REQ-NF-010 | Console uses no **CDN-loaded** third-party front-end library and no build step. The single exception is the locally vendored Chart.js UMD bundle admitted by ADR-0011 (P13, REQ-F-050); it is committed to the repository and served from `/static/`, never fetched from a network. | done | M0 | ACC-M3-001 |
 | REQ-NF-011 | The verdict is a **pure function**: no sockets, no global state and no clock access inside the engine (time is injected), unit-testable without a network (AGENT.md section 12, REQ-NF-004 precedent). | done | P8 | ACC-P8-004 |
 | REQ-NF-012 | Cross-call anti-fraud state is **in memory**; a restart loses it. This is a registered POC gap, closed in P11 by the pluggable state store (D9). | done | P8 | ACC-P8-004 |
 | REQ-NF-013 | No media is played. A real UAC that does not declare `sip.608` would require a media announcement; this is a registered POC gap, not a hidden defect (D5, ADR-0006). | done | P8 | ACC-P8-003 |
@@ -147,20 +147,25 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 - **P9 chained demo — requirements stage (2026-09-19).** `REQ-F-025 … REQ-F-028` and
   `REQ-NF-016 … REQ-NF-018` are P9's own rows; no Phase 1 or P8 requirement is changed.
   **Chaining is configuration, not code (D6, `REQ-F-026`).** The plan's implementation note
-  records that no iFC emulation is needed in the mock — pointing AS-1's next hop at AS-2's
-  listen address is a peer/catalogue setting — and the anti-fraud AS relays an allowed call
-  to its single configured next hop (`FRAUD_SBC_PEER_*`), so the chain is wired from the
-  existing knobs and the routing catalogue. **Structural change (`REQ-NF-017`).** P9
+  recorded that no iFC emulation was needed in the mock and that pointing AS-1's next hop at
+  AS-2's listen address was a peer/catalogue setting. **That wiring is superseded by P9b /
+  ADR-0014 (2026-09-23):** the chain is now driven by the S-CSCF iFC orchestrator in
+  `src/ims_mock/`, no AS ever addresses another AS, each AS receives its own trunk INVITE
+  from the S-SBC forward side and returns its outbound INVITE to the top `Route` on the
+  S-SBC return side, and `*_SBC_PEER_*` is only the fallback for a trunk INVITE that carries
+  no `Route`. **Structural change (`REQ-NF-017`).** P9
   introduces a **new run command** — a chained-demo entry point mirroring `make demo` /
   `make demo-fraud`. Under `AGENT.md` section 13 a changed run command is a structural
   change, so the implementation commit must update `AGENT.md` section 10, `README.md` and
   `docs/README.md` in the same commit. The chained topology needs **no new environment
   variable and no new port**: the two AS listen ports (`5060` / `5062`) already differ
-  precisely so both instances can run on one host (plan section 6). **Known issue
-  (`REQ-NF-016`, `REQ-F-028`).** Two B2BUAs in series mean two Call-IDs: each AS terminates
-  the incoming INVITE and originates its own second leg, and `Call-ID` is regenerated rather
-  than passed through (`src/as_app/sip_adapter.py`, `PASSTHROUGH_HEADERS`), so cross-AS
-  correlation is unsolved and is registered as a POC gap rather than assumed away.
+  precisely so both instances can run on one host (plan section 6).   **Known issue
+  (`REQ-NF-016`, `REQ-F-028`).** Two B2BUAs in series mean one `Call-ID` per leg — four
+  AS-leg values on the implemented iFC chain (`X`, `X-b2b_1`, `Z`, `Z-b2b_1`; ADR-0014
+  decision 4). Each AS terminates the incoming INVITE and originates its own second leg, and
+  `Call-ID` is regenerated rather than passed through (`src/as_app/sip_adapter.py`,
+  `PASSTHROUGH_HEADERS`), so cross-AS correlation is unsolved and is registered as a POC gap
+  rather than assumed away.
   **Deliberate output (`REQ-NF-018`).** The friction the chain exposes is P10's primary
   input and is recorded at the item's close (plan section 5.4). The HLD/LLD deltas and any
   probe are the next pipeline stage (plan section 5.1) and are not written here; the

@@ -4,11 +4,12 @@ Duration: 5–10 minutes (10–14 with the anti-fraud section, §5a, and the cha
 Audience: architecture reviewers and operator-side reviewers. Rehearse it before showing it;
 if the script and `make demo` disagree, both are wrong (`AGENT.md` section 10).
 
-**Status:** the whole script runs. Sections 1–7 are the Phase 1 path (M0–M4): the stack probe,
+**Status:** the whole script runs. Sections 1–6 are the Phase 1 path (M0–M4): the stack probe,
 the rule data, a real translated call, the failure branches and the operations console — every
 one of them rehearsed for M4. Sections 5a and 5b are the Phase 2 additions: §5a is
-`make demo-fraud`, the anti-fraud AS, rehearsed for P8; §5b is `make demo-chained`, the two AS
-instances in series, rehearsed for P9. The runs that recorded the evidence are in
+`make demo-fraud`, the anti-fraud AS, rehearsed for P8; §5b is `make demo-chained`, the
+iFC-orchestrated chain of P9b (ADR-0014) — not the obsolete trunk-to-trunk P9 chain.
+Section 7 is Phase 3 (P12/P13 live load). The runs that recorded the evidence are in
 `docs/acceptance/report.md`.
 
 ## 0. Setup (before the audience arrives)
@@ -106,21 +107,24 @@ make demo-fraud        # two calls through the anti-fraud AS: one allowed, one r
 
 > "Phase 2 adds a second, independently runnable AS process at the same trunk boundary. This
 > one does not translate anything: it inspects the **calling** party and returns a verdict.
-> A caller the screening data allows is relayed towards the core unchanged; a caller on the
+> A caller the screening data allows is relayed, unchanged, to the top `Route` the S-SBC
+> inserted — back through the S-SBC; a caller on the
 > block list is answered `608 Rejected` (RFC 8688) by the AS itself — no second leg, no media
 > announcement, and no `Call-Info`. The `608` is what a generic `403` or `603` cannot say: an
 > automated anti-fraud engine made the decision."
 
 What the reviewer should see, in the transcript `make demo-fraud` prints:
 
-1. The topology line `emulated S-CSCF --UDP--> anti-fraud AS (608 Rejected) --UDP--> emulated
-   core network` and the screening file in use (`config/caller_screening.yaml`).
+1. The topology line `S-SBC forward --UDP--> anti-fraud AS (608 or relay) --UDP--> S-SBC
+   return (top Route)` — an allowed call is relayed **back through the S-SBC**, not to any
+   "core" — and the screening file in use (`config/caller_screening.yaml`).
 2. The fixed verdict order: `allow list -> block list -> call-rate window -> reputation`.
 3. Call 1 (`+86216180001`): `verdict: allow`, `signal: none`, `final status: 200`,
-   `core INVITE delta 1` — the allowed call really reached the emulated core.
+   `return INVITE delta 1` — the allowed call really left the AS towards the S-SBC return
+   side.
 4. Call 2 (`+8613400000001`): `verdict: reject`, `signal: block_list`,
    `list entry: BL-0001`, `final status: 608`, `second leg: none ... (RFC 8688, no
-   Call-Info)`, `core INVITE delta 0` — the rejected call never reached the core, because the
+   Call-Info)`, `return INVITE delta 0` — the rejected call never left the AS, because the
    reject path is UAS behaviour and originates no second leg.
 
 Point out that each demo allocates its own ephemeral ports, so this section and `make demo`
@@ -166,7 +170,8 @@ make console   # terminal 3: console on 127.0.0.1:8081, reading the AS API at :8
 Open `http://127.0.0.1:8081`. The call placed by `make mock` is visible in the live flow.
 Status bar with peer state and version, live message flow with direction colours, Call-ID
 filter, payload viewer, the matched rule highlighted, the statistics dashboard and the SVG
-topology. No third-party front-end libraries, so it works offline.
+topology. No CDN and no build step, so it works offline; the only third-party asset is the
+locally vendored Chart.js bundle permitted by ADR-0011.
 
 `make demo` (section 4) runs its own AS and mock on ephemeral ports, so those calls do not
 appear in a console pointed at the long-running AS — use `make dev` + `make mock` here.
@@ -174,16 +179,19 @@ appear in a console pointed at the long-running AS — use `make dev` + `make mo
 ## 7. Phase 3 — Live-load dashboard (3 minutes)
 
 **Duration.** 3 minutes for the simple variant, 5–6 with the full chained topology.
-**Preparation.** Start the mock core, translation AS (or full chain), load generator and
-enhanced console — see `docs/demo-steps.md` Part 3 for the exact commands.
+**Preparation.** Start the mock S-SBC (whose return side answers the AS's outbound INVITE),
+translation AS (or full chain), load generator and enhanced console — see
+`docs/demo-steps.md` Part 3 for the exact commands.
 
 ### 7a. Start the stack (2–3 minutes before the audience arrives)
 
 Four terminals + browser:
 
 ```bash
-make core                                            # terminal 0: core mock on :5061
+make mock-return                                     # terminal 0: mock S-SBC return side on :5061
 # terminal 1: translation AS on :5060, API on :8080
+# SBC_PEER_* is only the fallback for a trunk INVITE with no Route; the hop itself
+# comes from the rule catalogue (127.0.0.1:5061 in config/routing_rules.yaml)
 SBC_PEER_ADDRESS=127.0.0.1 SBC_PEER_PORT=5061 \
   uv run python -m as_app.main
 make gen                                             # terminal 2: load generator on :8765
@@ -250,7 +258,8 @@ Toggle on F1–F4 in the Call Types panel.
 
 > "Watch the pie chart — red slices appear for rejected_608. The topology link l1 might
 > shift toward orange. These are **real** 608s from the anti-fraud AS, not simulated. The
-> AS answers from the UAS side (RFC 8688) so the call never reaches the core."
+> AS answers from the UAS side (RFC 8688) so the call never leaves the AS towards the
+> S-SBC return side."
 
 ### 7f. Vendored Chart.js (30 seconds)
 

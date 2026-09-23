@@ -150,8 +150,10 @@ rendered images that cannot be reviewed in a diff.
   codes and log messages; the mapping is documented in the LLD and in the interface
   specification. No ad-hoc exceptions with bare strings.
 - **Structured logging.** Every log line carries `timestamp`, `level`, `module`,
-  `call_id`, `direction`, `peer`, and an event message. Call-ID threads the whole call
-  across both legs. The field set is documented in the LLD and never changed silently.
+  `call_id`, `direction`, `peer`, and an event message. Each B2BUA leg carries its own
+  `Call-ID` (the outbound leg appends `-b2b_1`), so a leg is correlated by the value that
+  instance saw on that leg; across two AS instances the `P-Charging-Vector` ICID is the
+  end-to-end key. The field set is documented in the LLD and never changed silently.
 - **File headers.** Every source file starts with the licence header and a short module
   responsibility statement. No anonymous modules.
 - **Domain naming.** Names express the telecom domain (`NumberTranslationService`,
@@ -253,7 +255,9 @@ src/anti_fraud_as/            the second AS: caller screening, 608 Rejected (P8,
   screening_data.py           caller_screening.yaml model, validation, reload
   internal_api.py             routes and bindings over the library's internal-API shell
 src/console/                  FastAPI + plain HTML/CSS/JS (separate process)
-src/s_sbc_mock/               UAC (emulates S-CSCF trigger) + UAS (emulates core)
+src/s_sbc_mock/               UAC (S-SBC forward: trunk INVITE + Route) + UAS (S-SBC return:
+                              answers the AS outbound INVITE) — stands in for the operator
+                              boundary, not for the core
 deploy/                       docker-compose.yml + per-service Dockerfiles
 tools/                        capture, message generation and probe scripts
 tests/unit/ tests/integration/ tests/e2e/
@@ -297,8 +301,9 @@ Pinned; do not upgrade without asking.
 
 - Python **3.10** (the version sippy has been verified against on this machine)
 - **sippy 2.4.2** — RFC 3261 SIP stack and B2BUA framework (BSD-2-Clause)
-- Console: **FastAPI** + uvicorn + plain HTML/CSS/JS, **no Node toolchain, no build
-  step, no third-party front-end libraries**
+- Console: **FastAPI** + uvicorn + plain HTML/CSS/JS, **no Node toolchain, no build step**,
+  and no third-party front-end library **except the one locally vendored bundle permitted by
+  ADR-0011** (`chart.umd.min.js`). No CDN, no npm.
 - `uv` for environment and dependency management (`pyproject.toml` + `uv.lock`)
 - pytest · `ruff` (format + lint) · `mypy`
 - `docker compose` for the local demo stack (both AS instances, two mocks and the console)
@@ -337,7 +342,10 @@ All configuration via environment variables, declared in `.env.example`, parsed 
 Key knobs (finalised in M0, kept in sync with `README.md` and the deployment guide):
 
 - `SIP_LISTEN_ADDRESS`, `SIP_LISTEN_PORT` — where the AS receives the trunk
-- `SBC_PEER_ADDRESS`, `SBC_PEER_PORT` — next hop (mock or real S-SBC)
+- `SBC_PEER_ADDRESS`, `SBC_PEER_PORT` — fallback next hop (mock or real S-SBC return side),
+  used only when the trunk INVITE carries no top `Route`; also the peer reported by the
+  startup self-check. It never rewrites the rule catalogue, which is what selects the hop
+  on a routed call
 - `RULES_FILE` — path to the routing rules file
 - `ALLOWED_PEERS` — source addresses accepted on the trunk
 - `INTERNAL_API_ADDRESS/PORT` — how the console reaches the AS
@@ -382,7 +390,7 @@ make fraud               # run the anti-fraud AS locally, on its own ports (P8)
 docker compose up        # as + anti-fraud-as + both mocks + console
 make demo                # one call through the number-translation AS, narrated
 make demo-fraud          # two calls through the anti-fraud AS: one allowed, one 608
-make demo-chained        # iFC chain via ims_mock (SBC -> anti-fraud -> S-CSCF -> SBC -> translation -> UAS)
+make demo-chained        # iFC chain via ims_mock (S-CSCF#1 -> S-SBC -> anti-fraud -> S-SBC -> S-CSCF#2 -> S-SBC -> translation -> S-SBC -> S-CSCF -> P-CSCF -> UAS)
 make lint                # ruff format --check + ruff check + mypy
 make test                # unit + integration + e2e
 ```

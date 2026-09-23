@@ -44,7 +44,7 @@ from sippy.SipURL import SipURL
 from sippy.Time.Timeout import Timeout
 from sippy.UA import UA
 
-__all__ = ["CoreUas", "ReceivedInvite"]
+__all__ = ["ReturnUas", "ReceivedInvite"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ SIP_USER_AGENT_NAME = "3rd-party AS POC mock S-SBC"
 
 @dataclass(frozen=True)
 class ReceivedInvite:
-    """An INVITE that reached the core side of the mock.
+    """An INVITE that reached the return side of the mock.
 
     Attributes:
         call_id: SIP Call-ID of the call.
@@ -88,7 +88,7 @@ def _header_value(request: Any, name: str) -> str | None:
     return str(request.getHFBody(name)).strip()
 
 
-class CoreUas:
+class ReturnUas:
     """Answers the INVITE originated by the AS.
 
     Attributes:
@@ -182,7 +182,7 @@ class CoreUas:
         return ua.recvRequest(request, transaction)
 
     def _contact(self) -> Any:
-        """Build the Contact header of the core side.
+        """Build the Contact header of the return side.
 
         Returns:
             A ``SipContact`` pointing at the local address and port of this side.
@@ -215,7 +215,7 @@ class CoreUas:
         while not self.received_invites:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError(f"no INVITE reached the core side within {timeout_seconds}s")
+                raise TimeoutError(f"no INVITE reached the return side within {timeout_seconds}s")
             ED2.loop(timeout=min(0.05, remaining))
         return self.received_invites[-1]
 
@@ -240,7 +240,7 @@ class CoreUas:
             )
         )
         _LOGGER.info(
-            "core side received INVITE call_id=%s ruri=%s called=%s",
+            "return side received INVITE call_id=%s ruri=%s called=%s",
             call_id,
             request_uri,
             request.getRURI().username,
@@ -270,7 +270,7 @@ class CoreUas:
         if isinstance(event, CCEventDisconnect):
             # The far end released the call; nothing left to do on this side.
             return
-        _LOGGER.debug("core side ignored %s", type(event).__name__)
+        _LOGGER.debug("return side ignored %s", type(event).__name__)
 
     def _ring(self, ua: Any) -> None:
         """Send ``180 Ringing`` and schedule the answer.

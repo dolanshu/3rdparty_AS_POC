@@ -38,7 +38,7 @@ from sippy.SipTransactionManager import SipTransactionManager
 from sippy.Time.Timeout import Timeout
 
 from s_sbc_mock.uac import CallScenario, TrunkUac
-from s_sbc_mock.uas import CoreUas
+from s_sbc_mock.uas import ReturnUas
 
 __all__ = ["MockConfig", "SMockApplication", "SIP_USER_AGENT_NAME", "main"]
 
@@ -137,7 +137,7 @@ class SMockApplication:
             route_return_address=config.listen_address,
             route_return_port=config.listen_port,
         )
-        self.uas = CoreUas(
+        self.uas = ReturnUas(
             config.listen_address,
             config.listen_port,
             talk_seconds=config.scenarios[0].talk_seconds if config.scenarios else 0.2,

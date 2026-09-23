@@ -131,7 +131,7 @@ capacity gauge 和动态 topology 用纯手写 SVG/CSS 实现，不需要额外�
 | Call count 实时折线图 | Chart.js (`new Chart(ctx, {type: 'line', ...})`) | 库提供 | rolling window ~60 data points，Chart.js 轻松 handle |
 | State distribution 饼图 | Chart.js (`{type: 'doughnut', ...}`) | 库提供 | 4-5 slices，Chart.js 原生支持 |
 | Capacity gauge (`active/target`) | **纯 SVG** —— `<circle stroke-dasharray>` + 中心文字 | **0KB** | gauge 就是圆环进度条 + 数字；Chart.js 没有原生 gauge，插件多而乱，手写 SVG 更轻量 |
-| 动态拓扑 (`SBC → anti-fraud → translation → core`) | **纯 SVG DOM** —— 4 节点 + 3 边，JS 动态更新 `stroke` 颜色和 `stroke-width` 粗细 | **0KB** | 4 节点远低于 SVG 性能瓶颈（5000+ 节点才会卡）；不需要任何 graph 库 |
+| 动态拓扑（固定 4 节点 `S-SBC → anti-fraud → translation → S-SBC ret`） | **纯 SVG DOM** —— 4 节点 + 3 边，JS 动态更新 `stroke` 颜色和 `stroke-width` 粗细 | **0KB** | 4 节点远低于 SVG 性能瓶颈（5000+ 节点才会卡）；不需要任何 graph 库。P14 改为按模式显隐/淡化，chained 另用 6 节点图（含 iFC 与 terminating UAS） |
 | Control panel (slider + toggles) | **纯 HTML/CSS** —— `<input type="range">` + `<input type="checkbox">` | **0KB** | 不需要 Material 或 Bootstrap；dark theme + CSS variables 手写搞定 |
 
 **为什么不是 ECharts（更大但功能更强）？** ECharts 最小 UMD ~135KB，比 Chart.js 大
@@ -232,7 +232,7 @@ call_load_generator.py (P12)
   ├─ mock S-CSCF UAC (from tools/chained_as_probe.py pattern)
   │    ├─ launches SIP INVITEs → AS
   │    ├─ tracks each call's lifecycle → end events back to generator
-  │    └─ controls per-call duration (simulated core behavior: 2s / 10s / 25s / timeout)
+  │    └─ controls per-call duration (simulated far-end behavior: 2s / 10s / 25s / timeout)
   │
   └─ WebSocket event stream → console
        (per-call events: call_started, call_leg1_relayed, call_state_changed, call_ended,
@@ -270,7 +270,7 @@ The load generator's call population. Mixed types, mixed durations, mixed outcom
 | F3 | high-rate caller | anti-fraud AS | 608 Rejected | high-rate | any |
 | F4 | missing PAI | anti-fraud AS | fail-open → relay | any | any |
 
-**Duration model (generator-controlled core behavior):**
+**Duration model (generator-controlled far-end behavior):**
 
 | # | Weight | Behavior |
 |---|--------|----------|
@@ -301,8 +301,13 @@ ceremony with read-only review gates.
 | **Version bump** | This repo → `0.10.0`; `as_platform` → no change | This repo → `1.0.0` |
 
 **Chained demo compatibility.** P12 validates against both single-AS and chained-AS
-topologies. P13's dynamic SVG topology visualization shows the call flow path
-(S-SBC → anti-fraud → translation → core) when both AS processes are running.
+topologies. P13's dynamic SVG topology ships **one fixed 4-node diagram**
+(`S-SBC → anti-fraud → translation → S-SBC ret`), drawn regardless of which AS is running — a
+display simplification, not the wire path. P14 makes it **mode-aware**: `simple` dims the
+anti-fraud node (`S-SBC → translation → S-SBC ret`), `fraud` dims translation
+(`S-SBC → anti-fraud → S-SBC ret`), and `chained` switches to the iFC layout with the iFC node
+between the two AS nodes and the terminating UAS at the end
+(ADR-0014, `Gen → S-SBC → Anti-fraud → iFC → Translation → UAS`).
 
 > **P14 follow-on (2026-09-23).** v1.0.0 shipped before P9b landed. The interactive demo
 > (`scripts/phase3-demo.sh full`) and console SVG still do not run the iFC-orchestrated chain
@@ -431,7 +436,7 @@ Files to modify (minimal, per D-P3-1 and D-P3-2 "no platform change, architectur
 
 Implementation steps (sequential):
 1. Skeleton + pool tick loop + mock UAC launch (uses `tools/chained_as_probe.py` UAC pattern).
-2. Call type table + weighted random selection + duration model → simulated core behavior (mock S-CSCF sleeps before BYE/timeout).
+2. Call type table + weighted random selection + duration model → simulated far-end behavior (mock S-CSCF sleeps before BYE/timeout).
 3. REST API (`/load/start`, `/load/stop`, `/load/config`, `/load/status`) — FastAPI, separate from AS internal_api.
 4. Call event emission from both AS controllers — hooks into AS-local internal_api (extend existing handler, no platform change).
 5. Generator WebSocket event stream → subscribe to AS events + its own pool events.
@@ -454,7 +459,7 @@ Three layers, all must pass (`AGENT.md` §11):
 - Timer independence: concurrent calls with unreachable hops → verify P8a cancellation does not cross-contaminate (this is the test that P8a was created to enable; see phase2-plan.md P8a §3, P9.5).
 
 **E2E (`tests/e2e/`):**
-- Chained topology load: 10 concurrent calls → anti-fraud → translation → core. Console old Call Trace view shows all 20 legs (10×2) with correct state progression.
+- Chained topology load: 10 concurrent calls → anti-fraud → translation → S-SBC ret. Console old Call Trace view shows all 20 legs (10×2) with correct state progression.
 - Pool status WebSocket feed: console receives `pool_status_update` events every tick.
 
 #### Stage 5 — Acceptance
@@ -506,7 +511,7 @@ New requirements IDs:
 | REQ-F-045 | Console must show live call count over time (rolling window line chart) | D-P3-5 |
 | REQ-F-046 | Console must show state distribution (pie chart: active, rejected_608, completed, timeout) | D-P3-5 |
 | REQ-F-047 | Console must show capacity gauge (active_calls / target_concurrency) | D-P3-5, D-P3-6 |
-| REQ-F-048 | Console must show dynamic topology visualization (SBC → anti-fraud → translation → core, call-flow arrows with state coloring) | §4.4 AGENT.md dynamic topology |
+| REQ-F-048 | Console must show dynamic topology visualization (P13: fixed `S-SBC → anti-fraud → translation → S-SBC ret`; P14 ADR-0014 / ACC-P14-003: mode-aware — simple dims anti-fraud, fraud dims translation, chained uses the iFC + terminating-UAS layout; call-flow arrows with state coloring) | §4.4 AGENT.md dynamic topology |
 | REQ-F-049 | Console must expose load generator controls (target concurrency slider, call type toggles, start/stop buttons) | D-P3-6 |
 | REQ-F-050 | Console must accept vendored Chart.js (~80KB UMD bundled) under `/static/` | D-P3-4 |
 
@@ -527,7 +532,7 @@ console server (FastAPI)
   │                         ├─ Chart.js instance 1: call count rolling line chart (30s window)
   │                         ├─ Chart.js instance 2: state distribution pie chart (updated on every event)
   │                         ├─ Chart.js instance 3: capacity gauge (target vs active)
-  │                         ├─ SVG topology: SBC → anti-fraud → translation → core
+  │                         ├─ SVG topology: 固定 4 节点 S-SBC → anti-fraud → translation → S-SBC ret
   │                         │    └─ arrow color changes: active→green, 608→red, timeout→orange
   │                         │    └─ arrow thickness: proportional to active call count on that hop
   │                         ├─ Call type toggles (checkboxes for T1-T6, F1-F4)
@@ -606,7 +611,8 @@ Files to modify:
 6. Chart.js instances: call count line chart (rolling 30s window, update on every
    `pool_status_update` event), state distribution pie (update on every
    `call_state_changed` event), capacity gauge (`active_calls / target_concurrency`).
-7. Dynamic SVG topology: arrows from SBC → anti-fraud → translation → core. Arrow
+7. Dynamic SVG topology: arrows across the fixed 4 nodes S-SBC → anti-fraud → translation →
+   S-SBC ret (P14 起按模式淡化未参与的节点，chained 模式换用含 iFC 与 terminating UAS 的图). Arrow
    thickness = active_calls on that hop; colour = green (all), red (608 on that hop),
    orange (timeouts on that hop).
 8. Control panel wiring: slider → REST `PUT /load/config`, toggles → same config endpoint,
@@ -722,7 +728,7 @@ This is the same pipeline Phase 2 used. No ceremony lightening for Phase 3. Phas
 |------|---------------|---------|
 | Caller/called number population for generator | Phase 1 demo has a fixed fleet of numbers. Does the generator need a configurable call-number generator (e.g., incrementing + random), or reuses the fixed fleet? | P12 Stage 2 (design) |
 | Load generator logging level | Should generator emit every call detail to stdout for demo narration, or aggregate by state? | P12 Stage 3 (implementation) |
-| Load generator → AS topology | P12 must support: generator → single-AS (both translation and anti-fraud, one at a time); generator → S-CSCF → chained AS → core (full topology). Which is the default for acceptance? | P12 Stage 1 (requirements) |
+| Load generator → AS topology | P12 must support: generator → single-AS (both translation and anti-fraud, one at a time); generator → S-CSCF → chained AS → S-SBC ret (full topology). Which is the default for acceptance? | P12 Stage 1 (requirements) |
 
 ---
 

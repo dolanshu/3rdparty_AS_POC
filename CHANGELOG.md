@@ -8,6 +8,26 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-23 — P14 Phase 3 × P9b alignment
+
+### Added
+
+- **`ims_mock.external_runtime`** — multi-process chained demo: orchestrator + S-SBC +
+  P-CSCF + terminating UAS without in-process AS (`python -m ims_mock.external_runtime`).
+- **Load generator topology modes** — `--topology simple|fraud|chained`, `ingress_port` and
+  `topology` on `/load/status`; chained mode sends `Route` to S-SBC return (REQ-F-052).
+- **Console mode-aware Dashboard** — topology badge, chained SVG (5-hop iFC layout), dual
+  fraud/translation WebSocket streams and health when `--fraud-api-url` is set (REQ-F-053/054).
+- **Topology-aware call-type toggles** — T* disabled in fraud-only, F* disabled in simple
+  (REQ-F-055).
+- **ADR-0015** — Phase 3 live-load demo aligned with P9b.
+
+### Changed
+
+- **`scripts/phase3-demo.sh full`** — runs P9b iFC chain via `external_runtime`; both AS
+  instances peer to S-SBC return, not core directly.
+- **`ChainedOrchestrator`** — lazy subscriber sessions for external load generator.
+
 ## [1.0.0] - 2026-09-22 — P13 Enhanced Console (Phase 3, v1.0 release)
 
 ### Added

@@ -54,8 +54,9 @@ from as_app.errors import AsError, AsErrorCode
 from as_app.observability.logging import LogDirection, get_logger, log_event
 from as_app.observability.metrics import CallDisposition, MetricsRegistry
 from as_app.observability.tracing import TraceRecorder
+from as_app.route_header import parse_top_route_target
 from as_app.routing.engine import Disposition, RoutingDecision, decide
-from as_app.routing.rules import RuleSetStore
+from as_app.routing.rules import NextHop, RuleSetStore
 from as_app.sip_adapter import extract_called_number, outbound_call_id
 
 __all__ = ["CallController", "TrunkCallMap"]
@@ -174,6 +175,18 @@ class CallController(BaseCallController):
                 )
         except (RuntimeError, AttributeError):
             pass  # asyncio bridge not ready — drop silently
+
+    def _originate_towards(self, hop: NextHop) -> None:
+        """Send the outbound INVITE to the top Route target when the trunk carried one.
+
+        The routing catalogue names the operator S-SBC hop; RFC 3261 loose routing uses
+        the trunk ``Route`` set the S-SBC inserted to choose the wire destination.
+        """
+        route_target = parse_top_route_target(self._trunk_request)
+        if route_target is not None:
+            address, port = route_target
+            hop = hop.model_copy(update={"address": address, "port": port})
+        super()._originate_towards(hop)
 
     # --- P12 apply_call_policy / record_disposition overrides ---------------
 
@@ -303,7 +316,7 @@ class CallController(BaseCallController):
             # the hop of the attempt; the base resolves both, so the values here are the
             # first attempt's and the base overwrites them on a failover attempt.
             attributes={"called_number": translated, "next_hop": decision.next_hops[0].name},
-            relay_log_message="invite originated towards the next hop",
+            relay_log_message="invite originated towards the S-SBC (top Route)",
             relay_log_fields={
                 "called_number": translated,
                 "next_hop": decision.next_hops[0].name,

@@ -33,7 +33,10 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Literal
+
+Topology = Literal["simple", "fraud", "chained"]
+TOPOLOGIES: Final[frozenset[str]] = frozenset({"simple", "fraud", "chained"})
 
 # ======================================================================
 # Call type model
@@ -54,6 +57,28 @@ class CallModel:
     )
 
     _base_weights: Final[dict[str, float]] = dict.fromkeys(ALL_TYPES, 1.0)
+
+    TRANSLATION_TYPES: Final[frozenset[str]] = frozenset(f"T{i}" for i in range(1, 7))
+    FRAUD_TYPES: Final[frozenset[str]] = frozenset(f"F{i}" for i in range(1, 5))
+
+    @classmethod
+    def types_for_topology(cls, topology: Topology) -> frozenset[str]:
+        """Return the call types valid for a topology mode (REQ-F-055)."""
+        if topology == "simple":
+            return cls.TRANSLATION_TYPES
+        if topology == "fraud":
+            return cls.FRAUD_TYPES
+        return cls.ALL_TYPES
+
+    @classmethod
+    def validate_enabled_for_topology(cls, topology: Topology, enabled_types: set[str]) -> None:
+        """Raise ``ValueError`` when toggles disagree with topology."""
+        allowed = cls.types_for_topology(topology)
+        invalid = enabled_types - allowed
+        if invalid:
+            raise ValueError(
+                f"call types {sorted(invalid)} are not valid for topology '{topology}'"
+            )
 
     @classmethod
     def pick(cls, enabled_types: set[str]) -> str:
@@ -124,6 +149,7 @@ class PoolConfig:
     target_concurrency: int
     call_rate: float
     enabled_call_types: frozenset[str]
+    topology: Topology = "simple"
 
     def __post_init__(self) -> None:
         if not (1 <= self.target_concurrency <= 50):
@@ -137,6 +163,9 @@ class PoolConfig:
         unknown = self.enabled_call_types - CallModel.ALL_TYPES
         if unknown:
             raise ValueError(f"Unknown call types: {sorted(unknown)}")
+        if self.topology not in TOPOLOGIES:
+            raise ValueError(f"topology must be one of {sorted(TOPOLOGIES)}")
+        CallModel.validate_enabled_for_topology(self.topology, set(self.enabled_call_types))
 
 
 @dataclass
@@ -173,9 +202,16 @@ class CallPool:
     TICK_INTERVAL: Final[float] = 0.5
     RATE_BUDGET_RESET_INTERVAL: Final[float] = 1.0
 
-    def __init__(self, config: PoolConfig, mock_uac: Any | None = None) -> None:
+    def __init__(
+        self,
+        config: PoolConfig,
+        mock_uac: Any | None = None,
+        *,
+        ingress_port: int = 5060,
+    ) -> None:
         self._config = config
         self._mock_uac = mock_uac
+        self._ingress_port = ingress_port
         self._lock = asyncio.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self.active_calls: int = 0
@@ -252,6 +288,8 @@ class CallPool:
             "binding_constraint": self.compute_binding_constraint(),
             "enabled_call_types": sorted(self._config.enabled_call_types),
             "rate_budget_remaining": round(self._rate_budget, 2),
+            "topology": self._config.topology,
+            "ingress_port": self._ingress_port,
         }
 
     # --------------------------------------------------------------
@@ -393,11 +431,16 @@ class MockSipUac:
         as_port: int,
         local_address: str = "127.0.0.1",
         local_port: int = 5099,
+        *,
+        route_return_address: str | None = None,
+        route_return_port: int | None = None,
     ) -> None:
         self.as_address = as_address
         self.as_port = as_port
         self.local_address = local_address
         self.local_port = local_port
+        self.route_return_address = route_return_address
+        self.route_return_port = route_return_port
         self._loop: asyncio.AbstractEventLoop | None = None
         self._global_config: dict[str, Any] = {}
         self._tm: Any | None = None  # SipTransactionManager
@@ -534,11 +577,12 @@ class MockSipUac:
 
         called, caller = self.numbers_for(call_type)
         self._known_call[call_id] = on_end
+        pai_caller = "" if call_type == "F4" else caller
 
         event = CCEventTry(
-            (None, caller, called, MsgBody(content=DEFAULT_SDP_OFFER), None, None)
+            (None, pai_caller or caller, called, MsgBody(content=DEFAULT_SDP_OFFER), None, None)
         )
-        event.extra_headers = self._isc_headers(caller)
+        event.extra_headers = self._isc_headers(pai_caller, call_id)
 
         ua = UA(
             self._global_config,
@@ -570,12 +614,26 @@ class MockSipUac:
 
     # --- ISC headers (mirror s_sbc_mock/uac.py) -------------------------
 
-    def _isc_headers(self, caller: str) -> tuple[Any, ...]:
+    def _isc_headers(self, caller: str, call_id: str) -> tuple[Any, ...]:
         """Build ISC-flavoured context headers like the mock S-SBC."""
         from sippy.SipHeader import SipHeader
 
+        headers: list[Any] = []
+        if self.route_return_port is not None and self.route_return_address is not None:
+            headers.append(
+                SipHeader(
+                    s=(
+                        "Route: "
+                        f"<sip:{self.route_return_address}:{self.route_return_port};lr>"
+                    )
+                )
+            )
+        if caller:
+            headers.append(
+                SipHeader(s=f"P-Asserted-Identity: <sip:{caller}@{_IMS_DOMAIN}>")
+            )
         return (
-            SipHeader(s=f"P-Asserted-Identity: <sip:{caller}@{_IMS_DOMAIN}>"),
+            *headers,
             SipHeader(s="Feature-Caps: *;+sip.608"),
             SipHeader(s="Subject: gen-call"),
         )
@@ -699,6 +757,7 @@ if FASTAPI_AVAILABLE:
         target_concurrency: int = Field(ge=1, le=50)
         call_rate: float = Field(ge=0.1, le=10.0)
         enabled_call_types: list[str]
+        topology: Topology | None = None
 
     def build_generator_app(
         *,
@@ -734,6 +793,8 @@ if FASTAPI_AVAILABLE:
                 "binding_constraint": "concurrency",
                 "enabled_call_types": sorted(CallModel.ALL_TYPES),
                 "rate_budget_remaining": 3.0,
+                "topology": "simple",
+                "ingress_port": 5060,
             }
 
         @app.get("/load/status")
@@ -762,10 +823,13 @@ if FASTAPI_AVAILABLE:
         async def set_config(req: _LoadConfigRequest):
             try:
                 enabled = frozenset(req.enabled_call_types)
+                current = (pool_state_getter or _default_getter)()
+                topology: Topology = req.topology or current.get("topology", "simple")
                 config = PoolConfig(
                     target_concurrency=req.target_concurrency,
                     call_rate=req.call_rate,
                     enabled_call_types=enabled,
+                    topology=topology,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -800,24 +864,38 @@ if FASTAPI_AVAILABLE:
 # ======================================================================
 
 
+def _default_enabled_types(topology: Topology) -> frozenset[str]:
+    return CallModel.types_for_topology(topology)
+
+
 async def _amain(args: argparse.Namespace) -> int:
     """Async entry point: sippy thread + CallPool + uvicorn on one loop."""
     import uvicorn
 
+    topology: Topology = args.topology
+    ingress_port = args.ingress_port if args.ingress_port is not None else args.as_port
+
     # 1. Wire up the SIP UAC (starts its own sippy ED2 daemon thread)
     uac = MockSipUac(
-        args.as_address, args.as_port,
-        local_address=args.local_address, local_port=args.local_port,
+        args.as_address,
+        ingress_port,
+        local_address=args.local_address,
+        local_port=args.local_port,
+        route_return_address=args.route_return_address,
+        route_return_port=args.route_return_port,
     )
     uac.set_loop(asyncio.get_running_loop())
     uac.start_sippy()
 
     # 2. Build initial pool config
-    default_types = frozenset(sorted(CallModel.ALL_TYPES))
+    default_types = _default_enabled_types(topology)
     initial_config = PoolConfig(
-        args.target_concurrency, args.call_rate, default_types,
+        args.target_concurrency,
+        args.call_rate,
+        default_types,
+        topology=topology,
     )
-    pool = CallPool(initial_config, mock_uac=uac)
+    pool = CallPool(initial_config, mock_uac=uac, ingress_port=ingress_port)
 
     # 3. Async controller bridge — FastAPI endpoints call these through the
     #    pool_controller hook; CallPool.start/stop/set_config are coroutines.
@@ -867,7 +945,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--as-address", default="127.0.0.1",
                         help="AS SIP listen address (default 127.0.0.1)")
     parser.add_argument("--as-port", type=int, default=5060,
-                        help="AS SIP listen port (default 5060)")
+                        help="AS SIP listen port (default 5060; alias for ingress)")
+    parser.add_argument(
+        "--ingress-port",
+        type=int,
+        default=None,
+        help="Subscriber ingress SIP port (default: --as-port)",
+    )
+    parser.add_argument(
+        "--topology",
+        choices=sorted(TOPOLOGIES),
+        default="simple",
+        help="Target topology: simple (translation), fraud, or chained (REQ-F-052)",
+    )
+    parser.add_argument(
+        "--route-return-address",
+        default=None,
+        help="S-SBC return host for Route header (chained mode)",
+    )
+    parser.add_argument(
+        "--route-return-port",
+        type=int,
+        default=None,
+        help="S-SBC return port for Route header (chained mode)",
+    )
     parser.add_argument("--local-address", default="127.0.0.1",
                         help="Generator local SIP address (default 127.0.0.1)")
     parser.add_argument("--local-port", type=int, default=5099,

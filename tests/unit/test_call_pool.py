@@ -69,6 +69,7 @@ def _default_pool_config(**overrides: Any) -> PoolConfig:
         "target_concurrency": 5,
         "call_rate": 10.0,
         "enabled_call_types": frozenset(CallModel.ALL_TYPES),
+        "topology": "chained",
     }
     cfg.update(overrides)
     return PoolConfig(**cfg)
@@ -216,6 +217,7 @@ def test_binding_at_boundary() -> None:
         target_concurrency=50,
         call_rate=10.0,
         enabled_call_types=frozenset(CallModel.ALL_TYPES),
+        topology="chained",
     )
     pool = CallPool(config)
     assert pool.compute_binding_constraint() == "concurrency"
@@ -240,6 +242,7 @@ async def test_set_config_updates_behaviour() -> None:
         target_concurrency=5,
         call_rate=10.0,
         enabled_call_types=frozenset(CallModel.ALL_TYPES),
+        topology="chained",
     )
     await pool.set_config(new_config)
     # Budget resets at t=1.0, next tick at t=1.5 spawns deficit

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Phase 3 demo stack — one terminal, four processes.
+# Phase 3 demo stack — one terminal, multiple processes.
 # Usage: ./scripts/phase3-demo.sh [simple|full]
-#   simple = translation AS only (3 processes + core mock)
-#   full   = anti-fraud AS -> translation AS -> core (5 processes + mock)
+#   simple = translation AS only + core mock (topology simple)
+#   full   = P9b iFC chain: fraud AS -> translation AS via ims_mock runtime (topology chained)
 # Ctrl+C kills everything cleanly.
 
 set -euo pipefail
@@ -12,13 +12,34 @@ MODE="${1:-simple}"
 LOG_DIR="/tmp/p3-demo"
 mkdir -p "$LOG_DIR"
 
+# WSL2: services bind 127.0.0.1 only → Windows browser gets ERR_EMPTY_RESPONSE on
+# http://127.0.0.1:8081. Bind 0.0.0.0 and open console via the WSL IP from Windows.
+if grep -qi microsoft /proc/version 2>/dev/null; then
+  WSL_IP="$(hostname -I | awk '{print $1}')"
+  BIND_ADDR="${BIND_ADDR:-0.0.0.0}"
+  API_HOST="${API_HOST:-$WSL_IP}"
+else
+  WSL_IP=""
+  BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
+  API_HOST="${API_HOST:-127.0.0.1}"
+fi
+
+NO_PROXY_LIST="127.0.0.1,localhost,::1"
+[[ -n "$WSL_IP" ]] && NO_PROXY_LIST="$NO_PROXY_LIST,$WSL_IP"
+export NO_PROXY="$NO_PROXY_LIST"
+export no_proxy="$NO_PROXY"
+
 # Allocate ports (override with env vars if needed)
 CORE_SIP="${CORE_SIP:-5061}"
-CORE_UAC="${CORE_UAC:-5062}"       # mock UAC side — MUST differ from AS_TRANS_SIP below
+CORE_UAC="${CORE_UAC:-5062}"
 AS_TRANS_SIP="${AS_TRANS_SIP:-5060}"
 AS_TRANS_API="${AS_TRANS_API:-8080}"
 AS_FRAUD_SIP="${AS_FRAUD_SIP:-5063}"
 AS_FRAUD_API="${AS_FRAUD_API:-8082}"
+IMS_RETURN="${IMS_RETURN:-5070}"
+IMS_FORWARD="${IMS_FORWARD:-5071}"
+IMS_TERM="${IMS_TERM:-5072}"
+IMS_PCSCF="${IMS_PCSCF:-5073}"
 GEN_HTTP="${GEN_HTTP:-8765}"
 CONSOLE_HTTP="${CONSOLE_HTTP:-8081}"
 
@@ -31,6 +52,7 @@ cleanup() {
     kill "$pid" 2>/dev/null || true
   done
   wait 2>/dev/null || true
+  [[ -f config/routing_rules.yaml.bak ]] && mv -f config/routing_rules.yaml.bak config/routing_rules.yaml
   echo "--- done ---"
   exit 0
 }
@@ -47,98 +69,142 @@ wait_port() {
   return 1
 }
 
-echo "==> Phase 3 demo stack — $MODE mode"
-echo "    logs: $LOG_DIR/"
+free_ports() {
+  local port
+  for port in "$CORE_SIP" "$CORE_UAC" "$AS_TRANS_SIP" "$AS_TRANS_API" \
+              "$AS_FRAUD_SIP" "$AS_FRAUD_API" "$IMS_RETURN" "$IMS_FORWARD" \
+              "$IMS_TERM" "$IMS_PCSCF" "$GEN_HTTP" "$CONSOLE_HTTP"; do
+    if command -v lsof >/dev/null 2>&1; then
+      lsof -ti ":$port" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+    fi
+  done
+  sleep 0.5
+}
 
-# --- Rewrite routing_rules.yaml next_hop ports to point at core mock ---
-# The shipped config has s-sbc-primary..intl-gateway ports 15061-15066, but
-# the core mock only listens on CORE_SIP. conftest.py does this rewrite for
-# pytest; demo script must do it too.
-RULES_FILE="config/routing_rules.yaml"
-if [[ -f "$RULES_FILE" ]]; then
-  echo "[rewrite] routing_rules.yaml next_hop ports -> $CORE_SIP"
+rewrite_rules_to_port() {
+  local target_port="$1"
+  local rules_file="config/routing_rules.yaml"
+  if [[ ! -f "$rules_file" ]]; then
+    echo "[warn] $rules_file not found — AS may route nowhere"
+    return
+  fi
+  echo "[rewrite] routing_rules.yaml next_hop ports -> $target_port"
   uv run python -c "
 import yaml, pathlib
-p = pathlib.Path('$RULES_FILE')
+p = pathlib.Path('$rules_file')
 d = yaml.safe_load(p.read_text())
 for nh in d.get('next_hops', []):
-    nh['port'] = $CORE_SIP
+    nh['port'] = $target_port
 tmp = p.with_suffix('.yaml.bak')
 if not tmp.exists(): p.rename(tmp)
 p.write_text(yaml.safe_dump(d, sort_keys=False))
 "
-else
-  echo "[warn] $RULES_FILE not found — AS may route nowhere"
-fi
+}
 
-# --- core mock (UAS side on UDP) ---
-# NOTE: mock has TWO SIP endpoints — UAS (listen-port, defaults to 15061)
-# and UAC (trunk-port, defaults to listen-port minus one). We MUST pin
-# --trunk-port explicitly because --listen-port 5061 would make trunk-port
-# default to 5060, which collides with the translation AS's SIP listen port.
-echo "[0/4] core mock :$CORE_SIP (UAS) trunk :$CORE_UAC (UAC)"
-uv run python -m s_sbc_mock.main \
-  --listen-port "$CORE_SIP" \
-  --trunk-port "$CORE_UAC" \
-  > "$LOG_DIR/core.log" 2>&1 &
-PIDS+=($!)
+echo "==> Phase 3 demo stack — $MODE mode (P14 topology)"
+echo "    logs: $LOG_DIR/"
+echo "    bind: $BIND_ADDR  api-host: $API_HOST"
+[[ -n "$WSL_IP" ]] && echo "    wsl:  open http://$WSL_IP:$CONSOLE_HTTP from Windows browser"
+
+echo "[preflight] freeing demo ports..."
+free_ports
+
+GEN_TOPOLOGY="simple"
+GEN_INGRESS="$AS_TRANS_SIP"
+GEN_ROUTE_RETURN_ARGS=()
+FRAUD_API_ARG=()
 
 if [[ "$MODE" == "full" ]]; then
-  # --- anti-fraud AS (AS-1) ---
-  echo "[1/4] anti-fraud AS :$AS_FRAUD_SIP API :$AS_FRAUD_API"
+  GEN_TOPOLOGY="chained"
+  GEN_INGRESS="$AS_FRAUD_SIP"
+  GEN_ROUTE_RETURN_ARGS=(--route-return-address 127.0.0.1 --route-return-port "$IMS_RETURN")
+  FRAUD_API_ARG=(--fraud-api-url "http://$API_HOST:$AS_FRAUD_API")
+  rewrite_rules_to_port "$IMS_RETURN"
+
+  echo "[ims] external chained runtime return:$IMS_RETURN term:$IMS_TERM"
+  uv run python -m ims_mock.external_runtime \
+    --bind-address 127.0.0.1 \
+    --as1-port "$AS_FRAUD_SIP" \
+    --as2-port "$AS_TRANS_SIP" \
+    --return-port "$IMS_RETURN" \
+    --forward-port "$IMS_FORWARD" \
+    --terminating-port "$IMS_TERM" \
+    --pcscf-port "$IMS_PCSCF" \
+    > "$LOG_DIR/ims.log" 2>&1 &
+  PIDS+=($!)
+
+  echo "[1/5] anti-fraud AS :$AS_FRAUD_SIP API :$AS_FRAUD_API"
   FRAUD_SIP_LISTEN_PORT="$AS_FRAUD_SIP" \
   FRAUD_INTERNAL_API_PORT="$AS_FRAUD_API" \
+  FRAUD_INTERNAL_API_ADDRESS="$BIND_ADDR" \
   FRAUD_SBC_PEER_ADDRESS=127.0.0.1 \
-  FRAUD_SBC_PEER_PORT="$AS_TRANS_SIP" \
+  FRAUD_SBC_PEER_PORT="$IMS_RETURN" \
   FRAUD_ALLOWED_PEERS=127.0.0.1 \
     uv run python -m anti_fraud_as.main \
     > "$LOG_DIR/fraud.log" 2>&1 &
   PIDS+=($!)
+else
+  rewrite_rules_to_port "$CORE_SIP"
+
+  echo "[0/4] core mock :$CORE_SIP (UAS) trunk :$CORE_UAC (UAC)"
+  uv run python -m s_sbc_mock.main \
+    --listen-port "$CORE_SIP" \
+    --trunk-port "$CORE_UAC" \
+    > "$LOG_DIR/core.log" 2>&1 &
+  PIDS+=($!)
 fi
 
-# --- translation AS (AS-2 in full mode, the only AS in simple) ---
-echo "[2/4] translation AS :$AS_TRANS_SIP API :$AS_TRANS_API"
+echo "[2/5] translation AS :$AS_TRANS_SIP API :$AS_TRANS_API"
+if [[ "$MODE" == "full" ]]; then
+  SBC_PEER_PORT="$IMS_RETURN"
+else
+  SBC_PEER_PORT="$CORE_SIP"
+fi
 SBC_PEER_ADDRESS=127.0.0.1 \
-SBC_PEER_PORT="$CORE_SIP" \
+SBC_PEER_PORT="$SBC_PEER_PORT" \
 SIP_LISTEN_PORT="$AS_TRANS_SIP" \
+INTERNAL_API_ADDRESS="$BIND_ADDR" \
 INTERNAL_API_PORT="$AS_TRANS_API" \
   uv run python -m as_app.main \
   > "$LOG_DIR/trans.log" 2>&1 &
 PIDS+=($!)
 
-# --- load generator ---
-GEN_AS_PORT="$AS_FRAUD_SIP"
-[[ "$MODE" == "simple" ]] && GEN_AS_PORT="$AS_TRANS_SIP"
-echo "[3/4] load generator -> AS :$GEN_AS_PORT HTTP :$GEN_HTTP"
+echo "[3/5] load generator topology=$GEN_TOPOLOGY ingress :$GEN_INGRESS HTTP :$GEN_HTTP"
 uv run python tools/call_load_generator.py \
-  --as-port "$GEN_AS_PORT" \
+  --topology "$GEN_TOPOLOGY" \
+  --ingress-port "$GEN_INGRESS" \
+  --as-port "$GEN_INGRESS" \
+  "${GEN_ROUTE_RETURN_ARGS[@]}" \
+  --http-address "$BIND_ADDR" \
   --http-port "$GEN_HTTP" \
   > "$LOG_DIR/gen.log" 2>&1 &
 PIDS+=($!)
 
-# --- enhanced console ---
-echo "[4/4] console :$CONSOLE_HTTP -> AS API :$AS_TRANS_API / load API :$GEN_HTTP"
+echo "[4/5] console :$CONSOLE_HTTP"
 uv run python -m console.main \
+  --address "$BIND_ADDR" \
   --port "$CONSOLE_HTTP" \
-  --as-api-url "http://127.0.0.1:$AS_TRANS_API" \
-  --load-api-url "http://127.0.0.1:$GEN_HTTP" \
+  --as-api-url "http://$API_HOST:$AS_TRANS_API" \
+  --load-api-url "http://$API_HOST:$GEN_HTTP" \
+  "${FRAUD_API_ARG[@]}" \
   > "$LOG_DIR/console.log" 2>&1 &
 PIDS+=($!)
 
 echo ""
 echo "    waiting for ports to bind..."
-for port in "$CORE_SIP" "$AS_TRANS_API" "$GEN_HTTP" "$CONSOLE_HTTP"; do
+for port in "$AS_TRANS_API" "$GEN_HTTP" "$CONSOLE_HTTP" "$GEN_INGRESS"; do
   if wait_port "$port"; then
     echo "      :$port  OK"
   else
     echo "      :$port  TIMEOUT — check $LOG_DIR/"
   fi
 done
+[[ "$MODE" == "full" ]] && wait_port "$IMS_RETURN" && echo "      :$IMS_RETURN (ims return) OK"
 
 echo ""
-echo "==> stack ready"
-echo "    console:  http://127.0.0.1:$CONSOLE_HTTP"
-echo "    healthz:  curl -s http://127.0.0.1:$AS_TRANS_API/healthz"
+echo "==> stack ready ($GEN_TOPOLOGY)"
+echo "    console (WSL):     http://127.0.0.1:$CONSOLE_HTTP"
+[[ -n "$WSL_IP" ]] && echo "    console (Windows): http://$WSL_IP:$CONSOLE_HTTP"
 echo "    generator: curl -X POST http://127.0.0.1:$GEN_HTTP/load/start"
 echo "    console -> Load Generator -> Start"
 echo ""

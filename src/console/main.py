@@ -9,12 +9,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Console process — Enhanced operations dashboard (Phase 3 P13, ADR-0011).
+"""Console process — Enhanced operations dashboard (Phase 3 P13/P14, ADR-0011).
 
 The console is a separate process serving a dark operations dashboard with
-live call-count charts, state distribution, capacity gauge, dynamic SVG
+live call-count charts, state distribution, capacity gauge, mode-aware SVG
 topology and load-generator controls. Uses vendored Chart.js UMD bundle
-served from ``/static/`` (ADR-0011, REQ-F-050).
+served from ``/static/`` (ADR-0011, REQ-F-050). P14 adds dual-AS event
+streams and topology modes aligned with P9b (ADR-0015).
 """
 
 from __future__ import annotations
@@ -32,13 +33,14 @@ from fastapi.staticfiles import StaticFiles
 __all__ = ["CONSOLE_PAGE", "create_app", "main"]
 
 DEFAULT_AS_API_URL = "http://127.0.0.1:8080"
+DEFAULT_FRAUD_API_URL = ""
 DEFAULT_LOAD_API_URL = "http://127.0.0.1:8765"
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
 # P13 Enhanced Console: multi-panel CSS Grid layout with 3 Chart.js panels
 # plus SVG topology + load generator controls.
-# Tokens __AS_API_URL__ and __LOAD_API_URL__ are replaced at request time.
+# Tokens __AS_API_URL__, __FRAUD_API_URL__ and __LOAD_API_URL__ are replaced at request time.
 CONSOLE_PAGE = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>3rd-party AS Console — Enhanced</title>
@@ -109,9 +111,14 @@ body{background:var(--bg);color:var(--tx);font-family:"SF Mono","Cascadia Code",
 table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;border-bottom:1px solid var(--bd)}th{color:var(--mut);font-size:11px;text-transform:uppercase}td{font-size:12px;word-break:break-all}
 .tag{display:inline-block;background:var(--p2);border:1px solid var(--bd);border-radius:3px;padding:0 4px;font-size:11px;margin:1px}.tag.en{color:var(--in);border-color:var(--in)}.tag.di{color:var(--err);border-color:var(--err)}.tag.rt{color:var(--acc)}.tag.rj{color:var(--warn)}
 .empty{color:var(--mut);padding:10px;text-align:center;font-size:12px}
+.topo-mode{display:inline-block;font-size:10px;padding:2px 6px;border-radius:3px;border:1px solid var(--acc);color:var(--acc);margin-left:6px}
+.topo-hint{font-size:10px;color:var(--mut);margin-top:4px;line-height:1.3}
+.topo-wrap svg.dim{opacity:.22}
+#topoChained{display:none}
 </style></head><body>
 <div class="sb" id="sb">
 <div class="si"><span class="dot" id="aDot"></span><span class="sv" id="aSt">connecting</span></div>
+<div class="si" id="fraudHealth" style="display:none"><span class="dot" id="fDot"></span><span class="sv" id="fSt">fraud</span></div>
 <div class="si"><span class="sl">instance</span><span class="sv" id="aInst">-</span></div>
 <div class="si"><span class="sl">ver</span><span class="sv" id="aVer">-</span></div>
 <div class="si"><span class="sl">uptime</span><span class="sv" id="aUp">-</span></div>
@@ -119,7 +126,8 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 <div class="si"><span class="sl">active</span><span class="sv" id="aAct">0</span></div>
 <div class="si"><span class="sl">target</span><span class="sv" id="aTgt">-</span></div>
 <div class="sp"></div>
-<div class="si ws" id="wsEv">event ws: offline</div>
+<div class="si ws" id="wsEv">trans ws: offline</div>
+<div class="si ws" id="wsEvF" style="display:none">fraud ws: offline</div>
 <div class="si ws" id="wsLd">load ws: offline</div>
 </div>
 
@@ -187,20 +195,40 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
 </div>
 <div class="sm-card g">
-<div class="chart-h"><span class="t">Network Topology</span><span class="v" id="topoVal">idle</span></div>
+<div class="chart-h"><span class="t">Network Topology</span><span class="topo-mode" id="topoMode">Simple</span><span class="v" id="topoVal">idle</span></div>
+<div class="topo-hint" id="topoHint" style="display:none">Cross-AS trace: correlate on ICID (P-Charging-Vector), not Call-ID.</div>
 <div class="topo-wrap">
-<svg viewBox="0 0 320 120" xmlns="http://www.w3.org/2000/svg" id="topoSvg">
-<rect x="4" y="48" width="52" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
-<text x="30" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">S-CSCF</text>
+<svg viewBox="0 0 320 120" xmlns="http://www.w3.org/2000/svg" id="topoSimple">
+<rect x="4" y="48" width="52" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nSsbc"/>
+<text x="30" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">S-SBC</text>
 <line id="l1" x1="56" y1="60" x2="96" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="96" y="48" width="72" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
+<rect x="96" y="48" width="72" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nFraud"/>
 <text x="132" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">Anti-fraud</text>
 <line id="l2" x1="168" y1="60" x2="208" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="208" y="48" width="64" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
+<rect x="208" y="48" width="64" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nTrans"/>
 <text x="240" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">Translation</text>
 <line id="l3" x1="272" y1="60" x2="312" y2="60" stroke="var(--mut)" stroke-width="2"/>
 <rect x="312" y="48" width="4" height="24" rx="1" fill="var(--p2)" stroke="var(--bd)"/>
 <text x="318" y="100" text-anchor="middle" fill="var(--mut)" font-size="10">core</text>
+</svg>
+<svg viewBox="0 0 400 120" xmlns="http://www.w3.org/2000/svg" id="topoChained">
+<rect x="2" y="48" width="40" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
+<text x="22" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">Gen</text>
+<line id="cl1" x1="42" y1="60" x2="58" y2="60" stroke="var(--mut)" stroke-width="2"/>
+<rect x="58" y="48" width="44" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
+<text x="80" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">S-SBC</text>
+<line id="cl2" x1="102" y1="60" x2="118" y2="60" stroke="var(--mut)" stroke-width="2"/>
+<rect x="118" y="48" width="56" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
+<text x="146" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">Anti-fraud</text>
+<line id="cl3" x1="174" y1="60" x2="190" y2="60" stroke="var(--mut)" stroke-width="2"/>
+<rect x="190" y="48" width="36" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
+<text x="208" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">iFC</text>
+<line id="cl4" x1="226" y1="60" x2="242" y2="60" stroke="var(--mut)" stroke-width="2"/>
+<rect x="242" y="48" width="56" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
+<text x="270" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">Translation</text>
+<line id="cl5" x1="298" y1="60" x2="314" y2="60" stroke="var(--mut)" stroke-width="2"/>
+<rect x="314" y="48" width="36" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
+<text x="332" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">UAS</text>
 </svg>
 </div>
 </div>
@@ -219,13 +247,15 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 
 <script>
 "use strict";
-var AS_URL = "__AS_API_URL__", LD_URL = "__LOAD_API_URL__";
+var AS_URL = "__AS_API_URL__", FRAUD_URL = "__FRAUD_API_URL__", LD_URL = "__LOAD_API_URL__";
 var W_EV = AS_URL.replace(/^http/, "ws") + "/ws/p12/events";
+var W_EV_F = FRAUD_URL ? FRAUD_URL.replace(/^http/, "ws") + "/ws/p12/events" : "";
 var W_LD = LD_URL.replace(/^http/, "ws") + "/ws/pool";
 
 // --- state ---------------------------------------------------------------
 var cv = "dashboard", hd = null, md = null, rd = null, sd = null;
-var wsEv = null, wsLd = null, wrEv = null, wrLd = null;
+var wsEv = null, wsEvF = null, wsLd = null, wrEv = null, wrEvF = null, wrLd = null;
+var topologyMode = "simple";
 var activeCalls = 0, targetConc = 10, callRate = 3.0, poolRunning = false;
 var callStates = {}; // call_id -> state
 var counters = { active: 0, completed: 0, rejected_608: 0, timeout: 0 };
@@ -332,11 +362,7 @@ function updateGauge(){
   E("aTgt").textContent = targetConc;
 }
 
-function updateTopology(){
-  // 3 links: l1 (SBC→anti-fraud), l2 (anti-fraud→translation), l3 (translation→core)
-  // Intensity from live active, but also reflect that traffic HAS flown via
-  // cumulative counters — so a burst of 50 D1 calls that never overlap still
-  // thickens the links and shows the console is alive.
+function topoIntensity(){
   var instantActive = Math.max(activeCalls || 0, counters.active || 0);
   var totalTraffic = (counters.completed || 0) + (counters.rejected_608 || 0) + (counters.timeout || 0);
   var intensity = Math.min(8, 1 + instantActive * 0.6 + Math.min(3, totalTraffic * 0.03));
@@ -344,13 +370,57 @@ function updateTopology(){
   if(counters.rejected_608 > 0) color = "var(--err)";
   else if(counters.timeout > 0) color = "var(--warn)";
   else if(instantActive > 0 || totalTraffic > 0) color = "var(--in)";
-  ["l1","l2","l3"].forEach(function(id){
+  return {intensity: intensity, color: color, instantActive: instantActive, totalTraffic: totalTraffic};
+}
+
+function paintLinks(ids, intensity, color){
+  ids.forEach(function(id){
     var l = E(id);
-    l.setAttribute("stroke-width", intensity);
-    l.setAttribute("stroke", color);
+    if(l){ l.setAttribute("stroke-width", intensity); l.setAttribute("stroke", color); }
   });
-  if(instantActive > 0) E("topoVal").textContent = instantActive + " active";
-  else if(totalTraffic > 0) E("topoVal").textContent = totalTraffic + " calls total";
+}
+
+function setTopologyMode(mode){
+  topologyMode = mode || "simple";
+  var labels = {simple: "Simple", fraud: "Fraud only", chained: "Chained (iFC)"};
+  E("topoMode").textContent = labels[topologyMode] || topologyMode;
+  E("topoHint").style.display = topologyMode === "chained" ? "" : "none";
+  var simple = E("topoSimple"), chained = E("topoChained");
+  if(topologyMode === "chained"){
+    if(simple) simple.style.display = "none";
+    if(chained) chained.style.display = "";
+  } else {
+    if(simple) simple.style.display = "";
+    if(chained) chained.style.display = "none";
+    if(E("nFraud")) E("nFraud").style.opacity = topologyMode === "simple" ? "0.25" : "1";
+    if(E("nTrans")) E("nTrans").style.opacity = topologyMode === "fraud" ? "0.25" : "1";
+  }
+  applyToggleGating();
+  updateTopology();
+}
+
+function applyToggleGating(){
+  var tOnly = topologyMode === "fraud", fOnly = topologyMode === "simple";
+  CALL_TYPES.forEach(function(t){
+    var el = E("tog_"+t), lab = el ? el.parentElement : null;
+    if(!el) return;
+    var isT = t.charAt(0) === "T", disabled = (tOnly && isT) || (fOnly && !isT);
+    el.disabled = disabled;
+    if(disabled){ el.checked = false; if(lab) lab.classList.remove("on"); }
+    else if(el.checked && lab) lab.classList.add("on");
+    if(lab) lab.style.opacity = disabled ? "0.35" : "1";
+  });
+}
+
+function updateTopology(){
+  var m = topoIntensity();
+  if(topologyMode === "chained"){
+    paintLinks(["cl1","cl2","cl3","cl4","cl5"], m.intensity, m.color);
+  } else {
+    paintLinks(["l1","l2","l3"], m.intensity, m.color);
+  }
+  if(m.instantActive > 0) E("topoVal").textContent = m.instantActive + " active";
+  else if(m.totalTraffic > 0) E("topoVal").textContent = m.totalTraffic + " calls total";
   else E("topoVal").textContent = "idle";
 }
 
@@ -358,6 +428,7 @@ function updateTopology(){
 function onPoolStatus(d){
   // WS messages wrap snapshot in {attributes:{...}}; REST returns flat.
   var s = d.attributes || d;
+  if(s.topology) setTopologyMode(s.topology);
   targetConc = s.target_concurrency || targetConc;
   callRate = s.call_rate || callRate;
   activeCalls = s.active_calls || 0;
@@ -416,11 +487,19 @@ function renderTrace(){
 // --- web sockets ---------------------------------------------------------
 function connEv(){
   try{wsEv = new WebSocket(W_EV)}catch(e){ewsEv();return}
-  wsEv.onopen = function(){E("wsEv").textContent="event ws: live";E("wsEv").className="si ws live"};
+  wsEv.onopen = function(){E("wsEv").textContent="trans ws: live";E("wsEv").className="si ws live"};
   wsEv.onmessage = function(m){try{var d=JSON.parse(m.data);onCallEvent(d)}catch(e){}};
   wsEv.onclose = function(){ewsEv()}; wsEv.onerror = function(){wsEv.close()};
 }
-function ewsEv(){E("wsEv").textContent="event ws: offline";E("wsEv").className="si ws down";if(!wrEv){wrEv=setTimeout(function(){wrEv=null;connEv()},3000)}}
+function ewsEv(){E("wsEv").textContent="trans ws: offline";E("wsEv").className="si ws down";if(!wrEv){wrEv=setTimeout(function(){wrEv=null;connEv()},3000)}}
+function connEvF(){
+  if(!W_EV_F) return;
+  try{wsEvF = new WebSocket(W_EV_F)}catch(e){ewsEvF();return}
+  wsEvF.onopen = function(){E("wsEvF").textContent="fraud ws: live";E("wsEvF").className="si ws live"};
+  wsEvF.onmessage = function(m){try{var d=JSON.parse(m.data);onCallEvent(d)}catch(e){}};
+  wsEvF.onclose = function(){ewsEvF()}; wsEvF.onerror = function(){wsEvF.close()};
+}
+function ewsEvF(){if(!W_EV_F)return;E("wsEvF").textContent="fraud ws: offline";E("wsEvF").className="si ws down";if(!wrEvF){wrEvF=setTimeout(function(){wrEvF=null;connEvF()},3000)}}
 
 function connLd(){
   try{wsLd = new WebSocket(W_LD)}catch(e){ewsLd();return}
@@ -450,6 +529,8 @@ async function fh(){try{var r=await fetch(AS_URL+"/healthz");if(!r.ok)return;hd=
   E("aVer").textContent=hd.version||"-";E("aInst").textContent=hd.instance||"-";
   E("aUp").textContent=Math.round(hd.uptime_seconds||0)+"s";
   document.title=(hd.instance?hd.instance+" - ":"")+"3rd-party AS Console"}catch(e){E("aSt").textContent="unreachable";E("aDot").className="dot er"}}
+async function ff(){if(!FRAUD_URL)return;try{var r=await fetch(FRAUD_URL+"/healthz");if(!r.ok)return;var fd=await r.json();
+  E("fSt").textContent=fd.status;E("fDot").className="dot "+(fd.status==="ok"?"ok":"er")}catch(e){E("fSt").textContent="unreachable";E("fDot").className="dot er"}}
 
 async function fm(){try{var r=await fetch(AS_URL+"/api/v1/metrics");if(!r.ok)return;md=await r.json();
   E("aCal").textContent=md.calls_total||0}catch(e){}}
@@ -459,7 +540,7 @@ async function ldStart(){try{await fetch(LD_URL+"/load/start",{method:"POST"})}c
 async function ldStop(){try{await fetch(LD_URL+"/load/stop",{method:"POST"})}catch(e){}}
 async function ldConfig(){
   var types = []; CALL_TYPES.forEach(function(t){if(E("tog_"+t).checked)types.push(t)});
-  var body = { target_concurrency: parseInt(E("tgtSlider").value), call_rate: parseFloat(E("rateSlider").value), enabled_call_types: types };
+  var body = { target_concurrency: parseInt(E("tgtSlider").value), call_rate: parseFloat(E("rateSlider").value), enabled_call_types: types, topology: topologyMode };
   try{await fetch(LD_URL+"/load/config",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})}catch(e){}
 }
 
@@ -513,9 +594,11 @@ E("rateSlider").oninput = function(){E("rateVal").textContent=parseFloat(this.va
 E("rateSlider").onchange = ldConfig;
 buildToggles();
 initCharts();
-fh(); fm(); fr(); fs();
-connEv(); connLd();
-setInterval(fh, 3000); setInterval(fm, 3000);
+if(FRAUD_URL){ E("fraudHealth").style.display=""; E("wsEvF").style.display=""; }
+setTopologyMode("simple");
+fh(); ff(); fm(); fr(); fs();
+connEv(); if(W_EV_F) connEvF(); connLd();
+setInterval(fh, 3000); setInterval(ff, 3000); setInterval(fm, 3000);
 // Push a line chart point every 500ms for the rolling view
 setInterval(function(){ pushLinePoint(activeCalls, 0, 0); }, 500);
 </script></body></html>
@@ -525,19 +608,21 @@ setInterval(function(){ pushLinePoint(activeCalls, 0, 0); }, 500);
 def create_app(
     *,
     as_api_url: str = DEFAULT_AS_API_URL,
+    fraud_api_url: str = DEFAULT_FRAUD_API_URL,
     load_api_url: str = DEFAULT_LOAD_API_URL,
 ) -> FastAPI:
-    """Create the enhanced console application (P13).
+    """Create the enhanced console application (P13/P14).
 
     Args:
-        as_api_url: URL of the AS internal API the browser JS fetches from.
+        as_api_url: URL of the translation AS internal API the browser fetches.
+        fraud_api_url: Optional anti-fraud AS API for chained mode dual streams.
         load_api_url: URL of the load generator REST API the browser JS calls.
 
     Returns:
         A FastAPI application with health endpoint, console page, and
         ``/static/`` mount for vendored Chart.js.
     """
-    app = FastAPI(title="3rd-party AS console (enhanced)", version="1.0.0")
+    app = FastAPI(title="3rd-party AS console (enhanced)", version="1.1.0")
 
     # Vendored Chart.js UMD bundle + license (ADR-0011, REQ-F-050)
     if _STATIC_DIR.is_dir():
@@ -550,6 +635,7 @@ def create_app(
             "status": "ok",
             "component": "console",
             "as_api_url": as_api_url,
+            "fraud_api_url": fraud_api_url or None,
             "load_api_url": load_api_url,
             "started_at": time.time(),
         }
@@ -559,6 +645,7 @@ def create_app(
         """Serve the enhanced console page with API URLs injected."""
         return (
             CONSOLE_PAGE.replace("__AS_API_URL__", as_api_url)
+            .replace("__FRAUD_API_URL__", fraud_api_url)
             .replace("__LOAD_API_URL__", load_api_url)
         )
 
@@ -584,6 +671,11 @@ def main(argv: list[str] | None = None) -> int:
         "http://127.0.0.1:8080)",
     )
     parser.add_argument(
+        "--fraud-api-url",
+        default=os.environ.get("FRAUD_INTERNAL_API_URL", DEFAULT_FRAUD_API_URL),
+        help="URL of the anti-fraud AS internal API (optional; chained demo)",
+    )
+    parser.add_argument(
         "--load-api-url",
         default=os.environ.get("LOAD_API_URL", DEFAULT_LOAD_API_URL),
         help="URL of the load generator REST API (default: env LOAD_API_URL or "
@@ -593,7 +685,11 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
-    app = create_app(as_api_url=args.as_api_url, load_api_url=args.load_api_url)
+    app = create_app(
+        as_api_url=args.as_api_url,
+        fraud_api_url=args.fraud_api_url,
+        load_api_url=args.load_api_url,
+    )
     uvicorn.run(app, host=args.address, port=args.port, log_level="info")
     return 0
 

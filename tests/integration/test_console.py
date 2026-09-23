@@ -250,7 +250,7 @@ def test_console_page_contains_operations_ui_elements() -> None:
     assert "gaugeChart" in page, "capacity gauge canvas missing (REQ-F-047)"
     # SVG topology with 4 nodes (REQ-F-048): S-CSCF, Anti-fraud, Translation, core.
     assert "<svg" in page, "SVG topology not found"
-    assert "S-CSCF" in page, "S-CSCF node not found in topology"
+    assert "S-SBC" in page or "S-CSCF" in page, "S-SBC node not found in topology"
     assert "Anti-fraud" in page, "Anti-fraud node not found in topology"
     assert "Translation" in page, "Translation node not found in topology"
     # Load generator controls (REQ-F-049).
@@ -260,6 +260,9 @@ def test_console_page_contains_operations_ui_elements() -> None:
     assert "btnStop" in page, "Stop button not found"
     # Live call trace panel.
     assert "Live Call Trace" in page, "live call trace panel not found"
+    # P14: mode-aware topology (REQ-F-053).
+    assert "topoMode" in page, "topology mode badge missing (REQ-F-053)"
+    assert "topoChained" in page, "chained topology SVG missing (REQ-F-053)"
 
 
 def test_console_page_injects_as_api_url() -> None:

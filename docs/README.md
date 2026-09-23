@@ -27,7 +27,7 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `README.md` | ready | Positioning, quickstart, repository tour, non-goals |
 | `CONTRIBUTING.md` | ready | How to work in this repository |
 | `docs/specs/index.md` | ready | Normative references |
-| `docs/specs/message-samples/` | ready | Real SIP messages on the trunk, generated with `make capture` and gitignored (only the folder `README.md` is tracked); the `office-to-mobile` call is 14 files, the translated outbound INVITE included. The anti-fraud AS's own calls are narrated live by `make demo-fraud`, and the chained `SBC -> anti-fraud -> number translation -> core` topology by `make demo-chained` |
+| `docs/specs/message-samples/` | ready | Real SIP messages on the trunk, generated with `make capture` and gitignored (only the folder `README.md` is tracked); the `office-to-mobile` call is 14 files, the translated outbound INVITE included. The anti-fraud AS's own calls are narrated live by `make demo-fraud`, and the iFC-chained topology (`ims_mock`, ADR-0014) by `make demo-chained` |
 | `tools/README.md` | ready | Probe, rule viewer, capture helper and the call capture tool |
 
 ## Deployment and operations
@@ -48,4 +48,7 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `docs/demo-steps.md` | ready | The one-page copy-pasteable command checklist for the demo |
 | `docs/roadmap.md` | ready | Milestone status, handover notes, open items |
 | `docs/phase2-plan.md` | ready | Phase 2: strategic decisions, the P8a–P11 work sequence, repository and branch strategy. The single detailed source for what follows P1–P7 — `docs/roadmap.md` links here instead of duplicating it. **The full text lives on the `phase2` branch**; the copy on `main` is a stub that points there |
+| `docs/chained-topology-plan.md` | ready | **P9b** — iFC-orchestrated chained demo (`src/ims_mock/`, ADR-0014). Implemented 2026-09-23 |
+| `docs/phase3-plan.md` | ready | **P12/P13** — Call Load + Enhanced Console (v1.0.0). Single source for Phase 3 scope |
+| `docs/phase3-p9b-alignment-plan.md` | ready | **P14** — align Phase 3 live-load demo + console with P9b chained topology. Implemented 2026-09-23 |
 | `CHANGELOG.md` / `VERSION` | ready | Version history and the current version |

@@ -24,12 +24,12 @@ make lint && make test
 
 ## 1. What this is (60 seconds)
 
-> "This is a third-party Application Server: a B2BUA that sits outside the operator's IMS
-> network and is reached over a SIP trunk from the operator's Service-SBC. The S-SBC, the
-> S-CSCF and the core are mocked locally, and every peer address is configuration — the
-> same code can be pointed at a real S-SBC by changing configuration only. It is a B2BUA
-> and only a B2BUA: it terminates the incoming INVITE, translates the number, and
-> originates a new INVITE back. Signalling only — no media."
+> "This is a third-party Application Server — the **only B2BUA** in the path. The operator
+> S-CSCF and S-SBC are not B2BUAs; locally the mock S-SBC forwards the trunk INVITE on
+> port 15060 and receives the translated INVITE back on 15061. The AS listens as a **UAS**
+> on 5060, translates the number, and originates a new INVITE as a **UAC** with a fresh
+> Call-ID towards the top Route the S-SBC inserted — back through the S-SBC into the IMS,
+> not directly to the core. Signalling only — no media."
 
 Point at the diagram in `README.md` and at `docs/architecture/hld.md` section 1.
 
@@ -131,38 +131,23 @@ is as repeatable as `make demo`.
 ## 5b. The chain — two AS instances in series (2 minutes)
 
 ```bash
-make demo-chained      # SBC -> AS-1 anti-fraud -> AS-2 number translation -> core, wired by config
+make demo-chained      # iFC chain via ims_mock (ADR-0014)
 ```
 
-> "The two AS instances chain by configuration alone: AS-1's next hop is pointed at AS-2's
-> listen address and AS-2's rule set selects the core. No iFC emulation in the mock, no code
-> shared between the two AS instances, and no new port or environment variable — it is the same
-> `next_hops` catalogue that changed. Two B2BUAs in series mean a call carries **three**
-> `Call-ID`s, one per leg, so each instance writes its own trace and there is no cross-AS
-> correlation by `Call-ID`; the end-to-end `P-Charging-Vector` ICID survives the whole chain
-> but nothing is keyed on it. The demo is a guard: it asserts all of that — including the
-> reject's silence as an absence — and exits non-zero if it does not hold."
+> "The two AS instances never talk directly. An iFC orchestrator in `src/ims_mock/` applies
+> iFC #1 to AS-1, then iFC #2 when AS-1's outbound INVITE is 透传 back through the S-SBC return
+> side. AS-2's allow path reaches a terminating UAS through P-CSCF — not through the S-SBC.
+> Four AS-leg `Call-ID` values on the allow path; ICID is preserved. The demo is a guard."
 
-What the reviewer should see, in the transcript `make demo-chained` prints:
+What the reviewer should see:
 
-1. The topology line `emulated S-CSCF --UDP--> AS-1 anti-fraud --UDP--> AS-2 number
-   translation --UDP--> emulated core` and the wiring line `AS-1 next hop = AS-2 listen
-   address; AS-2 next hop = the rule set`.
-2. Call 1 (`+86216180001` → `+8613800138000`): `AS-1 verdict: allow`, `AS-1 signal: none`,
-   AS-2's matched rule `R-MOB-CM-40`, `core called number: 013800138000`, `final status: 200`,
-   `released: True` — the allowed call really traversed both B2BUAs and was translated at AS-2.
-3. The three per-leg `Call-ID`s and their derivation: `S-CSCF Call-ID` `dc6cbf77…e621`,
-   `AS-2 trunk Call-ID` `dc6cbf77…e621-b2b_1`, `core Call-ID` `dc6cbf77…e621-b2b_1-b2b_1`,
-   with `distinct Call-IDs: 3` and `Call-ID per leg: True (each transition is
-   outbound_call_id of the previous one)`.
-4. The preserved ICID: `S-CSCF ICID`, `AS-2 ICID` and `core ICID` all read
-   `poc-chained-allow`, with `ICID preserved: True`.
-5. Call 2 (`+8613400000001`): `AS-1 verdict: reject`, `final status: 608 (608 Rejected, no
-   second leg)`, `AS-2 calls seen: 0` and `core INVITEs seen: 0` — the reject short-circuits
-   before AS-2 and the core, and the absence is the assertion.
-6. The five `OK` verdict lines: `allowed call completed through two B2BUAs`, `608 reject
-   short-circuited before AS-2`, `Call-ID regenerated on every leg`, `three distinct Call-IDs
-   across the chain` and `ICID preserved across every leg`.
+1. Topology line mentioning `S-CSCF/iFC` and `P-CSCF -> terminating UAS`.
+2. Call 1: `AS-1 verdict: allow`, `AS-2 rule: R-MOB-CM-40`, `terminating called: 013800138000`,
+   `final status: 200`.
+3. Four AS-leg `Call-ID`s with `distinct Call-IDs: 4` and `Call-ID per leg: True`.
+4. `ICID preserved: True`.
+5. Call 2: `608`, `AS-2 calls seen: 0`, `terminating INVITEs: 0`.
+6. Five `OK` verdict lines including `four distinct AS-leg Call-IDs`.
 
 Ports and Call-IDs are ephemeral and vary per run. `make demo-chained` writes nothing, so it is
 as repeatable as `make demo`.

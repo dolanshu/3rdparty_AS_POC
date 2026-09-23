@@ -688,14 +688,15 @@ def place_screening_call(pair: Any, name: str, calling_number: str) -> str:
 def test_stopping_the_process_leaves_no_timer_armed(fraud_pair_factory, free_udp_port: int) -> None:
     """Nothing the anti-fraud process armed outlives its stop path (P8a lesson 5).
 
-    The next hop is an unbound port, so the relayed INVITE keeps retransmitting and the
-    controller's no-answer timer stays armed — exactly the state that used to leave a timer
-    firing into a shut-down transaction manager. ``stop()`` has to cancel both.
+    The outbound INVITE targets an unreachable top ``Route`` entry, so the relayed INVITE
+    keeps retransmitting and the controller's no-answer timer stays armed — exactly the state
+    that used to leave a timer firing into a shut-down transaction manager. ``stop()`` has to
+    cancel both.
     """
     from sippy.Core.EventDispatcher import ED2
     from sippy.Time.Timeout import Timeout
 
-    pair = fraud_pair_factory(peer_port=free_udp_port)
+    pair = fraud_pair_factory(route_return_port=free_udp_port)
     stack = pair.as_stack
     scenario = CallScenario(
         name="pending-relay",

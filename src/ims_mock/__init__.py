@@ -12,13 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Mock of the operator's Service-SBC as seen from the trunk.
+"""IMS-side mock for iFC-orchestrated chained AS topology (P9b, ADR-0014)."""
 
-The mock stands in for the operator S-SBC boundary: forward side sends INVITE into the AS
-trunk (with Route); return side answers the AS outbound INVITE toward IMS. It is built on
-the same SIP stack as the AS
-(ADR-0001 and ADR-0005) so both sides show identical protocol behaviour.
+from ims_mock.chain_config import AsHop, ChainConfig
+from ims_mock.chained_stack import ChainedImsStack, ExternalRuntimePorts
+from ims_mock.external_runtime import ExternalChainedRuntime
 
-Nothing in ``src/as_app`` may import from here; the AS has to run against a real S-SBC
-without a code change (``AGENT.md`` section 5).
-"""
+__all__ = [
+    "AsHop",
+    "ChainConfig",
+    "ChainedImsStack",
+    "ExternalChainedRuntime",
+    "ExternalRuntimePorts",
+]

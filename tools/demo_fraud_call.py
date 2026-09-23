@@ -233,8 +233,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print("anti-fraud AS POC - screening demo")
     print(
-        "topology   : emulated S-CSCF --UDP--> anti-fraud AS (608 Rejected) --UDP--> "
-        "emulated core network"
+        "topology   : S-SBC forward --UDP--> anti-fraud AS (608 or relay) "
+        "--UDP--> S-SBC return (top Route)"
     )
     print(f"ports      : anti-fraud-as 127.0.0.1:{as_port}, trunk {trunk_port}, core {core_port}")
     try:

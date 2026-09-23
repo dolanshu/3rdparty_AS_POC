@@ -555,6 +555,10 @@ retransmission population, so P9.5 inherits the P8a timer population unchanged.
 
 ### P9 — Chained demo
 
+> **P9b rework (2026-09-23).** The trunk-to-trunk wiring described below is **superseded** by
+> the iFC-orchestrated mock in `docs/chained-topology-plan.md` and ADR-0014. Implementation
+> follows that document.
+
 - **Goal.** `SBC → AS-1 (anti-fraud) → AS-2 (number translation) → core`, running and
   demonstrated.
 - **Implementation note.** No iFC emulation is needed in the mock: pointing AS-1's next hop

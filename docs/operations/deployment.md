@@ -11,21 +11,22 @@ Local processes (`make dev` / `make mock` / `make console`) all use the loopback
    +--------------------------------------------------- docker host --------------------+
    |                                                                                    |
    |  s-sbc-mock                       as                            console            |
-   |  UAC 127.0.0.1:15060/udp  =====>  127.0.0.1:5060/udp  <==== HTTP 127.0.0.1:8081    |
-   |  UAS 127.0.0.1:15061/udp  <====  (originates back to the UAS port)                 |
+   |  forward 127.0.0.1:15060/udp ===> 127.0.0.1:5060/udp  <==== HTTP 127.0.0.1:8081   |
+   |  return 127.0.0.1:15061/udp <====  (outbound INVITE via top Route)                 |
    |                                                                                    |
    +------------------------------------------------------------------------------------+
 ```
 
 The **anti-fraud AS** (P8, ADR-0007) is a second, independently runnable AS on the same host
 with its own ports, its own data file and its own console feed. It receives the trunk on
-`127.0.0.1:5062/udp`; a call it **allows** is relayed to the next hop (`FRAUD_SBC_PEER_*`),
+`127.0.0.1:5062/udp`; a call it **allows** is relayed back through the S-SBC (top `Route`
+on the trunk INVITE; `FRAUD_SBC_PEER_*` is the fallback when no `Route` is present),
 and a call it **rejects** is answered by the AS itself and never leaves it:
 
 ```text
    s-sbc-mock-fraud                        anti-fraud-as
-   UAC 127.0.0.1:15063/udp  ===========>   127.0.0.1:5062/udp  --allow-->  next hop
-   UAS 127.0.0.1:15062/udp  <===========   (a reject is answered here: 608 Rejected)
+   forward 127.0.0.1:15063/udp ==========> 127.0.0.1:5062/udp  --allow-->  next hop
+   return 127.0.0.1:15062/udp <===========  (a reject is answered here: 608 Rejected)
 ```
 
 P8 demonstrates the two AS instances **independently**; the chained
@@ -40,12 +41,12 @@ never reach another container over `127.0.0.1`:
    +--------------------------- compose network as-poc-trunk (172.28.0.0/24) ------------+
    |                                                                                    |
    |  s-sbc-mock                       as                            console            |
-   |  UAC 172.28.0.3:15060/udp =====>  172.28.0.2:5060/udp  <==== HTTP as:8080           |
-   |  UAS 172.28.0.3:15061/udp <====   (originates back to 172.28.0.3:15061)            |
+   |  forward 172.28.0.3:15060/udp ==> 172.28.0.2:5060/udp  <==== HTTP as:8080          |
+   |  return 172.28.0.3:15061/udp <==  (outbound INVITE via top Route)                   |
    |                                                                                    |
    |  s-sbc-mock-fraud                 anti-fraud-as                                    |
-   |  UAC 172.28.0.5:15063/udp =====>  172.28.0.4:5062/udp  <==== HTTP anti-fraud-as:8082|
-   |  UAS 172.28.0.5:15062/udp <====   (relays an allowed call back; a reject stops here)|
+   |  forward 172.28.0.5:15063/udp ==> 172.28.0.4:5062/udp  <==== HTTP anti-fraud-as:8082|
+   |  return 172.28.0.5:15062/udp <==  (relays an allowed call back; a reject stops here)|
    |                                                                                    |
    +------------------------------------------------------------------------------------+
 ```
@@ -62,10 +63,10 @@ stack reads a dedicated rule set whose catalogue points at the mock:
 | `as` | `as` | TCP `8080` (internal API) | `8080` | `INTERNAL_API_ADDRESS` / `INTERNAL_API_PORT` |
 | `anti-fraud-as` | `anti-fraud-as` | UDP `5062` (trunk) | `5062` | `FRAUD_SIP_LISTEN_ADDRESS` / `FRAUD_SIP_LISTEN_PORT` |
 | `anti-fraud-as` | `anti-fraud-as` | TCP `8082` (internal API) | `8082` | `FRAUD_INTERNAL_API_ADDRESS` / `FRAUD_INTERNAL_API_PORT` |
-| `s-sbc-mock` | `s-sbc-mock` | UDP `15060` (UAC, emulated S-CSCF trigger) | `15060` | `--listen-port - 1` in `MockConfig` |
-| `s-sbc-mock` | `s-sbc-mock` | UDP `15061` (UAS, emulated core network) | `15061` | `--listen-port` |
-| `s-sbc-mock-fraud` | `s-sbc-mock-fraud` | UDP `15063` (UAC, emulated S-CSCF trigger) | `15063` | `--trunk-port` |
-| `s-sbc-mock-fraud` | `s-sbc-mock-fraud` | UDP `15062` (UAS, emulated core network) | `15062` | `--listen-port` |
+| `s-sbc-mock` | `s-sbc-mock` | UDP `15060` (forward: inbound INVITE + Route into AS trunk) | `15060` | `--listen-port - 1` in `MockConfig` |
+| `s-sbc-mock` | `s-sbc-mock` | UDP `15061` (return: answers AS outbound INVITE toward IMS) | `15061` | `--listen-port` |
+| `s-sbc-mock-fraud` | `s-sbc-mock-fraud` | UDP `15063` (forward: inbound INVITE + Route) | `15063` | `--trunk-port` |
+| `s-sbc-mock-fraud` | `s-sbc-mock-fraud` | UDP `15062` (return: answers outbound INVITE) | `15062` | `--listen-port` |
 | `console` | `console` | TCP `8081` | `8081` | `--port` |
 
 The two AS instances must not share a listen port: `anti-fraud-as` uses `5062`/`8082`

@@ -24,7 +24,7 @@ reference is named; see `docs/specs/index.md`.
 | Request-URI | The SIP URI a request is addressed to; the AS rewrites it with the translated number. | RFC 3261 section 8.1.2 |
 | S-CSCF (Serving CSCF) | The IMS registrar and session controller that triggers ASs via iFC. Mocked here. | 3GPP TS 23.228 |
 | SDP (Session Description Protocol) | The body that describes media. Passed through verbatim in this POC. | RFC 4566 |
-| S-SBC (Service-SBC) | The operator's session border controller on the service side: it impersonates an internal AS towards the S-CSCF and a core node towards us. Mocked here. | — |
+| S-SBC (Service-SBC) | The operator's session border controller on the service side: forwards iFC-triggered INVITEs to the AS trunk (with Route) and receives the AS outbound INVITE back toward IMS. Mocked here on forward (`15060`) and return (`15061`) ports. | — |
 | Short code | A short service number such as `110`, `10086` or an office extension `6xxx`. | — |
 | SIP trunk | A SIP relationship between two administrative domains; here between the operator's S-SBC and us. | — |
 | Transaction | A request with its responses and retransmissions; the layer sippy manages for us. | RFC 3261 section 17 |

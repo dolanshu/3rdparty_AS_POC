@@ -3485,3 +3485,75 @@ exception) — there is **no CDN, no npm, no build step**, keeping the "one Pyth
 assets" deployment model of the original M3 console. No AS source code is modified; the enhanced
 console is purely a consumer of the P12 event stream and REST API. Nothing is pushed and nothing
 is tagged (`AGENT.md` §13/§15).
+
+---
+
+## P9b — chained topology rework (executed 2026-09-23)
+
+Reworked P9 from trunk-to-trunk (`FRAUD_SBC_PEER_* → AS-2`) to iFC-orchestrated chain per
+ADR-0014 and `docs/chained-topology-plan.md`. New module `src/ims_mock/`; AS binaries unchanged.
+
+### Gate summary
+
+| ACC ID | Status |
+| --- | --- |
+| ACC-P9b-001 | **accepted** |
+| ACC-P9b-002 | **accepted** |
+| ACC-P9b-003 | **accepted** |
+| ACC-P9b-004 | **accepted** |
+| ACC-P9b-005 | **accepted** |
+| ACC-P9b-006 | **accepted** (standalone demos verified before merge) |
+| ACC-P9b-007 | **accepted** |
+| ACC-P9b-008 | **accepted** |
+
+### ACC-P9b-001 / ACC-P9b-002 — integration
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest tests/integration/test_chained_topology.py -q
+3 passed in 2.10s
+```
+
+### ACC-P9b-003 — probe
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run python tools/chained_as_probe.py; echo $?
+distinct Call-IDs : 4
+Call-ID per leg   : True
+ICID preserved    : True
+608 reject short-circuited before AS-2     : OK
+0
+```
+
+### ACC-P9b-004 / ACC-P9b-007 — e2e
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest tests/e2e/test_chained_call_flows.py -q
+2 passed in 1.8s
+```
+
+### ACC-P9b-005 — demo
+
+```text
+$ NO_PROXY=127.0.0.1,localhost make demo-chained; echo $?
+four distinct AS-leg Call-IDs                : OK
+608 reject short-circuited before AS-2       : OK
+0
+```
+
+### ACC-P9b-008 — concurrent
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest tests/integration/test_concurrent_load.py -q -k chained
+2 passed in 5.1s
+```
+
+### ACC-P9b-006 — standalone regression
+
+`make demo` and `make demo-fraud` exit `0` (verified on the integration branch before merge).
+
+### Unit — orchestrator FSM
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest tests/unit/test_ims_orchestrator.py -q
+3 passed
+```

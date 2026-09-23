@@ -41,6 +41,7 @@ def pool_and_app():
         target_concurrency=3,
         call_rate=10.0,
         enabled_call_types=frozenset(CallModel.ALL_TYPES),
+        topology="chained",
     )
     uac = _FakeUac()
     pool = CallPool(config, mock_uac=uac)
@@ -82,6 +83,7 @@ def test_get_status_keys(client):
     expected_keys = {
         "active_calls", "target_concurrency", "call_rate",
         "binding_constraint", "enabled_call_types", "rate_budget_remaining",
+        "topology", "ingress_port",
     }
     assert expected_keys <= set(body.keys())
     assert body["target_concurrency"] == 3
@@ -113,6 +115,17 @@ def test_put_config_rejects_out_of_range(client):
         "enabled_call_types": ["T1"],
     })
     assert resp.status_code == 422
+
+
+def test_put_config_rejects_f_types_in_simple_topology(client):
+    resp = client.put("/load/config", json={
+        "target_concurrency": 10,
+        "call_rate": 3.0,
+        "enabled_call_types": ["T1", "F1"],
+        "topology": "simple",
+    })
+    assert resp.status_code == 400
+    assert "not valid for topology" in resp.json()["detail"]
 
 
 def test_put_config_rejects_unknown_call_type(client):

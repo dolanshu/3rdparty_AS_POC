@@ -21,12 +21,16 @@ Options considered:
 
 ## Decision
 
-`src/s_sbc_mock/` is a mock S-SBC built on **sippy**, with two sides:
+`src/s_sbc_mock/` is a mock **operator S-SBC** built on **sippy**, with two UDP endpoints.
+Neither the S-CSCF nor the S-SBC is a B2BUA; the third-party AS is the only B2BUA (UAS on
+the trunk, UAC on the outbound leg with a new `Call-ID`).
 
-- **UAC side** — emulates the S-CSCF iFC trigger: originates the INVITE towards the AS
-  and then behaves like a normal UAC (CANCEL, ACK, BYE). Driven by `CallScenario` data.
-- **UAS side** — emulates the core network behind the S-SBC: answers the INVITE the AS
-  originates with `100 Trying`, `180 Ringing`, `200 OK`, then BYE.
+- **Forward side (`15060`)** — emulates the S-SBC forwarding the operator INVITE towards
+  the AS trunk (`5060`), carrying a `Route` set that points back at the S-SBC return
+  interface. Driven by `CallScenario` data (CANCEL, ACK, BYE on the trunk leg).
+- **Return side (`15061`)** — emulates the S-SBC interface that receives the translated
+  INVITE the AS originates (top `Route`, RFC 3261). Answers with `100 Trying`,
+  `180 Ringing`, `200 OK`, then BYE for the POC.
 
 Peer addresses and ports are configuration, so the mock can be swapped for a real S-SBC
 without a code change. `src/as_app` never imports from the mock; only tests may.

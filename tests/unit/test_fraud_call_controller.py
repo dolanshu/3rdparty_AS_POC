@@ -26,8 +26,10 @@ of silent behaviour change the extraction could otherwise leave untested (REQ-F-
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+from as_platform.call_controller import BaseCallController
 from as_platform.hop import NextHop
 
 from anti_fraud_as.call_controller import FraudCallController
@@ -86,3 +88,26 @@ def test_the_no_answer_label_is_a_dash_without_a_serving_hop(screening_file: Pat
     """With no hop configured the label is ``-``, not the shell's empty default."""
     controller = build_controller(screening_file, None)
     assert controller._no_answer_hop_label() == "-"
+
+
+class _RouteRequest:
+    """Minimal trunk INVITE carrying one Route entry."""
+
+    def getHFBodys(self, name: str) -> list[str]:
+        if name == "route":
+            return ["<sip:10.0.0.9:9999;lr>"]
+        return []
+
+
+def test_originate_towards_uses_the_top_route_target(screening_file: Path) -> None:
+    """The allow path sends the outbound INVITE to the S-SBC return from Route, not the knob."""
+    controller = build_controller(screening_file, NEXT_HOP)
+    controller._trunk_request = _RouteRequest()
+    hop = NextHop(name=NEXT_HOP_NAME, address="127.0.0.1", port=15061)
+    with patch.object(BaseCallController, "_originate_towards") as parent:
+        controller._originate_towards(hop)
+        parent.assert_called_once()
+        called_hop = parent.call_args.args[0]
+
+    assert called_hop.address == "10.0.0.9"
+    assert called_hop.port == 9999

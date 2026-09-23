@@ -42,6 +42,14 @@ def test_call_model_rejects_unknown_types():
         CallModel.pick({"T1", "INVALID"})
 
 
+def test_call_model_types_for_topology():
+    assert "T1" in CallModel.types_for_topology("simple")
+    assert "F1" not in CallModel.types_for_topology("simple")
+    assert "F1" in CallModel.types_for_topology("fraud")
+    assert "T1" not in CallModel.types_for_topology("fraud")
+    assert CallModel.types_for_topology("chained") == CallModel.ALL_TYPES
+
+
 def test_call_model_all_types_constant():
     """ALL_TYPES is exactly the 10 expected keys."""
     expected = {f"T{i}" for i in range(1, 7)} | {f"F{i}" for i in range(1, 5)}
@@ -85,6 +93,7 @@ def test_pool_config_accepts_valid_values():
         target_concurrency=10,
         call_rate=3.0,
         enabled_call_types=frozenset({"T1", "T2", "F1", "F2"}),
+        topology="chained",
     )
     assert cfg.target_concurrency == 10
     assert cfg.call_rate == 3.0

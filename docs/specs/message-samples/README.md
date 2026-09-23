@@ -20,8 +20,8 @@ themselves are reproduced with `make capture` (or `uv run python tools/capture_c
 - `direction` — `in` (S-SBC -> AS) or `out` (AS -> S-SBC)
 - `method-or-status` — `invite`, `180`, `200`, `ack`, `bye`, `cancel`
 
-Example: `03-out-invite-core.txt` is the INVITE the AS originates on the core leg after
-number translation.
+Example: `03-out-invite-core.txt` is the INVITE the AS originates on the outbound leg
+(toward the S-SBC return side) after number translation.
 
 ## Rules
 
@@ -74,17 +74,17 @@ change in M2 is the called number in the Request-URI, `To` and `Contact`:
 
 | File | Message |
 | --- | --- |
-| `01-in-invite-trunk.txt` | INVITE from the emulated S-CSCF, Request-URI `sip:+8613800138000@...` |
-| `02-out-100-trunk.txt` | 100 Trying towards the emulated S-CSCF |
+| `01-in-invite-trunk.txt` | INVITE from the S-SBC forward side, Request-URI `sip:+8613800138000@...` |
+| `02-out-100-trunk.txt` | 100 Trying toward the S-SBC forward side |
 | `03-out-invite-core.txt` | INVITE the AS originates, Request-URI `sip:013800138000@...` (translated) |
-| `04-in-100-core.txt` | 100 Trying from the emulated core network |
-| `05-in-180-core.txt` | 180 Ringing from the emulated core network |
-| `06-out-180-trunk.txt` | 180 Ringing towards the emulated S-CSCF |
-| `07-in-200-core.txt` | 200 OK from the emulated core network, SDP echoed back |
-| `08-out-ack-core.txt` | ACK towards the emulated core network |
-| `09-out-200-trunk.txt` | 200 OK towards the emulated S-CSCF |
-| `10-in-ack-trunk.txt` | ACK from the emulated S-CSCF |
-| `11-in-bye-core.txt` | BYE from the emulated core network (talk time over) |
+| `04-in-100-core.txt` | 100 Trying from the S-SBC return side |
+| `05-in-180-core.txt` | 180 Ringing from the S-SBC return side |
+| `06-out-180-trunk.txt` | 180 Ringing toward the S-SBC forward side |
+| `07-in-200-core.txt` | 200 OK from the S-SBC return side, SDP echoed back |
+| `08-out-ack-core.txt` | ACK toward the S-SBC return side |
+| `09-out-200-trunk.txt` | 200 OK toward the S-SBC forward side |
+| `10-in-ack-trunk.txt` | ACK from the S-SBC forward side |
+| `11-in-bye-core.txt` | BYE from the S-SBC return side (talk time over) |
 | `12-out-200-core.txt` | 200 OK for that BYE |
-| `13-out-bye-trunk.txt` | BYE the AS relays towards the emulated S-CSCF |
+| `13-out-bye-trunk.txt` | BYE the AS relays toward the S-SBC forward side |
 | `14-in-200-trunk.txt` | 200 OK for that BYE |

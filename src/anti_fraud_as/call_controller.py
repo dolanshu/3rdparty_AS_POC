@@ -52,6 +52,7 @@ from as_platform.call_controller import (
 )
 from as_platform.hop import NextHop
 from as_platform.observability.logging import LogDirection, get_logger, log_event
+from as_platform.route_header import parse_top_route_target
 from as_platform.observability.metrics import CallDisposition, MetricsRegistry
 from as_platform.observability.tracing import TraceRecorder
 from as_platform.sip_adapter import outbound_call_id
@@ -80,9 +81,9 @@ SIP_608_TOKEN = "sip.608"
 #: Separator between feature tags in a ``Feature-Caps`` value (RFC 6809).
 _FEATURE_CAPS_SEPARATOR = re.compile(r"[;,]\s*")
 
-#: Name of the single next hop this AS relays towards. The hop is configured by its
-#: address and port only (``FRAUD_SBC_PEER_*``), so the name is internal: the peer-status
-#: key and the no-answer warning render the address and port, never this label.
+#: Name of the single next hop this AS relays towards. ``FRAUD_SBC_PEER_*`` supplies the
+#: fallback wire destination when the trunk carries no ``Route``; when ``Route`` is present
+#: the top entry wins (RFC 3261), same as the number-translation AS.
 _NEXT_HOP_NAME = "fraud_sbc_peer"
 
 
@@ -386,9 +387,22 @@ class FraudCallController(BaseCallController):
             action=PolicyAction.RELAY,
             outbound_event=outbound_event,
             next_hops=[hop],
-            relay_log_message="invite relayed towards the next hop",
+            relay_log_message="invite relayed towards the S-SBC (top Route)",
             relay_log_fields={"verdict": ScreeningVerdict.ALLOW.value},
         )
+
+    def _originate_towards(self, hop: NextHop) -> None:
+        """Send the outbound INVITE to the top Route target when the trunk carried one.
+
+        ``FRAUD_SBC_PEER_*`` names the fallback hop when no ``Route`` is present; loose
+        routing uses the trunk ``Route`` set the S-SBC inserted to choose the wire
+        destination on the allow path.
+        """
+        route_target = parse_top_route_target(self._trunk_request)
+        if route_target is not None:
+            address, port = route_target
+            hop = hop.model_copy(update={"address": address, "port": port})
+        super()._originate_towards(hop)
 
     def _reject(
         self,

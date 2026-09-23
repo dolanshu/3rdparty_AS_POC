@@ -304,6 +304,11 @@ ceremony with read-only review gates.
 topologies. P13's dynamic SVG topology visualization shows the call flow path
 (S-SBC → anti-fraud → translation → core) when both AS processes are running.
 
+> **P14 follow-on (2026-09-23).** v1.0.0 shipped before P9b landed. The interactive demo
+> (`scripts/phase3-demo.sh full`) and console SVG still do not run the iFC-orchestrated chain
+> on the wire. Alignment work — generator topology modes, multi-process `ims_mock` runtime,
+> mode-aware console UI — is **`docs/phase3-p9b-alignment-plan.md`**.
+
 **Exit barrier.** Phase 3 ends at `v1.0.0` when:
 1. P12 acceptance items all verified with evidence (`docs/acceptance/report.md`)
 2. P13 acceptance items all verified with evidence

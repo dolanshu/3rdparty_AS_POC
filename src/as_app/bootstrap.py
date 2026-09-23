@@ -86,7 +86,7 @@ class AsSettings(BaseSettings):
     sip_listen_address: str = "127.0.0.1"
     sip_listen_port: int = Field(default=5060, ge=1, le=65535)
     sbc_peer_address: str = "127.0.0.1"
-    sbc_peer_port: int = Field(default=5061, ge=1, le=65535)
+    sbc_peer_port: int = Field(default=15061, ge=1, le=65535)
     # NoDecode keeps the raw environment string so that ALLOWED_PEERS can be a plain
     # comma separated list instead of JSON (operators edit .env by hand).
     allowed_peers: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["127.0.0.1"])

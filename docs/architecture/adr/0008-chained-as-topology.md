@@ -1,6 +1,6 @@
 # ADR-0008: Chained AS topology — configuration-only chaining and a distinct Call-ID per B2BUA leg
 
-- **Status:** Accepted
+- **Status:** Accepted (decision 1 **superseded** by ADR-0014 — kept as historical evidence)
 - **Date:** 2026-09-19
 - **Deciders:** project maintainer
 - **Related:** `docs/phase2-plan.md` section 2 (D6) and section 3 (P9), section 5.1, section 6

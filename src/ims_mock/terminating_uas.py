@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Mock of the operator's Service-SBC as seen from the trunk.
+"""Called-party UAS reached through the P-CSCF relay (not the S-SBC return port)."""
 
-The mock stands in for the operator S-SBC boundary: forward side sends INVITE into the AS
-trunk (with Route); return side answers the AS outbound INVITE toward IMS. It is built on
-the same SIP stack as the AS
-(ADR-0001 and ADR-0005) so both sides show identical protocol behaviour.
+from __future__ import annotations
 
-Nothing in ``src/as_app`` may import from here; the AS has to run against a real S-SBC
-without a code change (``AGENT.md`` section 5).
-"""
+from s_sbc_mock.uas import CoreUas, ReceivedInvite
+
+__all__ = ["TerminatingUas", "ReceivedInvite"]
+
+#: Reuse the core-side answer pattern; only the wiring differs (ADR-0014).
+TerminatingUas = CoreUas

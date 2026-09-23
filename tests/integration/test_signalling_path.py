@@ -57,26 +57,20 @@ pytestmark = pytest.mark.integration
 #: ``127.0.0.0/8`` is loopback on Linux, so it needs no extra interface (RFC 6890).
 FOREIGN_TRUNK_ADDRESS = "127.0.0.2"
 
-#: A rule set whose first next hop is an unbound port and whose second hop is left for
-#: the test to point at the mock. The call only completes because the controller fails
-#: over, and the abandoned attempt towards the first hop is what leaves a transaction
-#: retransmitting — the exact condition that used to survive a shutdown (P8a).
-_FAILOVER_DOCUMENT = """
+#: Minimal rule set for the shutdown timer test. The wire destination comes from the
+#: trunk ``Route`` header, not from these catalogue ports (``call_controller``).
+_SHUTDOWN_TEST_RULES = """
 version: 1
 name: shutdown-test
 next_hops:
-  - name: s-sbc-primary
-    address: 127.0.0.1
-    port: {unbound_port}
-    priority: 1
-  - name: s-sbc-failover
+  - name: s-sbc-return
     address: 127.0.0.1
     port: {core_port}
-    priority: 2
+    priority: 1
 rules:
   - rule_id: R-MOB-40
     priority: 100
-    description: China Mobile, failover to the second hop
+    description: China Mobile
     match:
       called_prefixes: ["+86138"]
       number_format: e164
@@ -86,7 +80,7 @@ rules:
         to_format: national
         strip_prefix: "+86"
         prepend: "0"
-      next_hops: [s-sbc-primary, s-sbc-failover]
+      next_hops: [s-sbc-return]
 """
 
 _HEADER_LINE = re.compile(r"^([A-Za-z0-9.\-]+):[ \t]*(.*)$")
@@ -384,9 +378,10 @@ def _armed_loop_timers(manager: Any) -> list[Any]:
 def test_stopping_the_stack_leaves_no_transaction_timer_armed(tmp_path: Path) -> None:
     """Nothing owned by a stopped transaction manager stays scheduled (P8a).
 
-    The call first fails over from an unreachable next hop, so the AS has an INVITE
-    client transaction that nobody answered — one that keeps retransmitting for as long
-    as RFC 3261 timer B allows. Stopping the stack has to cancel that retransmission:
+    The outbound INVITE is sent to the top ``Route`` target. When that UDP port is
+    unreachable, the AS has an INVITE client transaction that nobody answered — one that
+    keeps retransmitting for as long as RFC 3261 timer B allows. Stopping the stack has to
+    cancel that retransmission:
     ``SipTransactionManager.shutdown()`` releases the UDP sockets and drops its own
     registries but cancels only its cache-purge timer, so any surviving timer fires into
     a manager whose ``global_config`` is ``None``. In the test suite, where one process
@@ -408,9 +403,9 @@ def test_stopping_the_stack_leaves_no_transaction_timer_armed(tmp_path: Path) ->
     core_port = _free_udp_port()
     trunk_port = _free_udp_port()
     api_port = _free_udp_port()
-    rules_path = tmp_path / "failover_rules.yaml"
+    rules_path = tmp_path / "shutdown_rules.yaml"
     rules_path.write_text(
-        _FAILOVER_DOCUMENT.format(unbound_port=unbound_port, core_port=core_port),
+        _SHUTDOWN_TEST_RULES.format(core_port=core_port),
         encoding="utf-8",
     )
     settings = AsSettings(
@@ -439,39 +434,37 @@ def test_stopping_the_stack_leaves_no_transaction_timer_armed(tmp_path: Path) ->
     )
     mock.start()
     try:
-        call_id = mock.uac.place_call(
+        # Route points at an unbound port so the outbound client transaction retransmits.
+        mock.uac.route_return_port = unbound_port
+        mock.uac.place_call(
             CallScenario(
-                name="failover",
+                name="unreachable-route",
                 calling_number="+86216180001",
                 called_number="+8613800138000",
                 ring_seconds=0.1,
                 talk_seconds=0.1,
             )
         )
-        outcome = mock.uac.outcome_for(call_id)
-        assert outcome is not None
-        state: dict[str, bool] = {"done": False}
-        deadline = time.monotonic() + 15.0
 
-        def poll() -> None:
-            if (mock.uac.outcome_for(call_id) or outcome).released or time.monotonic() >= deadline:
-                state["done"] = True
-                ED2.breakLoop()
-
-        call_timer = Timeout(poll, 0.02, -1)
-        try:
-            ED2.loop(timeout=15.0)
-        finally:
-            call_timer.cancel()
-        assert state["done"], f"failover call {call_id} did not finish within the timeout"
-
-        # Premise of the regression: the attempt towards the unreachable hop is still
-        # retransmitting when the stack stops. Without it the test below would pass even
-        # if the cancellation did nothing at all.
         manager = stack.transaction_manager
         assert manager is not None
+        pending: list[Any] = []
+        deadline = time.monotonic() + 5.0
+
+        def poll() -> None:
+            pending[:] = _armed_transaction_timers(manager)
+            if pending or time.monotonic() >= deadline:
+                ED2.breakLoop()
+
+        call_timer = Timeout(poll, 0.05, -1)
+        try:
+            ED2.loop(timeout=6.0)
+        finally:
+            call_timer.cancel()
         pending = _armed_transaction_timers(manager)
-        assert pending, "the abandoned first-hop INVITE left no pending retransmission"
+        assert pending, (
+            "the outbound INVITE towards an unreachable Route target left no pending retransmission"
+        )
 
         stack.stop()
         armed_after_stop = _armed_loop_timers(manager)

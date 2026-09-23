@@ -13,7 +13,7 @@ operator's Service-SBC.
 This is an **IMS/SIP** POC, **not** a 5G capability exposure (CAPIF/NEF) POC.
 
 **Stance: we implement the external AS.** We do not implement the S-SBC, the S-CSCF or
-any core network element. The S-SBC and the core network behind it are replaced by a
+any core network element. The operator boundary (S-SBC forward and return) is replaced by a
 local mock, and every peer address is configuration, so the same code can be pointed at
 a real S-SBC by changing configuration only.
 
@@ -22,15 +22,17 @@ a real S-SBC by changing configuration only.
  +-------------------------------+                          +----------------------+
  |  S-CSCF ---ISC--- S-SBC       | ======================== | 3rd-party AS (B2BUA)|
  +-------------------------------+        UDP / 5060        +----------------------+
-      (mocked: UAC + UAS side)                                  (this repository)
+      (mocked: forward + return)                                (this repository)
 ```
 
 Boundaries that define our position:
 
-- The S-SBC **impersonates an internal AS** towards the S-CSCF (iFC-triggered over ISC)
-  and **impersonates a core network node** towards us. We only ever see the trunk side.
+- S-CSCF and S-SBC are **not B2BUAs**. The **3rd-party AS is the only B2BUA**: it
+  terminates the trunk leg (UAS) and originates a new INVITE back through the S-SBC (UAC)
+  with a new Call-ID. The outbound destination is the top `Route` target from the inbound
+  INVITE (RFC 3261).
 - We are a **B2BUA, and only a B2BUA**: we terminate the incoming INVITE, apply number
-  translation and routing, then originate a new INVITE back to the S-SBC. A
+  translation and routing, then originate a new INVITE back to the S-SBC return side. A
   redirect-server mode (`302 Moved Temporarily`) is explicitly **not** implemented.
 - SDP bodies and SIP headers are **passed through verbatim**; only the Request-URI and
   the number format (E.164 <-> local format) are rewritten.
@@ -349,8 +351,9 @@ describe the process, not the instance:
 - `FRAUD_SIP_LISTEN_ADDRESS`, `FRAUD_SIP_LISTEN_PORT` — where the anti-fraud AS receives the
   trunk (default port `5062`, deliberately not `5060`, so both AS instances can run on one
   host)
-- `FRAUD_SBC_PEER_ADDRESS`, `FRAUD_SBC_PEER_PORT` — next hop an **allowed** INVITE is
-  relayed to
+- `FRAUD_SBC_PEER_ADDRESS`, `FRAUD_SBC_PEER_PORT` — fallback next hop when the trunk
+  INVITE carries no `Route`; on the allow path the wire destination is the top `Route`
+  target (same as the number-translation AS)
 - `FRAUD_ALLOWED_PEERS` — source addresses accepted on the anti-fraud trunk
 - `FRAUD_SCREENING_FILE` — path to the declarative screening data file
 - `FRAUD_INTERNAL_API_ADDRESS`, `FRAUD_INTERNAL_API_PORT` — how the console reaches it
@@ -379,7 +382,7 @@ make fraud               # run the anti-fraud AS locally, on its own ports (P8)
 docker compose up        # as + anti-fraud-as + both mocks + console
 make demo                # one call through the number-translation AS, narrated
 make demo-fraud          # two calls through the anti-fraud AS: one allowed, one 608
-make demo-chained        # two B2BUAs in series (SBC -> anti-fraud -> number translation -> core)
+make demo-chained        # iFC chain via ims_mock (SBC -> anti-fraud -> S-CSCF -> SBC -> translation -> UAS)
 make lint                # ruff format --check + ruff check + mypy
 make test                # unit + integration + e2e
 ```

@@ -101,7 +101,7 @@ def settings_for(free_udp_port: int, screening_path: Path, **overrides: object) 
         "fraud_sip_listen_address": "127.0.0.1",
         "fraud_sip_listen_port": free_udp_port,
         "fraud_sbc_peer_address": "127.0.0.1",
-        "fraud_sbc_peer_port": 15061,
+        "fraud_sbc_peer_port": 15062,
         "fraud_allowed_peers": ["127.0.0.1"],
         "fraud_screening_file": screening_path,
         "fraud_internal_api_port": 8082,
@@ -133,6 +133,7 @@ def test_defaults_are_loopback_and_do_not_collide_with_the_first_as(
     assert settings.fraud_internal_api_address == "127.0.0.1"
     assert settings.fraud_internal_api_port == 8082
     assert settings.fraud_sbc_peer_address == "127.0.0.1"
+    assert settings.fraud_sbc_peer_port == 15062
     assert settings.fraud_allowed_peers == ["127.0.0.1"]
     assert str(settings.fraud_screening_file) == "config/caller_screening.yaml"
     # The first AS owns 5060/8080; sharing either would break a side-by-side run.

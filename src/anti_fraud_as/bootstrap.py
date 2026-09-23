@@ -56,8 +56,8 @@ class FraudAsSettings(BaseSettings):
         fraud_sip_listen_port: Local UDP port of the trunk; defaults to ``5062`` so both AS
             instances can run on one host (the port-collision trap of
             ``docs/phase2-plan.md`` section 6).
-        fraud_sbc_peer_address: Next hop the allowed INVITE is relayed to.
-        fraud_sbc_peer_port: UDP port of that next hop.
+        fraud_sbc_peer_address: Fallback next hop when the trunk INVITE carries no Route.
+        fraud_sbc_peer_port: UDP port of that fallback hop.
         fraud_allowed_peers: Source addresses accepted on the trunk, comma separated.
         fraud_screening_file: Path to the screening-data file.
         fraud_internal_api_address: Address the console reaches this AS on.
@@ -78,7 +78,7 @@ class FraudAsSettings(BaseSettings):
     fraud_sip_listen_address: str = "127.0.0.1"
     fraud_sip_listen_port: int = Field(default=5062, ge=1, le=65535)
     fraud_sbc_peer_address: str = "127.0.0.1"
-    fraud_sbc_peer_port: int = Field(default=15061, ge=1, le=65535)
+    fraud_sbc_peer_port: int = Field(default=15062, ge=1, le=65535)
     # NoDecode keeps the raw environment string so FRAUD_ALLOWED_PEERS can be a plain comma
     # separated list instead of JSON (operators edit .env by hand).
     fraud_allowed_peers: Annotated[list[str], NoDecode] = Field(

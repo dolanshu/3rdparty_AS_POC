@@ -14,16 +14,14 @@
 
 """Integration tests for the chained AS topology on localhost UDP.
 
-Two B2BUA instances in series, ``emulated S-CSCF -> AS-1 (anti-fraud) -> AS-2 (number
-translation) -> emulated core``, wired **by configuration only** (REQ-F-026): AS-1's
-configured next hop is AS-2's listen address and AS-2's next hop is a routing-catalogue
-entry. What is exercised here, on the wire and with ephemeral ports (never 5060 or 5062):
+Two B2BUA instances in series with an iFC orchestrator mock (ADR-0014):
+``S-SBC -> AS-1 -> S-CSCF -> S-SBC -> AS-2 -> P-CSCF -> terminating UAS``. What is
+exercised here, on the wire and with ephemeral ports (never 5060 or 5062):
 
-- an INVITE AS-1 **allows** is relayed into AS-2, translated there and answered by the core,
-  with the SDP body and the pass-through headers surviving both hops (REQ-F-025);
-- every leg derives its **own** dialog ``Call-ID``, so the call carries three distinct values
-  and each instance keys its trace on the value it saw on its own trunk leg (REQ-NF-016,
-  REQ-F-028);
+- an INVITE AS-1 **allows** triggers iFC #2 to AS-2, is translated there and answered by the
+  terminating UAS, with the SDP body and pass-through headers surviving both hops (REQ-F-025);
+- every AS leg derives its **own** dialog ``Call-ID`` — four distinct values on the allow path
+  (REQ-NF-016, REQ-F-028);
 - a call AS-1 **rejects** is answered ``608`` on the trunk and never reaches AS-2 or the
   core — the absence of the second leg is the assertion, not just the status code
   (REQ-F-027).
@@ -108,12 +106,10 @@ def recorded_invites(recorder: Any, direction: str) -> list[Any]:
 
 
 def test_an_allowed_call_traverses_both_b2bus_and_is_translated(chained_pair_factory) -> None:
-    """AS-1 relays, AS-2 translates, the core answers: one call through two B2BUAs.
+    """AS-1 allows, iFC #2 reaches AS-2, terminating UAS answers with translation.
 
-    The chain is configuration only (REQ-F-026): AS-1's peer knob points at AS-2's listen
-    address and AS-2's catalogue entry selects the core. What proves the relay crossed both
-    instances is the far end: the core saw exactly one INVITE, carrying AS-2's translated
-    number, the same SDP body and the same pass-through headers AS-1 received.
+    What proves both AS instances ran is the terminating side: exactly one INVITE with AS-2's
+    translated number, the same SDP body and pass-through headers AS-1 received.
     """
     pair = chained_pair_factory()
     scenario = CallScenario(
@@ -131,7 +127,9 @@ def test_an_allowed_call_traverses_both_b2bus_and_is_translated(chained_pair_fac
     assert outcome.released is True
 
     invites = list(pair.mock.uas.received_invites)
-    assert len(invites) == 1, f"the core received {len(invites)} INVITEs, expected exactly 1"
+    assert len(invites) == 1, (
+        f"the terminating UAS received {len(invites)} INVITEs, expected exactly 1"
+    )
     received = invites[0]
     assert received.called_number == TRANSLATED_NUMBER, (
         f"the core received {received.called_number}, expected {TRANSLATED_NUMBER}"
@@ -157,13 +155,10 @@ def test_an_allowed_call_traverses_both_b2bus_and_is_translated(chained_pair_fac
 def test_every_leg_regenerates_its_call_id_and_each_instance_keys_its_trace(
     chained_pair_factory,
 ) -> None:
-    """Three distinct Call-IDs, one per leg, read off the wire (REQ-NF-016, REQ-F-028).
+    """Four distinct AS-leg Call-IDs read off the wire (REQ-NF-016, REQ-F-028).
 
-    The identities are read from the recorded messages and the core's received INVITE, not
-    inferred from the controller: the trunk leg, AS-1's inter-AS leg and AS-2's core leg each
-    carry a value derived from the previous one, so the chain has **no** shared key. Each
-    instance still keys its trace on the Call-ID of its own trunk leg, which is what makes
-    the call observable per instance.
+    AS-1 trunk ``X``, AS-1 outbound ``X-b2b_1``, AS-2 trunk ``Z`` (iFC #2) and AS-2 outbound
+    ``Z-b2b_1``. Each instance keys its trace on its own trunk Call-ID only.
     """
     pair = chained_pair_factory()
     scenario = CallScenario(
@@ -175,33 +170,38 @@ def test_every_leg_regenerates_its_call_id_and_each_instance_keys_its_trace(
     finished = pair.run_until(lambda: (pair.outcome_for(trunk_call_id) or outcome).released)
     assert finished, f"the chained call {trunk_call_id} did not finish within the timeout"
 
-    inbound = recorded_invites(pair.as_messages, "in")
-    outbound = recorded_invites(pair.as_messages, "out")
-    assert len(inbound) == 1, f"expected one inbound INVITE at AS-1, got {len(inbound)}"
-    assert len(outbound) == 1, f"expected one outbound INVITE at AS-1, got {len(outbound)}"
-    assert pair.mock.uas.received_invites, "no INVITE reached the core side"
+    as1_in = recorded_invites(pair.as_messages, "in")
+    as1_out = recorded_invites(pair.as_messages, "out")
+    assert len(as1_in) == 1, f"expected one inbound INVITE at AS-1, got {len(as1_in)}"
+    assert len(as1_out) == 1, f"expected one outbound INVITE at AS-1, got {len(as1_out)}"
+    assert pair.mock.uas.received_invites, "no INVITE reached the terminating UAS"
 
-    trunk_wire = str(inbound[0].call_id)
-    inter_as_wire = str(outbound[0].call_id)
-    core_wire = str(pair.mock.uas.received_invites[0].call_id)
+    as2_call_ids = pair.second_as.tracer.known_call_ids()
+    assert len(as2_call_ids) == 1, f"AS-2 should have one call, got {as2_call_ids}"
+    as2_trunk_wire = as2_call_ids[0]
+
+    trunk_wire = str(as1_in[0].call_id)
+    as1_out_wire = str(as1_out[0].call_id)
+    as2_out = recorded_invites(pair.as2_messages, "out")
+    assert len(as2_out) == 1, f"expected one outbound INVITE at AS-2, got {len(as2_out)}"
+    as2_out_wire = str(as2_out[0].call_id)
 
     assert trunk_wire == trunk_call_id
-    assert inter_as_wire == outbound_call_id(trunk_wire)
-    assert core_wire == outbound_call_id(inter_as_wire)
-    assert len({trunk_wire, inter_as_wire, core_wire}) == 3, (
-        "the chain must carry three distinct Call-IDs, got "
-        f"{trunk_wire!r}, {inter_as_wire!r}, {core_wire!r}"
+    assert as1_out_wire == outbound_call_id(trunk_wire)
+    assert as2_out_wire == outbound_call_id(as2_trunk_wire)
+    assert as2_trunk_wire != trunk_wire, "iFC #2 must use a new trunk Call-ID"
+    assert len({trunk_wire, as1_out_wire, as2_trunk_wire, as2_out_wire}) == 4, (
+        "the chain must carry four distinct AS-leg Call-IDs, got "
+        f"{trunk_wire!r}, {as1_out_wire!r}, {as2_trunk_wire!r}, {as2_out_wire!r}"
     )
 
-    # Each instance keys its trace on the Call-ID of its own trunk leg...
     assert pair.as_stack.tracer.trace_for(trunk_wire).events, (
         "AS-1 did not key its trace on the S-CSCF's Call-ID"
     )
-    assert pair.second_as.tracer.trace_for(inter_as_wire).events, (
-        "AS-2 did not key its trace on the Call-ID AS-1 sent"
+    assert pair.second_as.tracer.trace_for(as2_trunk_wire).events, (
+        "AS-2 did not key its trace on its own trunk Call-ID"
     )
-    # ...and on no other value of this call, which is why the two feeds do not correlate.
-    assert not pair.as_stack.tracer.trace_for(inter_as_wire).events, (
+    assert not pair.as_stack.tracer.trace_for(as2_trunk_wire).events, (
         "AS-1 keyed a trace on AS-2's Call-ID"
     )
     assert not pair.second_as.tracer.trace_for(trunk_wire).events, (
@@ -251,5 +251,5 @@ def test_a_reject_at_as1_short_circuits_before_as2_and_the_core(chained_pair_fac
         "a rejected call must not create any call state at AS-2"
     )
     assert len(pair.mock.uas.received_invites) - core_before == 0, (
-        "a rejected call must not originate an INVITE towards the core"
+        "a rejected call must not originate an INVITE towards the terminating UAS"
     )

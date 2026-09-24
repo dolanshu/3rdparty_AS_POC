@@ -33,6 +33,21 @@ pip install -r requirements.txt   # exported with: uv export --no-dev --format r
 Python **3.10** is required. sippy is pinned at **2.4.2**; do not upgrade it without
 asking the maintainer.
 
+## Formal features (multi-phase)
+
+User-visible capabilities that cross console/API boundaries follow the staged workflow in
+`.cursor/skills/feature-delivery/SKILL.md`:
+
+1. Requirements (`REQ-*`, `ACC-*`) → **review**
+2. ADR → **review**
+3. Design (`docs/features/<slug>/design.md`) → **review**
+4. Testing plan → **review**
+5. Coding → tests → **review** (repeat per phase, e.g. A then B)
+
+Each **stage** and each **review** runs in a **fresh subagent**; the orchestrator merges
+artifacts only. Package layout: `docs/features/<feature-slug>/` (see
+`docs/features/call-trace-message-flow/` for the reference example).
+
 ## Before you open a change
 
 - `make lint` and `make test` are green.

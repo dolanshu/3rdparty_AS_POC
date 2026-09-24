@@ -67,6 +67,8 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-F-053 | The console Dashboard shows a **topology mode badge** and switches between simple and chained SVG layouts; inactive nodes are dimmed in single-AS modes (REQ-F-048 extension). | done | P14 | ACC-P14-003 |
 | REQ-F-054 | When `--fraud-api-url` is configured, the console opens **both** AS `/ws/p12/events` streams and shows dual instance health (REQ-F-042 extension). | done | P14 | ACC-P14-004 |
 | REQ-F-055 | Call-type toggles are **topology-aware**: T1–T6 disabled in `fraud` mode, F1–F4 disabled in `simple` mode; server rejects invalid sets with HTTP 400. | done | P14 | ACC-P14-005 |
+| REQ-F-056 | The console **Call Trace** view renders a **three-party SVG sequence diagram** (mock S-SBC forward → AS → mock S-SBC return) for the Call-ID selected in Live Call Trace, driven by `GET /api/v1/traces/{call_id}` (`TraceRecorder` events). Clicking a diagram arrow opens a modal with structured event fields (`method`, `direction`, `peer`, `summary`, `rule_id`, `attributes`). | accepted | P15-A | ACC-P15-001 |
+| REQ-F-057 | When SIP messages are captured on the AS, the console modal also shows the **verbatim wire-format SIP** for the selected diagram step via `GET /api/v1/traces/{call_id}/messages` (trunk + outbound Call-ID legs). | accepted | P15-B | ACC-P15-002 |
 
 ## 2. Non-functional requirements
 
@@ -102,8 +104,17 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-NF-028 | Each AS instance (translation and anti-fraud) runs as its **own process with its own sippy `ED2` event loop**. The concurrent call isolation `REQ-F-043` validates holds **per-AS**, not cross-AS: each AS's process handles multiple concurrent calls independently. Phase 2 P9 already proved chained isolation; P12 proves **within-AS** concurrent isolation for the first time. | accepted | P12 | ACC-P12-009 |
 | REQ-NF-029 | The load generator is an **external tool, not an AS component**. It talks to AS processes only via SIP (INVITE from a mock S-CSCF) and observes via event streams (`REQ-F-042`). It does not import `as_platform`, `src/as_app` or `src/anti_fraud_as`. Running the generator is an **additional** process that `make demo` does not launch — `make demo` stays self-contained for Phase 3's development cycle. | accepted | P12 | ACC-P12-010 |
 | REQ-NF-030 | P12's integration and e2e tests exercise **genuine concurrent load** — not sequential one-call-at-a-time that happens to run in the same test file. The test suite must prove the `REQ-F-043` isolation property by: (a) launching N (≥ 10) concurrent calls through the AS process, (b) verifying each call reaches its own independent end, and (c) asserting that one call's timer cancellation did not affect any other call's armed timer (`REQ-F-043` is the claim, and a test that launches one call at a time is not a proof of that claim). | accepted | P12 | ACC-P12-011 |
+| REQ-NF-031 | Verbatim SIP capture for the console (REQ-F-057) is **bounded in-memory demo data** only: capped message count per process, not durable storage, not published in acceptance evidence as a throughput claim. Payload display follows `SECURITY.md` (off by default in production posture). | accepted | P15-B | ACC-P15-002 |
 
 ## 3. Traceability notes
+
+- **REQ-F-012 vs P15 (`REQ-F-056`, `REQ-F-057`, 2026-09-24).** `REQ-F-012` remains
+  **`done` for M3**: the original centre-panel message flow, payload viewer and rule-hit
+  display shipped in 0.4.0. P13 moved live traffic to the Dashboard bottom panel (P12 WS)
+  and left `#vw-call-trace` as a placeholder while ACC-P13-008 kept the nav entry.
+  **P15 restores** the dedicated Call Trace sequence view without amending the REQ-F-012
+  text: `REQ-F-056` covers the SVG ladder + structured event modal (Phase A);
+  `REQ-F-057` covers verbatim SIP in the same modal (Phase B). See ADR-0016.
 
 - `REQ-F-003` and `REQ-F-004` are implemented as pure functions in
   `src/as_app/routing/engine.py`; the sippy glue that applies them to a Request-URI is

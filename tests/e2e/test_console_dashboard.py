@@ -289,6 +289,7 @@ class TestNavigation:
         _click_nav(page, "call-trace")
         page.wait_for_timeout(500)
         assert page.locator("#vw-call-trace").evaluate("el => el.classList.contains('act')")
+        assert page.locator("#traceFlowSvg").count() == 1
         assert page.locator(".nav").count() == 1
         assert page.locator('.nav button[data-v="call-trace"]').evaluate(
             "b => b.classList.contains('act')"
@@ -368,6 +369,51 @@ class TestNavigation:
             assert not page.locator(f"#vw-{view}").evaluate(
                 "el => el.classList.contains('act')"
             ), f"{view} still act after dashboard nav"
+
+
+class TestCallTraceSequence:
+    """P15-A: Live row select → REST-backed SVG sequence + event modal (REQ-F-056)."""
+
+    def test_call_trace_view_shows_sequence_after_row_select(self, page, demo_stack):
+        _open_console(page, demo_stack)
+        _click_visible(page, "#btnStart")
+        lifecycle = _wait_full_trace_lifecycle(page, timeout=25)
+        assert lifecycle is not None, "no call reached full P12 lifecycle in tc[]"
+        page.locator("#tlist .ti").first.click()
+        page.wait_for_timeout(2500)
+        assert page.locator("#vw-call-trace").evaluate("el => el.classList.contains('act')")
+        step_count = page.locator("#traceFlowSvg .seq-step").count()
+        assert step_count >= 3, f"expected ≥3 sequence steps, got {step_count}"
+        header = page.locator("#traceFlowHeader").inner_text()
+        assert lifecycle["call_id"][:8] in header or "events" in header.lower()
+        _click_visible(page, "#btnStop")
+
+    def test_call_trace_modal_opens_on_step_click(self, page, demo_stack):
+        _open_console(page, demo_stack)
+        _click_visible(page, "#btnStart")
+        assert _wait_full_trace_lifecycle(page, timeout=25) is not None
+        page.locator("#tlist .ti").first.click()
+        page.wait_for_timeout(2500)
+        page.locator("#traceFlowSvg .seq-step").first.click()
+        assert page.locator("#traceDetailModal.open").count() == 1
+        body = page.locator("#traceDetailBody").inner_text()
+        assert body.strip(), "modal body empty"
+        page.locator("#traceDetailX").click()
+        _click_visible(page, "#btnStop")
+
+    def test_call_trace_modal_shows_sip_payload(self, page, demo_stack):
+        """P15-B: modal shows verbatim SIP when messages API is available (REQ-F-057)."""
+        _open_console(page, demo_stack)
+        _click_visible(page, "#btnStart")
+        assert _wait_full_trace_lifecycle(page, timeout=25) is not None
+        page.locator("#tlist .ti").first.click()
+        page.wait_for_timeout(2500)
+        page.locator("#traceFlowSvg .seq-step").first.click()
+        sip_pre = page.locator("#traceDetailBody pre.trace-sip")
+        assert sip_pre.count() == 1, "expected SIP pre block in modal"
+        assert "Call-ID:" in sip_pre.inner_text()
+        page.locator("#traceDetailX").click()
+        _click_visible(page, "#btnStop")
 
 
 # ===========================================================================

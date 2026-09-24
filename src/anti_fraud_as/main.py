@@ -198,6 +198,7 @@ class FraudAsStack(BaseAsStack[FraudAsSettings]):
             screening_data_store=self.screening_data,
             metrics=self.metrics,
             tracer=self.tracer,
+            sip_recorder=self.sip_message_recorder,
         )
 
     def start_internal_api(self) -> InternalApiServer:

@@ -135,6 +135,13 @@ this documentation commit changes no file under `src/`.
 | Consumption probe's stand-in scope | `tools/path_dependency_probe.py` measures `uv`'s resolution and install behaviour against a **two-module stand-in** library, not the real skeleton, so it says nothing about the extraction itself or the runtime of the extracted code. | Re-measure against a real published artefact; the extraction itself is covered by this repository's three layers and the committed probes. |
 | CI second checkout (new dependency) | Every CI job clones the library repository into `../as_platform` before `uv sync --frozen`, because the `path` dependency cannot resolve without a sibling checkout (ADR-0009 decision 6). The clone needs the library **published at a real remote** (`<owner>/as_platform`); the library has **no remote configured yet and has never been pushed**, so CI is not green until it is. The existing lock comment ("`uv sync --frozen` … fails when …") is true for **registry** dependencies and **not** for this path dependency. | Publish the library repository at a real remote (and, later, consume a versioned artefact) so a fresh clone of this repository resolves its dependency in CI; treat the lock as a guard for registry dependencies only. |
 
+## Additional gaps registered for P15 Call Trace message flow (planned 2026-09-24)
+
+| Area | POC behaviour | Production requirement |
+| --- | --- | --- |
+| Console SIP payload source | **Delivered (P15-B, 2026-09-24):** bounded in-memory `SipMessageRecorder` on both AS processes (`DualSipLogger` + `DEFAULT_MAX_CAPTURED_MESSAGES=5000`); read-only `GET /api/v1/traces/{call_id}/messages` feeds the console modal (ADR-0016). Demo/loopback only. | Durable trace store with retention, redaction, and access control; SIP payloads encrypted at rest; no full message text in browser for all operators by default |
+| Event ↔ message correlation | **Delivered (heuristic):** modal matches by direction + SIP start-line method + event index order; diagram unchanged when no match | Stable message IDs and correlation keys in the trace store |
+
 ## Notes
 
 - Gaps are never "forgotten features": each one is a decision with an ADR or a row in this

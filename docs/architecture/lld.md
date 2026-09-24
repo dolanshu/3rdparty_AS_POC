@@ -28,6 +28,17 @@ section 5 (a structural change).
 | Module | Responsibility |
 | --- | --- |
 | `console/main.py` | FastAPI application: health endpoint plus the operations console page (dark theme, live flow, rule highlight, statistics, SVG topology) served from a single inline HTML string |
+
+#### Call Trace message flow view (P15-A, ADR-0016)
+
+The Dashboard bottom panel (`#tlist`) lists P12 coarse events; selecting a row loads the
+**Call Trace** centre view (`#vw-call-trace`) with a three-lifeline SVG sequence diagram
+(S-SBC forward → AS → S-SBC return) built from `GET /api/v1/traces/{call_id}` on the
+translation or anti-fraud internal API (chosen by event `source`). Arrow clicks open
+`#traceDetailModal` with structured `TraceEvent` fields — not wire-format SIP in Phase A.
+Phase B adds `GET /api/v1/traces/{call_id}/messages` into the same modal shell. Full UI
+data flow, DOM ids and event→arrow mapping: `docs/features/call-trace-message-flow/design.md`.
+
 | `s_sbc_mock/main.py` | Process entry point, `MockConfig`, wires UAC and UAS |
 | `s_sbc_mock/uac.py` | Trunk-forward side: emulates the operator S-SBC sending the trunk INVITE to the AS (`Route`→S-SBC) |
 | `s_sbc_mock/uas.py` | S-SBC return side: receives the AS-originated INVITE on the top `Route` port and answers it for the POC |

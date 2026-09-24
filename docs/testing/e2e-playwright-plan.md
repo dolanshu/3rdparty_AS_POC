@@ -1,7 +1,7 @@
 # P13 Dashboard — Playwright E2E 测试计划
 
 > 状态：已按 review-20260923 两轮修订（含 review-kimi 第二轮） · 编写日期：2026-09-22 · 最后修订：2026-09-23
-> 对应文件：`tests/e2e/test_console_dashboard.py`（**43 测试 / 9 类**，含 2026-09-24 trace filter 生命周期补测）
+> 对应文件：`tests/e2e/test_console_dashboard.py`（**46 测试 / 9 类**，含 2026-09-24 P15 Call Trace sequence + SIP modal）
 > 目标：用真实浏览器（Chromium headless）完整走通 Enhanced Dashboard 用户旅程生命周期，覆盖事件流每一环。
 
 ### 代码修复状态（review 两轮 + HY4 第三轮行动项）
@@ -213,6 +213,9 @@ python3 -m pytest tests/e2e/test_console_dashboard.py -v -k "Concurrent"
 | 21 | `test_trace_panel_accumulates_call_records` | Start → wait 8s → `#tlist .ti` count `>= 3` | draft 写 `>= 5`，实际代码是 `>= 3`。**推导**：wait 8s，每 call 产生 3-5 条 trace entry × bursty factor 0.5 = 3 下限 | **REQ-F-042 / ACC-P12-005**（**前版错标 REQ-F-047 gauge**——trace 是 AS per-call event stream）|
 | 22 | `test_trace_filter_narrows_list` | ① 取 `total_before = #tlist .ti count` ② **若 0 → `pytest.skip()`** ③ 输入 `"zzzzzzzNoMatchzzzzz"`（必然不匹配的字符串）④ assert `after_nomatch <= total_before` | **⚠️ smoke-only**（R2-P2-1）：断言在 filter 完全失效时也会通过。**已修** P0-3（import pytest），但 `pytest.skip()` 是否实际被调用仍是随机的（generator 是否够活跃产生 ≥1 条 trace）。强化路径：改首条 trace 的 Call-ID 片段作为过滤词，断言 `after == 1` + `total_before > 1` | **REQ-F-042 / ACC-P12-005** ✔ |
 | 43 | `test_trace_filter_shows_multiple_rows_for_one_call_id` | Start → deadline 25s 轮询 JS `tc[]` 直到某 `call_id` 同时含 `call_started` + `call_routed` + `call_ended`（≥3 条）→ `page.fill("#filt", call_id)` → assert `#tlist .ti` count **≥ 3** 且每行 `.cid` 均为该 Call-ID | **补 #22 缺口**：用户 filter 后只见一行 `call_routed` 时此测应红；验 filter 展示**同一 Call-ID 的生命周期多行**，不是 pool 总行数 | **REQ-F-042 / ACC-P12-005** |
+| 44 | `test_call_trace_view_shows_sequence_after_row_select` | Start → `_wait_full_trace_lifecycle` → click `#tlist .ti` → `#vw-call-trace.act` → `#traceFlowSvg .seq-step` count **≥ 3** | P15-A：REST trace 驱动的三方 sequence 图 | **REQ-F-056 / ACC-P15-001** |
+| 45 | `test_call_trace_modal_opens_on_step_click` | 同上选中 call → click `.seq-step` → `#traceDetailModal.open` + `#traceDetailBody` 非空 | P15-A：结构化 event modal（Phase B 加 SIP `<pre>`） | **REQ-F-056 / ACC-P15-001** |
+| 46 | `test_call_trace_modal_shows_sip_payload` | 同上 → click `.seq-step` → `#traceDetailBody pre.trace-sip` 含 `Call-ID:` | P15-B：verbatim SIP 来自 ``GET .../messages`` | **REQ-F-057 / ACC-P15-002** |
 
 > **#43 等待策略**：读浏览器内 `tc`（Live Trace 的内存源），不读 REST `/api/v1/traces`。成功路由的 translation AS 呼叫应产生 3 个 P12 事件；若 WS 在 `call_started` 前未连上或 UI 只保留最后一事件，测试失败并暴露回归。
 

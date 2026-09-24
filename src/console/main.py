@@ -88,7 +88,7 @@ html,body{width:100%;height:100%;margin:0;padding:0}
 .trace-h .t{font-weight:600;color:var(--acc);font-size:12px}
 .trace-h .tf{flex:1;background:var(--bg);border:1px solid var(--bd);border-radius:4px;padding:3px 6px;color:var(--tx);font:inherit;font-size:12px}
 .tl{flex:1;overflow-y:auto;padding:4px 0}.ti{padding:4px 14px;cursor:pointer;border-bottom:1px solid var(--bd);display:flex;gap:10px}
-.ti:hover{background:var(--p2)}.ti .cid{color:var(--acc);font-size:11px;width:240px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ti:hover{background:var(--p2)}.ti.sel{background:var(--p2);border-left:3px solid var(--acc)}.ti .cid{color:var(--acc);font-size:11px;width:240px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ti .ev{color:var(--mut);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ti .st{font-size:11px;width:80px;text-align:right;flex-shrink:0}.st.ok{color:var(--in)}.st.rj{color:var(--err)}.st.to{color:var(--warn)}
 
@@ -127,6 +127,17 @@ tr.err-row td{color:var(--err)}
 .as-summary a:hover{text-decoration:underline}
 .rule-link{color:var(--acc);text-decoration:none}
 .rule-link:hover{text-decoration:underline}
+.flow-wrap{flex:1;min-height:280px;overflow:auto;border:1px solid var(--bd);border-radius:6px;background:var(--bg);padding:8px}
+.flow-hdr{font-size:11px;color:var(--mut);margin-bottom:8px;word-break:break-all}
+#traceFlowSvg{width:100%;min-height:200px;display:block}
+.trace-modal{display:none;position:fixed;inset:0;z-index:100;align-items:center;justify-content:center}
+.trace-modal.open{display:flex}
+.trace-modal-bg{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+.trace-modal-box{position:relative;background:var(--panel);border:1px solid var(--bd);border-radius:8px;max-width:560px;width:90%;max-height:80vh;overflow:auto;padding:14px;z-index:1}
+.trace-modal-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:600;color:var(--acc)}
+.trace-modal-h button{border:none;background:0;color:var(--mut);font-size:18px;cursor:pointer}
+.trace-attrs{font-size:11px;color:var(--mut);margin-top:10px;white-space:pre-wrap;word-break:break-all;background:var(--bg);padding:8px;border-radius:4px;border:1px solid var(--bd)}
+.mut{color:var(--mut);font-size:11px;margin:6px 0}
 </style></head><body>
 <div class="sb" id="sb">
 <div class="si"><span class="dot" id="aDot"></span><span class="sv" id="aSt">connecting</span></div>
@@ -175,8 +186,9 @@ tr.err-row td{color:var(--err)}
 </section>
 
 <div class="vw" id="vw-call-trace">
-<div class="st2">Call Trace</div>
-<p class="empty">Switch to the Dashboard view for the live trace panel at the bottom.</p>
+<div class="st2">Call Trace — message flow</div>
+<p class="flow-hdr" id="traceFlowHeader">Select a call from Live Call Trace below</p>
+<div class="flow-wrap" id="traceFlowWrap"><svg id="traceFlowSvg" xmlns="http://www.w3.org/2000/svg"></svg></div>
 </div>
 
 <div class="vw" id="vw-rules">
@@ -256,6 +268,14 @@ tr.err-row td{color:var(--err)}
 
 </div>
 
+<div class="trace-modal" id="traceDetailModal">
+<div class="trace-modal-bg" id="traceDetailClose"></div>
+<div class="trace-modal-box">
+<div class="trace-modal-h"><span>Trace event</span><button type="button" id="traceDetailX" title="Close">×</button></div>
+<div id="traceDetailBody"></div>
+</div>
+</div>
+
 <script>
 "use strict";
 var _host = location.hostname;
@@ -276,6 +296,7 @@ var counters = { active: 0, completed: 0, rejected_608: 0, timeout: 0 };
 var lineData = { labels: [], active: [], completed: [], rejected: [] };
 var ROLL_WINDOW = 60; // 30s at 0.5s ticks = 60 points
 var tc = [], sel = null;
+var selectedCallId = null, selectedSource = null, traceEvents = [], traceMessages = null;
 var CALL_TYPES = ["T1","T2","T3","T4","T5","T6","F1","F2","F3","F4"];
 var enabledTypes = new Set(CALL_TYPES);
 var lineChart, pieChart, gaugeChart;
@@ -531,6 +552,129 @@ function onCallEvent(d){
   renderTrace();
 }
 
+// --- Call Trace sequence view (REQ-F-056, ADR-0016) ----------------------
+function traceApiBase(source){
+  if(source && source.indexOf("fraud")>=0 && FRAUD_URL) return FRAUD_URL;
+  return AS_URL;
+}
+function normDir(d){
+  d = (d||"").toLowerCase();
+  if(d==="in"||d==="inbound") return "in";
+  if(d==="out"||d==="outbound") return "out";
+  if(d==="internal"||d==="int") return "internal";
+  return d;
+}
+function eventArrowMeta(ev){
+  var leg = (ev.attributes && ev.attributes.leg) || "-";
+  var dir = normDir(ev.direction);
+  if(dir==="internal"){
+    return {kind:"note", label:(ev.method||"decision")+(ev.summary?": "+ev.summary.slice(0,36):""), rule:ev.rule_id};
+  }
+  var from=1,to=1,color="var(--mut)";
+  if(dir==="in" && leg==="trunk"){ from=0; to=1; color="var(--in)"; }
+  else if(dir==="out" && leg==="trunk"){ from=1; to=0; color="var(--out)"; }
+  else if(dir==="in" && leg==="next_hop"){ from=2; to=1; color="var(--in)"; }
+  else if(dir==="out" && leg==="next_hop"){ from=1; to=2; color="var(--out)"; }
+  var label = ev.method || "?";
+  if(ev.rule_id) label += " · "+ev.rule_id;
+  return {kind:"arrow", from:from, to:to, label:label, color:ev.rule_id?"var(--rule)":color, rule:ev.rule_id};
+}
+function renderSequenceSvg(events){
+  var svg = E("traceFlowSvg"); if(!svg) return;
+  if(!events.length){ svg.innerHTML=""; return; }
+  var xs=[60,160,260], names=["S-SBC fwd","AS","S-SBC ret"];
+  var rowH=32, top=48, h=top+events.length*rowH+24;
+  svg.setAttribute("viewBox","0 0 320 "+h);
+  var parts=['<defs><marker id="arrowHead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--mut)"/></marker></defs>'];
+  for(var i=0;i<3;i++){
+    parts.push('<line x1="'+xs[i]+'" y1="22" x2="'+xs[i]+'" y2="'+(h-8)+'" stroke="var(--bd)" stroke-width="1"/>');
+    parts.push('<text x="'+xs[i]+'" y="16" text-anchor="middle" fill="var(--mut)" font-size="10">'+names[i]+'</text>');
+  }
+  events.forEach(function(ev, idx){
+    var y=top+idx*rowH, meta=eventArrowMeta(ev);
+    if(meta.kind==="note"){
+      parts.push('<g class="seq-step" data-event-index="'+idx+'"><rect x="'+(xs[1]-58)+'" y="'+(y-10)+'" width="116" height="18" rx="3" fill="var(--p2)" stroke="'+(ev.rule_id?"var(--rule)":"var(--int)")+'"/>');
+      parts.push('<text x="'+xs[1]+'" y="'+(y+2)+'" text-anchor="middle" fill="var(--int)" font-size="9">'+esc(meta.label.slice(0,22))+'</text></g>');
+    }else{
+      var x1=xs[meta.from], x2=xs[meta.to];
+      parts.push('<g class="seq-step" data-event-index="'+idx+'">');
+      parts.push('<line class="seq-arrow" x1="'+x1+'" y1="'+y+'" x2="'+x2+'" y2="'+y+'" stroke="'+meta.color+'" stroke-width="2" marker-end="url(#arrowHead)"/>');
+      parts.push('<text x="'+((x1+x2)/2)+'" y="'+(y-5)+'" text-anchor="middle" fill="var(--tx)" font-size="9">'+esc(meta.label)+'</text>');
+      parts.push('<rect x="'+Math.min(x1,x2)+'" y="'+(y-10)+'" width="'+Math.max(Math.abs(x2-x1),20)+'" height="16" fill="transparent"/></g>');
+    }
+  });
+  svg.innerHTML = parts.join("");
+  svg.querySelectorAll(".seq-step").forEach(function(g){
+    g.style.cursor="pointer";
+    g.onclick=function(){ showDetail(parseInt(g.getAttribute("data-event-index"),10)); };
+  });
+}
+function matchMessage(ev, messages, eventIndex){
+  if(!messages || !messages.length) return null;
+  var dir = normDir(ev.direction);
+  var method = (ev.method || "").toUpperCase();
+  var candidates = [];
+  for(var i=0;i<messages.length;i++){
+    var m = messages[i];
+    if(normDir(m.direction) !== dir) continue;
+    var firstLine = (m.text || "").split("\\n")[0].toUpperCase();
+    if(firstLine.indexOf(method) === 0 || firstLine.indexOf("SIP/2.0 "+method) >= 0){
+      candidates.push(m);
+    }
+  }
+  if(!candidates.length) return null;
+  if(typeof eventIndex === "number" && candidates.length === 1) return candidates[0];
+  if(typeof eventIndex === "number" && eventIndex < candidates.length) return candidates[eventIndex];
+  return candidates[0];
+}
+function showDetail(index){
+  var ev = traceEvents[index]; if(!ev) return;
+  var body = E("traceDetailBody"), modal = E("traceDetailModal");
+  if(!body||!modal) return;
+  var leg = (ev.attributes && ev.attributes.leg) || "-";
+  var attrs = ev.attributes ? JSON.stringify(ev.attributes,null,2) : "{}";
+  var sip = traceMessages ? matchMessage(ev, traceMessages, index) : null;
+  var sipBlock = sip ? '<pre class="trace-sip">'+esc(sip.text)+'</pre>' :
+    (traceMessages !== null ? '<p class="mut">SIP capture unavailable for this step</p>' : '');
+  body.innerHTML = '<p><strong>'+esc(ev.method)+'</strong> · '+esc(ev.direction)+' · '+esc(leg)+'</p>'+
+    '<p class="mut">'+esc(ev.summary||"")+'</p>'+
+    '<table><tr><td>timestamp</td><td>'+esc(ev.timestamp||"")+'</td></tr>'+
+    '<tr><td>peer</td><td>'+esc(ev.peer||"-")+'</td></tr>'+
+    '<tr><td>rule_id</td><td>'+esc(ev.rule_id||"-")+'</td></tr></table>'+
+    sipBlock+
+    '<pre class="trace-attrs">'+esc(attrs)+'</pre>';
+  modal.classList.add("open");
+}
+function closeDetail(){ var m=E("traceDetailModal"); if(m) m.classList.remove("open"); }
+async function loadCallTrace(callId, source){
+  var hdr=E("traceFlowHeader");
+  if(hdr) hdr.textContent="loading "+callId+"…";
+  traceEvents=[]; traceMessages=null;
+  try{
+    var base=traceApiBase(source);
+    var r=await fetch(base+"/api/v1/traces/"+encodeURIComponent(callId));
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    var data=await r.json();
+    traceEvents=data.events||[];
+    try{
+      var mr=await fetch(base+"/api/v1/traces/"+encodeURIComponent(callId)+"/messages");
+      if(mr.ok){ var mdata=await mr.json(); traceMessages=mdata.messages||[]; }
+    }catch(_ignore){ traceMessages=null; }
+    if(hdr) hdr.textContent=callId+" · "+esc(source||"as_translation")+" · "+traceEvents.length+" events";
+    renderSequenceSvg(traceEvents);
+  }catch(e){
+    traceEvents=[];
+    if(hdr) hdr.textContent="failed to load trace for "+callId+" ("+e+")";
+    renderSequenceSvg([]);
+  }
+}
+function selectTraceRow(callId, source){
+  selectedCallId=callId; selectedSource=source||null;
+  renderTrace();
+  loadCallTrace(callId, source);
+  sv("call-trace");
+}
+
 function renderTrace(){
   var f = (E("filt").value || "").toLowerCase(), l = E("tlist");
   l.innerHTML = "";
@@ -538,11 +682,15 @@ function renderTrace(){
   if(!q.length){l.innerHTML='<div class="empty">no calls yet</div>';E("traceCount").textContent="0 calls";return}
   q.forEach(function(t){
     var d = document.createElement("div"); d.className = "ti";
+    if(selectedCallId === t.call_id) d.classList.add("sel");
+    d.dataset.callId = t.call_id;
+    d.dataset.source = t.source || "";
     var stCls = t.event.indexOf("ended")>=0?"ok":t.event.indexOf("rejected")>=0?"rj":t.event.indexOf("timeout")>=0?"to":"";
     var stLabel = t.event.replace("call_","");
     d.innerHTML='<span class="cid">'+esc(t.call_id)+'</span>'+
       '<span class="ev">'+esc(t.event)+' · '+esc(t.source||"")+'</span>'+
       '<span class="st '+stCls+'">'+esc(stLabel)+'</span>';
+    d.onclick=function(){ selectTraceRow(t.call_id, t.source); };
     l.appendChild(d);
   });
   E("traceCount").textContent = tc.length + " calls";
@@ -624,7 +772,9 @@ function sv(v){cv=v;
   if(v==="dashboard"){dash.style.display="";if(el)el.classList.remove("act")}
   else{dash.style.display="none";if(el)el.classList.add("act")}
   if(v==="rules"){if(!rd)fr();else rr()}if(v==="screening"){if(!sd)fs();else rsd()}
-  if(v==="statistics"){if(!md)fm().then(function(){if(cv==="statistics")rs()});else rs()}}
+  if(v==="statistics"){if(!md)fm().then(function(){if(cv==="statistics")rs()});else rs()}
+  if(v==="call-trace" && selectedCallId){ loadCallTrace(selectedCallId, selectedSource); }
+}
 
 function buildToggles(){
   var c = E("typeToggles"); c.innerHTML = "";
@@ -680,6 +830,8 @@ E("apiUrl").textContent = AS_URL; E("loadUrl").textContent = LD_URL;
 document.querySelectorAll(".nav button").forEach(function(b){b.onclick=function(){sv(b.dataset.v)}});
 E("filt").oninput = renderTrace;
 E("btnStart").onclick = ldStart; E("btnStop").onclick = ldStop;
+if(E("traceDetailClose")) E("traceDetailClose").onclick = closeDetail;
+if(E("traceDetailX")) E("traceDetailX").onclick = closeDetail;
 E("tgtSlider").oninput = function(){E("tgtVal").textContent=this.value};
 E("tgtSlider").onchange = ldConfig;
 E("rateSlider").oninput = function(){E("rateVal").textContent=parseFloat(this.value).toFixed(1)};

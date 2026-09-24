@@ -1,7 +1,7 @@
 # Integration 测试计划
 
 > 状态：已实现 · 更新日期：2026-09-24
-> 对应目录：`tests/integration/`（8 个文件，45 tests）
+> 对应目录：`tests/integration/`（10 个文件，48 tests）
 > 标签：`pytest.mark.integration`
 
 ---
@@ -13,7 +13,7 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 | 层 | 进程 | 浏览器 | 测试数量 | 典型耗时 |
 |---|---|---|---|---|
 | unit | 无 | 无 | 182 | ~20s |
-| **integration** | **1（测试进程内 bind）** | **无** | **45** | **~30s** |
+| **integration** | **1（测试进程内 bind）** | **无** | **48** | **~30s** |
 | e2e (call flows) | 1 | 无 | 9 | ~10s |
 | e2e (dashboard) | 4 独立进程 | Chromium headless | 28 | ~130s |
 
@@ -33,7 +33,7 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 
 ---
 
-## 三、测试用例清单（45 个 / 8 文件）
+## 三、测试用例清单（48 个 / 10 文件）
 
 ### 3.1 test_translation.py（7 tests）—— Routing + Hot Reload + Error 分支
 
@@ -121,6 +121,25 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 | # | 测试名 | 核心断言 |
 |---|--------|----------|
 | 1 | `test_single_call_p12_events_share_trunk_call_id` | 单通 completed call → broadcast 捕获 ``call_started`` + ``call_routed`` + ``call_ended``，三者 ``call_id`` 均为 trunk Call-ID（≠ ``"-"``）；无 ``call_started`` 落在 ``call_id='-'`` |
+
+### 3.9 test_call_trace_sequence.py（1 test）—— REST trace 生命周期（P15-A）
+
+| # | 测试名 | 核心断言 |
+|---|--------|----------|
+| 1 | `test_completed_call_trace_has_invite_and_200_events` | ``trunk_pair`` + ``start_internal_api`` → ``GET /api/v1/traces/{id}`` 含 trunk INVITE、internal decision、next_hop 200 |
+
+### 3.10 test_console_call_trace_flow.py（1 test）—— Console 页面 marker（P15-A）
+
+| # | 测试名 | 核心断言 |
+|---|--------|----------|
+| 1 | `test_console_page_has_call_trace_flow_markers` | ``CONSOLE_PAGE`` 含 ``#traceFlowSvg``、``#traceDetailModal``、``#traceFlowHeader``；不含 placeholder 文案 |
+
+### 3.11 test_call_trace_messages_api.py（2 tests）—— verbatim SIP REST（P15-B）
+
+| # | 测试名 | 核心断言 |
+|---|--------|----------|
+| 1 | `test_messages_api_returns_invite_for_completed_call` | ``trunk_pair`` + ``start_internal_api`` → ``GET .../messages`` ≥ 2 条，含 ``INVITE`` 起头的 ``text`` |
+| 2 | `test_messages_include_outbound_call_id_field` | 响应 ``outbound_call_id`` = ``outbound_call_id(trunk_call_id)`` |
 
 ---
 

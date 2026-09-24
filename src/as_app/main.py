@@ -185,6 +185,7 @@ class AsStack(BaseAsStack[AsSettings]):
             rule_set_store=self.rule_set_store,
             metrics=self.metrics,
             tracer=self.tracer,
+            sip_recorder=self.sip_message_recorder,
         )
 
     def start_internal_api(self) -> InternalApiServer:

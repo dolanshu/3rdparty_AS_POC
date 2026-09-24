@@ -32,6 +32,7 @@ Endpoints (ADR-0002)::
     GET /api/v1/rules              — active rule set, read-only
     GET /api/v1/traces             — most recent calls with their trace events
     GET /api/v1/traces/{call_id}   — one call, Call-ID keyed
+    GET /api/v1/traces/{call_id}/messages — verbatim SIP for trunk + outbound legs
     WS  /ws/events                 — live event feed for the console
 """
 
@@ -43,11 +44,16 @@ from typing import Any, Final
 from as_platform.internal_api import InternalApiServer as _InternalApiServer
 from as_platform.internal_api import create_internal_api_app as _create_internal_api_app
 from as_platform.internal_api import health_payload as _health_payload
-from as_platform.internal_api import metrics_payload, trace_payload, traces_payload
+from as_platform.internal_api import (
+    messages_payload,
+    metrics_payload,
+    trace_payload,
+    traces_payload,
+)
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from as_app.observability.metrics import MetricsRegistry
-from as_app.observability.tracing import TraceRecorder
+from as_app.observability.tracing import SipMessageRecorder, TraceRecorder
 from as_app.routing.rules import RuleSet, RuleSetStore
 
 __all__ = [
@@ -56,6 +62,7 @@ __all__ = [
     "InternalApiServer",
     "create_internal_api_app",
     "health_payload",
+    "messages_payload",
     "metrics_payload",
     "rules_payload",
     "trace_payload",
@@ -76,6 +83,7 @@ INTERNAL_API_ROUTES: dict[str, str] = {
     "GET /api/v1/rules": "active rule set, read-only (rules are edited as data files)",
     "GET /api/v1/traces": "most recent calls with their trace events",
     "GET /api/v1/traces/{call_id}": "one call, Call-ID keyed",
+    "GET /api/v1/traces/{call_id}/messages": "verbatim SIP for trunk and outbound legs",
     "WS /ws/events": "live event feed for the console",
 }
 
@@ -189,6 +197,7 @@ def create_internal_api_app(
     rule_set_store: RuleSetStore,
     metrics: MetricsRegistry,
     tracer: TraceRecorder,
+    sip_recorder: SipMessageRecorder | None = None,
     started_at: float,
 ) -> FastAPI:
     """Create the FastAPI application for the internal API.
@@ -198,6 +207,7 @@ def create_internal_api_app(
         rule_set_store: Source of the active rule set, reported as readiness.
         metrics: Counter registry exposed on ``/api/v1/metrics``.
         tracer: Trace recorder exposed on ``/api/v1/traces``.
+        sip_recorder: Verbatim SIP recorder for ``/api/v1/traces/{call_id}/messages``.
         started_at: ``time.monotonic()`` value at server creation, for uptime.
 
     Returns:
@@ -209,6 +219,7 @@ def create_internal_api_app(
         metrics=metrics,
         tracer=tracer,
         started_at=started_at,
+        sip_recorder=sip_recorder,
     )
 
 
@@ -296,6 +307,7 @@ class InternalApiServer(_InternalApiServer):
         rule_set_store: RuleSetStore,
         metrics: MetricsRegistry,
         tracer: TraceRecorder,
+        sip_recorder: SipMessageRecorder | None = None,
     ) -> None:
         """Create the internal API server.
 
@@ -306,6 +318,7 @@ class InternalApiServer(_InternalApiServer):
             rule_set_store: Source of the active rule set.
             metrics: Counter registry.
             tracer: Trace recorder.
+            sip_recorder: Verbatim SIP recorder for the messages route.
         """
         self.rule_set_store = rule_set_store
         # Eagerly build the app + P12 fanout so call_map can access ``.app``
@@ -317,6 +330,7 @@ class InternalApiServer(_InternalApiServer):
             rule_set_store=rule_set_store,
             metrics=metrics,
             tracer=tracer,
+            sip_recorder=sip_recorder,
             started_at=_time.monotonic(),  # real monotonic for health uptime
         )
         _mount_p12_fanout(self.app, SimplePublisher())
@@ -327,6 +341,7 @@ class InternalApiServer(_InternalApiServer):
             provider=_RuleSetPayloadProvider(rule_set_store),
             metrics=metrics,
             tracer=tracer,
+            sip_recorder=sip_recorder,
         )
 
     def start(self) -> None:

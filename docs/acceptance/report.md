@@ -3517,6 +3517,46 @@ is tagged (`AGENT.md` §13/§15).
 
 ---
 
+## Phase 3 — P15 Call Trace message flow (executed 2026-09-24)
+
+Feature package: `docs/features/call-trace-message-flow/` · ADR-0016 · REQ-F-056/057 · REQ-NF-031.
+
+### Gate summary
+
+| ACC ID | Status |
+| --- | --- |
+| ACC-P15-001 | **accepted** |
+| ACC-P15-002 | **accepted** |
+
+### ACC-P15-001 — SVG sequence + event modal (Phase A)
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest \
+    tests/integration/test_call_trace_sequence.py \
+    tests/integration/test_console_call_trace_flow.py \
+    tests/e2e/test_console_dashboard.py::TestCallTraceSequence \
+    -v -k "not sip_payload"
+# 4 passed (sequence markers + 2 e2e without SIP test)
+```
+
+Observed: `#traceFlowSvg` renders ≥ 3 `.seq-step` for a completed translation call; arrow click opens `#traceDetailModal` with structured event fields from `GET /api/v1/traces/{call_id}`.
+
+### ACC-P15-002 — verbatim SIP in modal (Phase B)
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest \
+    tests/integration/test_call_trace_messages_api.py \
+    tests/e2e/test_console_dashboard.py::TestCallTraceSequence::test_call_trace_modal_shows_sip_payload \
+    -v
+# 3 passed
+```
+
+Observed: `GET /api/v1/traces/{call_id}/messages` returns `messages[].text` starting with `INVITE`; production AS uses `DualSipLogger` (bounded `SipMessageRecorder`, max 5000 messages). E2E modal `#traceDetailBody pre.trace-sip` contains a `Call-ID:` header line.
+
+**Honest declaration.** P15 closes the `#vw-call-trace` placeholder gap (`docs/phase3-gap-audit.md` §7). Phase B required `as_platform` internal API extension (messages route) — scoped to ADR-0016, not the P13 REQ-NF-027 console-only constraint. SIP text is demo/loopback capture only; not published as acceptance artifacts per `SECURITY.md`.
+
+---
+
 ## Phase 3 — P14 Phase 3 × P9b alignment (executed 2026-09-23) — evidence not recorded here
 
 `docs/acceptance/criteria.md` records P14 as executed on 2026-09-23 with `ACC-P14-001 … 008`

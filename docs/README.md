@@ -13,11 +13,13 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `AGENT.md` §1–§5, §15 | ready | Positioning, boundaries, non-goals, delivery standards, roadmap |
 | `docs/architecture/hld.md` | ready | System context, deployment view, interface view, quality attributes, key flows — including the second AS instance (§8) |
 | `docs/architecture/lld.md` | ready | Modules, data structures, state machines, error codes, process model, log fields — including the anti-fraud AS (§9) |
-| `docs/architecture/adr/` | ready | ADR-0001 … ADR-0015: 0001 sippy, 0002 process separation, 0003 UDP only (superseded for the library's pluggable seam by ADR-0010), 0004 YAML rules, 0005 mock strategy, 0006 signalling only, 0007 anti-fraud AS / `608 Rejected`, 0008 chained topology (**historical** — per-leg `Call-ID`; decision 1 superseded by 0014), 0009 platform library extraction / `path` consumption, 0010 P11 TLS + Redis + capacity harness verification, 0011 vendored Chart.js, 0012 load-generator boundary, 0013 two generator controls (Little's Law), 0014 iFC-orchestrated chain (the one that ships), 0015 Phase 3 × P9b alignment |
+| `docs/architecture/adr/` | ready | ADR-0001 … ADR-0016: 0001 sippy, 0002 process separation, 0003 UDP only (superseded for the library's pluggable seam by ADR-0010), 0004 YAML rules, 0005 mock strategy, 0006 signalling only, 0007 anti-fraud AS / `608 Rejected`, 0008 chained topology (**historical** — per-leg `Call-ID`; decision 1 superseded by 0014), 0009 platform library extraction / `path` consumption, 0010 P11 TLS + Redis + capacity harness verification, 0011 vendored Chart.js, 0012 load-generator boundary, 0013 two generator controls (Little's Law), 0014 iFC-orchestrated chain (the one that ships), 0015 Phase 3 × P9b alignment, **0016 Call Trace sequence view + phased SIP API** |
 | `../as_platform/` (the platform library) | ready | The shared skeleton both AS instances build on, in its own repository checked out beside this one and consumed through a `path` source (`editable = true`). Carries its own `ruff` / `mypy` / `pytest` gate and its library-standard documents — API reference, integration guide, compatibility matrix (`REQ-NF-019`, `REQ-NF-021`, ADR-0009) |
 | `docs/production-gaps.md` | ready | Every POC shortcut and what production would require |
 | `docs/glossary.md` | ready | Terminology |
 | `docs/requirements/functional-and-nonfunctional.md` | ready | `REQ-F-*` / `REQ-NF-*` capability list with milestone status |
+| `docs/features/` | ready | Formal feature packages (plan, design, testing-plan, reviews) — see `call-trace-message-flow/` |
+| `.cursor/skills/feature-delivery/` | ready | Staged subagent workflow for new features (requirements → ADR → design → tests → code → review) |
 
 ## Development
 

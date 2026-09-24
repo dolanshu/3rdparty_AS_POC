@@ -26,6 +26,7 @@ the sockets and the test drives the loop explicitly through
 
 from __future__ import annotations
 
+import os
 import re
 import socket
 import time
@@ -35,6 +36,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+# Corporate http_proxy breaks loopback health checks and internal API polls (WSL/CI).
+_NO_PROXY = "127.0.0.1,localhost"
+os.environ.setdefault("NO_PROXY", _NO_PROXY)
+os.environ.setdefault("no_proxy", _NO_PROXY)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RULES_FILE = REPO_ROOT / "config" / "routing_rules.yaml"

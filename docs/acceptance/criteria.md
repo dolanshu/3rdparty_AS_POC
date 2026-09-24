@@ -166,3 +166,10 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | ACC-P14-006 | P14 does not modify `../as_platform` | `test -f ../as_platform/VERSION && cat ../as_platform/VERSION` | Library version unchanged at consumer discretion | REQ-NF-027 |
 | ACC-P14-007 | `make demo` unchanged; generator remains external | `grep -L call_load_generator Makefile` | `make demo` target does not launch generator | REQ-NF-029 |
 | ACC-P14-008 | Unit + integration suite green (307 tests) | `NO_PROXY=127.0.0.1,localhost uv run pytest tests/unit tests/integration -q` | 307 passed | REQ-NF-004 |
+
+## Phase 3 — P15 Call Trace message flow (executed 2026-09-24)
+
+| ID | Criterion | Verification command | Evidence | Requirement |
+| --- | --- | --- | --- | --- |
+| ACC-P15-001 | Selecting a Call-ID in Live Call Trace opens the **Call Trace** view with an **SVG sequence diagram** (≥ 3 arrows for a completed translation call) sourced from `GET /api/v1/traces/{call_id}`; clicking an arrow opens a modal with structured trace event fields | `uv run pytest tests/integration/test_call_trace_sequence.py tests/integration/test_console_call_trace_flow.py tests/e2e/test_console_dashboard.py -v -k "call_trace or trace_flow or sequence"` | Integration: REST trace has INVITE + 200 events; page contains `#traceFlowSvg`; E2E: arrow click → `#traceDetailModal` visible | REQ-F-056 |
+| ACC-P15-002 | The modal can show **verbatim SIP** when the AS exposes `GET /api/v1/traces/{call_id}/messages` | `uv run pytest tests/integration/test_call_trace_messages_api.py tests/e2e/test_console_dashboard.py -v -k "sip_payload or messages_api"` | Response includes `messages[].text` starting with `INVITE`; modal `<pre>` contains `Call-ID:` | REQ-F-057, REQ-NF-031 |

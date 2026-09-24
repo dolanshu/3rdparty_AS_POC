@@ -40,6 +40,7 @@ def test_documented_routes_cover_health_metrics_rules_and_traces() -> None:
         "/api/v1/metrics",
         "/api/v1/rules",
         "/api/v1/traces",
+        "/messages",
         "/ws/events",
     ):
         assert fragment in joined

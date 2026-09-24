@@ -249,7 +249,7 @@ uv run pytest -q               # 确认测试全绿再继续
 | **integration** | ``tests/integration/test_p12_call_events.py`` | 单通 ``trunk_pair`` + ``start_internal_api``，broadcast 捕获 started+routed+ended 同一 ``call_id`` |
 | **e2e** | ``tests/e2e/test_console_dashboard.py`` #43 | 浏览器 ``#filt`` 过滤后 ≥3 行（UI 附加证据）|
 
-**状态**: 代码已修；unit + integration + E2E 计划已补（2026-09-24）
+**状态**: **Done**（2026-09-24）— Phase A SVG sequence + event modal；Phase B verbatim SIP via ``GET .../messages`` + modal ``pre.trace-sip``（ADR-0016, ACC-P15-001/002）。
 
 ---
 

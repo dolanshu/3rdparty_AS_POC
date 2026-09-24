@@ -859,6 +859,21 @@ every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
   Plan: **`docs/phase3-p9b-alignment-plan.md`**. Explicitly **excludes**
   `tools/capacity_probe.py`. Target version `1.1.0`.
 
+## Future directions (not scheduled)
+
+These are architecture notes, not milestones. Nothing here is on the P1–P15 delivery track until
+a maintainer schedules it.
+
+- **SIP engine seam (`B2buaEngine`).** Today sippy types leak through `PolicyDecision.outbound_event`
+  (`CCEventTry`) and app controllers still construct sippy outbound events. The platform B2BUA
+  relay shell (~1000 lines in `as_platform/call_controller.py`) is implemented on sippy
+  throughout. A future step introduces a stack-neutral engine in `as_platform` with a
+  `SippyAdapter` (and later a second adapter), after a **one-time** app migration off sippy
+  types. Mock and tools can stay on sippy if the AS speaks RFC 3261 on the wire; integration
+  tests that drive `ED2.loop()` in-process would need a new harness. Full write-up:
+  **`docs/architecture/future/sip-engine-seam.md`**. Reserve **ADR-0017** when implementation is
+  scheduled.
+
 ## Conventions
 
 - **Single source of truth:** rules live in `AGENT.md`; live status lives here; evidence

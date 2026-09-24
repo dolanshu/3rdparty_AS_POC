@@ -142,6 +142,12 @@ this documentation commit changes no file under `src/`.
 | Console SIP payload source | **Delivered (P15-B, 2026-09-24):** bounded in-memory `SipMessageRecorder` on both AS processes (`DualSipLogger` + `DEFAULT_MAX_CAPTURED_MESSAGES=5000`); read-only `GET /api/v1/traces/{call_id}/messages` feeds the console modal (ADR-0016). Demo/loopback only. | Durable trace store with retention, redaction, and access control; SIP payloads encrypted at rest; no full message text in browser for all operators by default |
 | Event ↔ message correlation | **Delivered (heuristic):** modal matches by direction + SIP start-line method + event index order; diagram unchanged when no match | Stable message IDs and correlation keys in the trace store |
 
+## Additional gap registered from stack-replacement discussion (2026-09-24)
+
+| Area | POC behaviour | Production requirement |
+| --- | --- | --- |
+| B2BUA / SIP stack binding | **P10 closed the internal-API duplication row** (controller shell is in `as_platform`), but the shell is still **implemented on sippy** end to end: `BaseAsStack` owns `ED2.loop()` and `SipTransactionManager`; `BaseCallController` owns `UA` relay, timers and failover. App controllers only override `decide()`, yet still return **`PolicyDecision.outbound_event: CCEventTry`** and import `SipCallId` / `CCEventFail`. Mock, tools and integration tests also depend on sippy (mock can stay on sippy if the AS speaks RFC 3261 on UDP). | Introduce a **`B2buaEngine`** seam in `as_platform` with stack-neutral inbound/outbound types; one-time app migration off sippy construction; then swap stacks via adapter without touching `as_app` / `anti_fraud_as` business logic. See **`docs/architecture/future/sip-engine-seam.md`**. Reserve ADR-0017 when scheduled. |
+
 ## Notes
 
 - Gaps are never "forgotten features": each one is a decision with an ADR or a row in this

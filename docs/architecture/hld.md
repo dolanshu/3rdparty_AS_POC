@@ -583,6 +583,19 @@ what the system does.
   this repository follows the library in the same piece of work — it is the first user, not a
   consumer at a distance (ADR-0009, *Consequences*; D8).
 
+### 10.7 Future direction: stack-agnostic SIP engine (not scheduled)
+
+P10 moved the B2BUA relay shell into `as_platform`, but the shell still **implements** relay,
+failover and timers with sippy types (`UA`, `CCEvent*`, `ED2.loop()`). App controllers hook
+`decide()` only; they do not drive the relay. The remaining coupling is **`PolicyDecision.outbound_event:
+CCEventTry`** and a few app-side sippy imports — not the routing or screening logic.
+
+A proposed next seam — documented, not scheduled — is a **`B2buaEngine`** in `as_platform`:
+stack-neutral call-leg events in, `OutboundInviteSpec` out of `decide()`, and a
+`SippyAdapter` (then a second adapter) underneath. After a one-time app migration, **future
+stack swaps would be platform-only**; mock and tools could keep sippy on the wire. See
+**`docs/architecture/future/sip-engine-seam.md`**.
+
 ## 11. Call Load capability (P12)
 
 Phase 3's first item. Demonstrates that the AS handles N concurrent SIP calls of mixed

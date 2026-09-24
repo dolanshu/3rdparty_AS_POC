@@ -1244,6 +1244,13 @@ reject needs no `RoutingDecision`, the disposition is supplied, and `dispose()` 
 move into the base as stated invariants, because the number-translation AS already tolerates
 them on its error branches. They are no longer an anti-fraud special case (ADR-0009 decision 4).
 
+**Future direction (not scheduled).** The seam above is **decision-shaped but not stack-neutral**:
+`outbound_event` is still a sippy `CCEventTry`, and app `decide()` implementations construct
+sippy types. A proposed follow-on replaces that field with a stack-neutral
+`OutboundInviteSpec` (or equivalent) and moves request parsing such as Route-header extraction
+into the platform, so a one-time app migration makes later stack swaps platform-only. See
+**`docs/architecture/future/sip-engine-seam.md`**.
+
 ### 11.3 The error model families
 
 Python forbids subclassing an `Enum` that has members, so a single `AsErrorCode` cannot be

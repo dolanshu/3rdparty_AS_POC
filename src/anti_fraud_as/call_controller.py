@@ -203,8 +203,13 @@ class FraudCallController(BaseCallController):
         self.screening_data = screening_data
         self.caller_state = caller_state
         self._emit_app = app
-        if app is not None:
+
+    def recv_request(self, request: Any, transaction: Any) -> Any:
+        """Terminate the trunk INVITE, then emit ``call_started`` with the real Call-ID."""
+        result = super().recv_request(request, transaction)
+        if self._emit_app is not None:
             self._emit_p12("call_started", {"direction": "trunk_in"})
+        return result
 
     # ------------------------------------------------------------------
     # P12 per-call event emission (no as_platform changes — AS-local only)

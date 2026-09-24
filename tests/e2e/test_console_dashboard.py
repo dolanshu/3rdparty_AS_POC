@@ -114,6 +114,76 @@ def _as_get(as_api: str, path: str) -> dict:
         return json.loads(r.read())
 
 
+def _wait_as_metrics(as_api: str, predicate, timeout: float = 25) -> dict:
+    """Poll GET /api/v1/metrics until predicate(metrics) is true."""
+    deadline = time.time() + timeout
+    last: dict = {}
+    while time.time() < deadline:
+        last = _as_get(as_api, "/api/v1/metrics")
+        if predicate(last):
+            return last
+        time.sleep(0.5)
+    pytest.fail(f"AS metrics predicate not met within {timeout}s — last: {last}")
+
+
+def _wait_fm_refresh(page, seconds: float = 3.5) -> None:
+    """Allow console setInterval(fm, 3000) to refresh cached md."""
+    page.wait_for_timeout(int(seconds * 1000))
+
+
+_VALID_CALL_TYPES = ["T1", "T2", "T3", "T5", "T6", "F1", "F2", "F3", "F4"]
+_SIMPLE_CALL_TYPES = ["T1", "T2", "T3", "T5", "T6"]
+
+
+def _accumulate_as_metrics(page, demo_stack) -> dict:
+    """Start generator and wait until AS metrics show routed calls."""
+    _click_visible(page, "#btnStart")
+    metrics = _wait_as_metrics(
+        demo_stack["as_api"],
+        lambda m: m.get("calls_total", 0) > 0 and bool(m.get("rule_hits")),
+    )
+    _wait_fm_refresh(page)
+    return metrics
+
+
+def _richest_trace_call(page) -> dict | None:
+    """Return the Call-ID with the most entries in the browser ``tc`` buffer."""
+    return page.evaluate("""() => {
+        var by = {};
+        tc.forEach(function(t){
+            if(!by[t.call_id]) by[t.call_id] = [];
+            by[t.call_id].push(t.event);
+        });
+        var best = null;
+        Object.keys(by).forEach(function(cid){
+            var evs = by[cid];
+            if(!best || evs.length > best.count){
+                best = {call_id: cid, events: evs.slice(), count: evs.length};
+            }
+        });
+        return best;
+    }""")
+
+
+def _wait_full_trace_lifecycle(page, timeout: float = 25) -> dict:
+    """Wait until ``tc`` holds started+routed+ended for one Call-ID."""
+    required = {"call_started", "call_routed", "call_ended"}
+    deadline = time.time() + timeout
+    last: dict | None = None
+    while time.time() < deadline:
+        last = _richest_trace_call(page)
+        if last:
+            evs = set(last.get("events") or [])
+            if required.issubset(evs):
+                return last
+        time.sleep(0.5)
+    pytest.fail(
+        "no Call-ID with call_started + call_routed + call_ended in Live Trace "
+        f"within {timeout}s — last tc snapshot: {last!r}. "
+        "Filter can only show one row when tc lacks the other lifecycle events."
+    )
+
+
 def _click_nav(page, view: str) -> None:
     _click_visible(page, f'.nav button[data-v="{view}"]')
 
@@ -193,6 +263,11 @@ class TestPageLoad:
         assert page.locator("#btnStop").is_disabled(), "btnStop should be disabled when generator idle"
         gauge = page.locator("#gaugeVal").inner_text()
         assert gauge.startswith("0 /"), f"gauge should start at 0/N, got '{gauge}'"
+        bind = page.locator("#bindInd").inner_text()
+        assert "binding:" in bind.lower(), f"binding indicator missing: '{bind}'"
+        assert "concurrency" in bind or "rate" in bind
+        as_sum = page.locator("#asSummary").inner_text()
+        assert "total calls" in as_sum.lower(), f"AS summary missing: '{as_sum}'"
 
 
 # ===========================================================================
@@ -237,9 +312,16 @@ class TestNavigation:
     def test_statistics_view_renders(self, page, demo_stack):
         _open_console(page, demo_stack)
         _click_nav(page, "statistics")
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(1500)
         assert page.locator("#vw-statistics").evaluate("el => el.classList.contains('act')")
-        assert page.locator("#statsCard").count() == 1
+        card = page.locator("#statsCard")
+        assert card.count() == 1
+        inner = card.inner_text()
+        assert "total calls" in inner.lower()
+        # Full metrics tables (disposition / errors / rules / peers) — not JSON.stringify.
+        html = card.inner_html()
+        assert "stat-section" in html or "No metrics yet" in inner
+        assert "JSON.stringify" not in html
 
     def test_about_view_renders(self, page, demo_stack):
         _open_console(page, demo_stack)
@@ -491,6 +573,33 @@ class TestDashboardLive:
         after_nomatch = page.locator("#tlist .ti").count()
         assert after_nomatch <= total_before, f"filter expanded list: {after_nomatch} > {total_before}"
 
+    def test_trace_filter_shows_multiple_rows_for_one_call_id(self, page, demo_stack):
+        """#filt must show every lifecycle event for one Call-ID, not a single row."""
+        _open_console(page, demo_stack)
+        _click_visible(page, "#btnStart")
+        lifecycle = _wait_full_trace_lifecycle(page)
+        call_id = lifecycle["call_id"]
+        page.fill("#filt", call_id)
+        page.wait_for_timeout(400)
+        rows = page.evaluate("""() => Array.from(document.querySelectorAll('#tlist .ti')).map(function(row){
+            return {
+                call_id: row.querySelector('.cid').innerText,
+                event: row.querySelector('.ev').innerText,
+            };
+        })""")
+        assert len(rows) >= 3, (
+            f"filter on {call_id!r} should show >=3 lifecycle rows, got {len(rows)}: {rows!r}; "
+            f"tc had events={lifecycle['events']!r}"
+        )
+        assert all(r["call_id"] == call_id for r in rows), (
+            f"filtered rows must all be the same Call-ID: {rows!r}"
+        )
+        event_text = " ".join(r["event"] for r in rows)
+        assert "call_started" in event_text, event_text
+        assert "call_routed" in event_text, event_text
+        assert "call_ended" in event_text, event_text
+        _click_visible(page, "#btnStop")
+
 
 # ===========================================================================
 # T5 — AS REST endpoints
@@ -614,6 +723,90 @@ class TestBindingConstraint:
             f"expected 'concurrency' for {{target=10, rate=2.0}} "
             f"(2.0×10.4=20.8>=10), got '{s['binding_constraint']}': {s}"
         )
+
+
+class TestBindingConstraintUI:
+    """phase3-gap-audit item 2 — Dashboard #bindInd follows generator config."""
+
+    def test_bind_ind_reflects_generator_config(self, page, demo_stack):
+        _open_console(page, demo_stack)
+        initial = page.locator("#bindInd").inner_text().lower()
+        assert "binding:" in initial
+        assert "concurrency" in initial, f"default should be concurrency-bound: '{initial}'"
+
+        _put_config(demo_stack["gen"], {
+            "target_concurrency": 10,
+            "call_rate": 0.1,
+            "enabled_call_types": _SIMPLE_CALL_TYPES,
+            "topology": "simple",
+        })
+        deadline = time.time() + 8
+        saw_rate = False
+        while time.time() < deadline:
+            txt = page.locator("#bindInd").inner_text().lower()
+            if "binding:" in txt and "rate" in txt:
+                saw_rate = True
+                break
+            time.sleep(0.3)
+        assert saw_rate, (
+            "#bindInd never flipped to rate after PUT call_rate=0.1 — "
+            f"last text: {page.locator('#bindInd').inner_text()!r}"
+        )
+
+
+class TestStatisticsMetrics:
+    """phase3-gap-audit item 1 — Statistics view renders full /api/v1/metrics tables."""
+
+    def test_peer_status_section_renders(self, page, demo_stack):
+        _open_console(page, demo_stack)
+        _click_nav(page, "statistics")
+        page.wait_for_timeout(1500)
+        inner = page.locator("#statsCard").inner_text()
+        assert "peer status" in inner.lower(), f"peer_status table missing: {inner!r}"
+
+    def test_metric_sections_after_generator_calls(self, page, demo_stack):
+        _open_console(page, demo_stack)
+        metrics = _accumulate_as_metrics(page, demo_stack)
+        _click_nav(page, "statistics")
+        page.wait_for_timeout(500)
+        inner = page.locator("#statsCard").inner_text()
+        lower = inner.lower()
+        assert "disposition" in lower, inner
+        assert "rule hits" in lower, inner
+        assert "peer status" in lower, inner
+        if metrics.get("errors_by_code"):
+            assert "errors by code" in lower, inner
+        _click_visible(page, "#btnStop")
+
+    def test_rule_hit_link_navigates_to_rules(self, page, demo_stack):
+        _open_console(page, demo_stack)
+        _accumulate_as_metrics(page, demo_stack)
+        _click_nav(page, "statistics")
+        page.wait_for_timeout(500)
+        link = page.locator("#statsCard .rule-link").first
+        assert link.count() >= 1, "expected at least one rule-link in statsCard"
+        link.click()
+        page.wait_for_timeout(400)
+        assert page.locator("#vw-rules").evaluate("el => el.classList.contains('act')")
+        _click_visible(page, "#btnStop")
+
+
+class TestAsSummary:
+    """phase3-gap-audit item 3 — Dashboard #asSummary cumulative snapshot."""
+
+    def test_as_summary_shows_top_rule_after_calls(self, page, demo_stack):
+        _open_console(page, demo_stack)
+        _accumulate_as_metrics(page, demo_stack)
+        summary = page.locator("#asSummary").inner_text()
+        assert "top rule:" in summary.lower(), f"AS summary missing top rule: {summary!r}"
+        _click_visible(page, "#btnStop")
+
+    def test_as_summary_statistics_link(self, page, demo_stack):
+        _open_console(page, demo_stack)
+        page.wait_for_selector("#asSumLink", timeout=8000)
+        page.locator("#asSumLink").click()
+        page.wait_for_timeout(500)
+        assert page.locator("#vw-statistics").evaluate("el => el.classList.contains('act')")
 
 
 class TestDomUniqueness:

@@ -286,9 +286,12 @@ def test_console_page_carries_the_screening_and_instance_surfaces() -> None:
     assert 'data-v="screening"' in page, "Screening navigation entry not found"
     assert "vw-screening" in page, "screening view container not found"
     assert "scrCard" in page, "screening card container not found"
-    # Statistics panel (P13 simplified: statsCard with total + disposition).
+    # Statistics panel — full metrics tables (disposition, errors, rules, peers).
     assert "vw-statistics" in page, "statistics view container not found"
     assert "statsCard" in page, "statistics card container not found"
+    assert "stat-section" in page, "statistics section markup not found"
+    assert "bindInd" in page, "binding constraint indicator not found"
+    assert "asSummary" in page, "AS summary card not found"
     # Instance identity: a status-bar chip and the document title both read /healthz.
     assert 'id="aInst"' in page, "instance status-bar chip not found"
     assert "hd.instance" in page, "the instance identity is not read from /healthz"

@@ -19,6 +19,7 @@ roadmap 上 P12/P13/P14 都标着 `[Status: Done]`。但在 2026-09-24 的 live 
 5. 两个 slider 撑爆侧边栏，水平拖动条
 6. Simple 拓扑画了不存在的 Anti-fraud 节点
 7. Statistics 视图只渲染 AS metrics API 的 2/6 字段
+8. Live Trace 按 Call-ID 过滤后只见一行（``call_started`` 曾以 ``call_id='-'`` 发出，与 routed/ended 的 trunk Call-ID 不一致）
 
 全部是 "Done" 标签掩盖的**没做 / 做错 / 数据断链**的问题。本文档列出所有遗留项，每条给**文件路径 + 行号 + API 返回证据 + 建议改动**，让接手者能直接动手。
 
@@ -230,7 +231,29 @@ uv run pytest -q               # 确认测试全绿再继续
 
 ---
 
-## 7. 已知设计决策（接手者别推翻）
+## 7. Live Trace Call-ID 过滤 — P12 ``call_started`` 用了 ``"-"``（已修 + 测试分层）
+
+**严重性**: 高（用户按 Call-ID 过滤只见 ``call_routed`` 一行，lifecycle 看起来断了）  
+**根因**: ``CallController.__init__`` 时 ``call_id=='-'`` 就 emit ``call_started``；``call_routed`` / ``call_ended`` 用的是 ``recv_request`` 后的真实 Call-ID  
+**位置**: ``src/as_app/call_controller.py``, ``src/anti_fraud_as/call_controller.py``（P12 路径，**不是** Phase 1 ``TraceRecorder``，**不是** load generator 专属）
+
+### 修复
+
+``call_started`` 移到 ``super().recv_request()`` 之后，与 routed/ended 共用 trunk Call-ID。
+
+### 测试分层（勿只写在 E2E plan）
+
+| 层 | 文件 | 断言 |
+|---|---|---|
+| **unit** | ``tests/unit/test_p12_call_controller.py`` | 构造时不 emit；``recv_request`` 后用 trunk Call-ID |
+| **integration** | ``tests/integration/test_p12_call_events.py`` | 单通 ``trunk_pair`` + ``start_internal_api``，broadcast 捕获 started+routed+ended 同一 ``call_id`` |
+| **e2e** | ``tests/e2e/test_console_dashboard.py`` #43 | 浏览器 ``#filt`` 过滤后 ≥3 行（UI 附加证据）|
+
+**状态**: 代码已修；unit + integration + E2E 计划已补（2026-09-24）
+
+---
+
+## 8. 已知设计决策（接手者别推翻）
 
 | 决策 | 理由 | 来源 |
 |---|---|---|
@@ -243,19 +266,20 @@ uv run pytest -q               # 确认测试全绿再继续
 
 ---
 
-## 8. 下一步优先级建议
+## 9. 下一步优先级建议
 
-| P | 项 | 理由 |
-|---|---|---|
-| 1 | Statistics 视图补全 4 个缺失字段（item 1） | 最明显的"Done 标签下的半成品"，20 行内改完 |
-| 2 | Binding constraint indicator 放到 Dashboard（item 2） | generator 后端实现了但前端没消费，Little's Law 是 P13 demo 核心叙事 |
-| 3 | 提交 `a5ea2ee` + 本轮 main.py / routing_rules.yaml 改动 | 清理未提交 state，便于跨机器 |
-| 4 | 在另一台机器上跑完整 demo 流程（`phase3-demo.sh simple` + Windows 浏览器） | 确认所有跨 OS 场景修复生效 |
-| 5 | 全量跑 Playwright E2E（`uv run pytest tests/e2e/test_console_dashboard.py -v`） | 本轮 main.py 改了但 Playwright 全量没跑过 |
+| P | 项 | 理由 | 状态 |
+|---|---|---|---|
+| 1 | Statistics 视图补全 4 个缺失字段（item 1） | 最明显的"Done 标签下的半成品"，20 行内改完 | **Done** — `rs()` 渲染 disposition / errors / rule_hits / peer_status 表格 |
+| 2 | Binding constraint indicator 放到 Dashboard（item 2） | generator 后端实现了但前端没消费，Little's Law 是 P13 demo 核心叙事 | **Done** — `#bindInd` 在 `onPoolStatus` / `pollLd` 更新 |
+| 3 | Dashboard AS summary 小卡片（item 3） | 累计 metrics 与实时 WS 并存 | **Done** — `#asSummary` 每 3s 随 `fm()` 刷新，链到 Statistics |
+| 4 | 提交本轮改动 | 清理未提交 state，便于跨机器 | 待 maintainer |
+| 5 | 在另一台机器上跑完整 demo 流程（`phase3-demo.sh simple` + Windows 浏览器） | 确认所有跨 OS 场景修复生效 | 待验证 |
+| 6 | 全量跑 Playwright E2E（`uv run pytest tests/e2e/test_console_dashboard.py -v`） | 本轮 main.py 改了但 Playwright 全量没跑过 | **已补计划+用例** — `docs/testing/e2e-playwright-plan.md` §3.7–3.9 新增 6 测（#37–42）；#43 + integration/unit P12 Call-ID 测试 |
 
 ---
 
-## 9. 测试结果快照（2026-09-24 live session）
+## 10. 测试结果快照（2026-09-24 live session）
 
 ```bash
 # Console integration — 7 passed ✅

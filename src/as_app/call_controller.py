@@ -116,9 +116,13 @@ class CallController(BaseCallController):
         # The routing decision of this call, kept so the failover attempts and the
         # rejection vocabulary reproduce the decision that produced them.
         self._decision: RoutingDecision | None = None
-        # P12: emit call_started event (as_app is "as_translation")
-        if app is not None:
+
+    def recv_request(self, request: Any, transaction: Any) -> Any:
+        """Terminate the trunk INVITE, then emit ``call_started`` with the real Call-ID."""
+        result = super().recv_request(request, transaction)
+        if self._emit_app is not None:
             self._emit_p12("call_started", {"direction": "trunk_in"})
+        return result
 
     # ------------------------------------------------------------------
     # P12 per-call event emission (no as_platform changes — AS-local only)

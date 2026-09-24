@@ -25,6 +25,28 @@ import pytest
 PROJECT_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
 VENV_PY = os.path.join(PROJECT_ROOT, ".venv", "bin", "python")
 
+# Corporate/WSL proxies often intercept 127.0.0.1 unless bypassed — breaks health polls.
+_LOCAL_NO_PROXY_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def _ensure_local_no_proxy() -> None:
+    for var in ("NO_PROXY", "no_proxy"):
+        existing = [p.strip() for p in os.environ.get(var, "").split(",") if p.strip()]
+        for host in _LOCAL_NO_PROXY_HOSTS:
+            if host not in existing:
+                existing.append(host)
+        os.environ[var] = ",".join(existing)
+
+
+_ensure_local_no_proxy()
+
+
+def _env_with_local_no_proxy(base: dict[str, str] | None = None) -> dict[str, str]:
+    env = dict(base or os.environ)
+    for var in ("NO_PROXY", "no_proxy"):
+        env[var] = os.environ.get(var, "")
+    return env
+
 
 # ---------------------------------------------------------------------------
 # Port / health helpers
@@ -106,7 +128,7 @@ def demo_stack(tmp_path_factory):
     with _rules_dst.open("w") as _f:
         _yaml.safe_dump(_doc, _f, sort_keys=False, allow_unicode=True)
 
-    env = os.environ.copy()
+    env = _env_with_local_no_proxy()
     procs: list[subprocess.Popen] = []
     log_files: list = []
 

@@ -1,7 +1,7 @@
 # P13 Dashboard — Playwright E2E 测试计划
 
 > 状态：已按 review-20260923 两轮修订（含 review-kimi 第二轮） · 编写日期：2026-09-22 · 最后修订：2026-09-23
-> 对应文件：`tests/e2e/test_console_dashboard.py`（28 测试 / 6 类）
+> 对应文件：`tests/e2e/test_console_dashboard.py`（**43 测试 / 9 类**，含 2026-09-24 trace filter 生命周期补测）
 > 目标：用真实浏览器（Chromium headless）完整走通 Enhanced Dashboard 用户旅程生命周期，覆盖事件流每一环。
 
 ### 代码修复状态（review 两轮 + HY4 第三轮行动项）
@@ -17,7 +17,11 @@
 | **M-5** | `test_console_dashboard.py` L46-79 | `_reset_gen` 区分不可达（立刻 fail）与超时（带诊断 fail） | ✅ **已修复** 2026-09-23 | 手动 kill generator 进程 → pytest.fail 给出清晰错误信息 |
 | **R2-P2-3** | `conftest.py` L79 | 删 conftest 死副本 `_reset_gen` | ✅ **已修复** 2026-09-23 | conftest 无同名死代码；dashboard 文件那份是唯一版本 |
 | **R2-P2-4 / N-2 / N-3** | `conftest.py` L113-154 | 4 进程日志落 per-session tmpdir、句柄 teardown 时关 | ✅ **已修复** 2026-09-23 | pytest session 结束后无 `/tmp/e2e-*` 残留；无 `PosixPath.close` teardown 错 |
-| **R3-P0-1** | `test_console_dashboard.py` TestBindingConstraint | binding-constraint 配方方向纠正：`call_rate` 越大越 `"concurrency"`；PUT 响应不含该字段需再 GET | ✅ **已补测试** commit `68d189a`（36 测试 → 8 新增） | 新 REST 级 E2E：`{10, 0.1} → "rate"`；`{10, 2.0} → "concurrency"` |
+| **R3-P0-1** | `test_console_dashboard.py` TestBindingConstraint | binding-constraint 配方方向纠正：`call_rate` 越大越 `"concurrency"`；PUT 响应不含该字段需再 GET | ✅ **已补测试** commit `68d189a`（REST 级 2 测） | `{10, 0.1} → "rate"`；`{10, 2.0} → "concurrency"` |
+| **P3-gap-1** | `TestStatisticsMetrics` | Statistics 视图消费 `/api/v1/metrics` 全字段（disposition / errors / rule_hits / peer_status），非 JSON.stringify | ✅ **已补测试** 2026-09-24 | `#statsCard` 含四段 `.stat-section`；rule-link → Rules |
+| **P3-gap-2** | `TestBindingConstraintUI` | Dashboard `#bindInd` 随 generator config 翻转（ADR-0013 浏览器可见） | ✅ **已补测试** 2026-09-24 | PUT rate=0.1 → `#bindInd` 含 `rate` |
+| **P3-gap-3** | `TestAsSummary` | Dashboard `#asSummary` 累计 metrics + Statistics 链接 | ✅ **已补测试** 2026-09-24 | 跑 calls 后 `top rule:`；`#asSumLink` → Statistics |
+| **P3-gap-4** | `TestDashboardLive` #43 | `#filt` 按 Call-ID 过滤后同一通呼叫须 **≥3 行**（started+routed+ended），非单行 | ✅ **已补测试** 2026-09-24 | 轮询 `tc[]` 找完整 lifecycle → fill `#filt` → `#tlist .ti` count ≥ 3 |
 | **R3-P1-2a** | `test_console_dashboard.py` TestDomUniqueness | DOM 唯一性 `#vw-{view}.count() == 1` | ✅ **已补测试** commit `68d189a` | 5 视图 parametrize；人为插第二份 `.vw-rules` → 测试红 |
 | **R3-P1-2b** | `test_console_dashboard.py` TestWsOfflineReconnect | WS 离线重连（`set_offline True → False`） | ✅ **已补测试** commit `68d189a` | `#wsEv/#wsLd: live → offline → recover → live` |
 | **R3-P1-4** | generator L105 + ADR-0013 L79 + HLD §12.4 + unit-plan + 2 处单测注释 | **9.5 vs 10.4 escalate to maintainer**——这是 ADR-0013 + HLD 共同确认的设计常量，不是某处注释写错；同步五处并改 `test_duration_model_avg_duration_constant` 为断言字面量 | **待裁决** | 五处数值一致；单测改为 `assert AVG_DURATION_SECONDS == 10.4` |
@@ -151,7 +155,7 @@ python3 -m pytest tests/e2e/test_console_dashboard.py -v -k "Concurrent"
 
 ---
 
-## 三、测试用例清单（28 个 / 6 类）
+## 三、测试用例清单（43 个 / 9 类）
 
 ### 3.1 TestPageLoad（5 个）—— 基础连通性，失败则中止后续
 
@@ -167,7 +171,7 @@ python3 -m pytest tests/e2e/test_console_dashboard.py -v -k "Concurrent"
 | 2 | `test_all_nav_buttons_present` | ① `.nav button.count() >= 5` ② texts 里有 Dashboard + Rules + About（**只校验这三个**）③ Dashboard 第一个按钮有 `act` class | draft 声称"6 个按钮全部可见且可点击"——可点击未校验；只验了 3 个文本 | **REQ-F-012 / ACC-P13-008**（console 展示 matched rule / configuration / statistics / topology——前版错标 REQ-F-045）|
 | 3 | `test_status_bar_renders` | 8 个 DOM id 各存在一个：`aDot, aSt, aInst, aVer, aUp, aCal, aAct, aTgt` | draft 写了"Load"字段——实际没有 Load id | —（`AGENT.md` §4.4 console standard 健康检查初始态）|
 | 4 | `test_both_websockets_connect` | `#wsEv` + `#wsLd` 的 inner_text 含 "live"，轮询 ≤ 10s 成功 | 一致 | **REQ-F-042 + REQ-F-044 / ACC-P12-005 + ACC-P12-007**（两个 AS per-call event stream + generator pool_status_update）|
-| 5 | `test_initial_dashboard_controls_state` | ① `#btnStop.is_disabled()` 为 True ② `#gaugeVal.inner_text` 以 `"0 /"` 开头 | draft 声称验证 btnStart enabled——代码没验 btnStart | **REQ-F-049 / ACC-P13-005**（generator 控件初始态）|
+| 5 | `test_initial_dashboard_controls_state` | ① `#btnStop.is_disabled()` 为 True ② `#gaugeVal` 以 `"0 /"` 开头 ③ `#bindInd` 含 `binding:` + `concurrency`/`rate` ④ `#asSummary` 含 `total calls` | 2026-09-24 增 ③④（phase3-gap-audit item 2/3 smoke） | **REQ-F-049 / ACC-P13-005** + **ADR-0013** |
 
 ### 3.2 TestNavigation（8 个）—— SPA 视图切换
 
@@ -178,7 +182,7 @@ python3 -m pytest tests/e2e/test_console_dashboard.py -v -k "Concurrent"
 | 6 | `test_call_trace_view_renders` | ① 点 Call Trace → `#vw-call-trace.classList.contains('act')` True ② `.nav` count == 1（没丢）③ `.nav button[data-v="call-trace"].classList.contains('act')` | **不**断言其他视图不可见（只 #13 部分覆盖）。选择器是 `#vw-*` id + `classList.contains('act')`，不是 draft 写的 `.vw-*` class | **REQ-F-012 / ACC-P13-008** |
 | 7 | `test_rules_view_renders_and_has_content` | ① `#vw-rules.classList.contains('act')` ② `#rulesCard.inner_text` 非空 | draft 声称"找到 ≥ 3 条规则卡片 `.rule-card`"——实际只验 inner_text 非空，无条数、无 `.rule-card` 选择器 | **REQ-F-012 / ACC-P13-008**（前版错标 REQ-F-050 Chart.js vendoring）|
 | 8 | `test_screening_view_renders` | ① `#vw-screening.classList.contains('act')` ② `#scrCard.count() == 1` | 一致（draft 没提 #scrCard）| **REQ-F-012 / ACC-P13-008**（**前版凭空造了 REQ-F-051——已删除**）|
-| 9 | `test_statistics_view_renders` | ① `#vw-statistics.classList.contains('act')` ② `#statsCard.count() == 1` | 一致 | **REQ-F-012 / ACC-P13-008** |
+| 9 | `test_statistics_view_renders` | ① `#vw-statistics.act` ② `#statsCard` 存在 ③ inner 含 `total calls` ④ HTML 含 `.stat-section` 或 `No metrics yet`，**不含** `JSON.stringify` | 2026-09-24 加强；**四表内容**见 T7 `#37–39` | **REQ-F-012 / ACC-P13-008** |
 | 10 | `test_about_view_renders` | ① `#vw-about.classList.contains('act')` ② inner_text 含 `"third-party"` | 一致 | **REQ-F-012 / ACC-P13-008** |
 | 11 | `test_nav_stays_visible_after_each_view` | 遍历 5 个非 dashboard 视图 → 每步 `.nav.count() == 1` + 当前按钮有 `act` | 不验证其他按钮的 act 状态（只验证当前点击的那个）| **REQ-F-012 / ACC-P13-008** |
 | 12 | `test_round_trip_rules_to_dashboard` | ① 点 Rules → `#vw-rules.act` ② 点 Dashboard → `#vw-dashboard.style.display != "none"` + `#vw-rules.classList.contains('act') == False` | draft 写的是"`.centre` 恢复可见"——代码用 `#vw-dashboard.style.display` 检查（两者等价，但实现更精确）| **REQ-F-012 / ACC-P13-008** |
@@ -195,7 +199,7 @@ python3 -m pytest tests/e2e/test_console_dashboard.py -v -k "Concurrent"
 | 16 | `test_stop_button_drains_active_to_zero` | Stop → deadline 15s → 同时满足 `running=False` 且 `active_calls=0` | 一致 | **REQ-F-049 / ACC-P13-005** ✔ |
 | 17 | `test_console_gauge_rises_then_falls_with_generator` | 4 阶段：① **try 前** `orig_cfg = _gen_status()` 存原配置 → `_put_config` 禁 T4 + 改 call_rate ② generator REST active_calls > 0 至少一次 ③ console `#gaugeVal.inner_text` 非零至少一次 ④ Stop → 两个 drain 断言 → **finally** 恢复 `_put_config(gen, orig_cfg_body)` | 前版用 `requests.put` + try/except 吞异常 + **不恢复配置**（M-4 blocker）——已修 | **REQ-F-047 + REQ-F-049 / ACC-P13-003 + ACC-P13-005**（gauge=REQ-F-047，generator 控件=REQ-F-049；**slider → call_rate → binding-constraint 闭环未覆盖**，见 §5.1 R3-P0-1）|
 
-### 3.4 TestDashboardLive（5 个）—— 实时图表
+### 3.4 TestDashboardLive（6 个）—— 实时图表
 
 > 图表用 `_read_chart()` helper（L76-84），走 `Chart.getChart(el)` 读，不是 draft 里的 `el.__chart__`。
 > **阈值推导口径**（R2-P2-2）：折线 chart 约 500ms 推一个点，wait 6s 理论 12 点；≥4 给 WS 抖动 + 首次连接延迟 3× 容错系数。trace 面板同理：wait 8s，每 call 产生 3-5 条 trace，≥3 允许短 calls + pool_feed bursty 导致的低值时段。
@@ -208,6 +212,11 @@ python3 -m pytest tests/e2e/test_console_dashboard.py -v -k "Concurrent"
 | 20 | `test_topology_svg_links_change_on_active` | ① 读 idle 态 `#l1.getAttribute('stroke-width')` ② Start → deadline 20s 轮询 → 找到 `active_sw > idle_sw + 0.1` ③ 否则 assert False + dump console 内部 state (activeCalls, counters, topoVal, l1_sw) | 文档 4.3 节描述"Math.max(activeCalls, counters.active, totalTraffic)"准确。draft §3 声称"> 1"——实际是浮点比较 `active_sw > idle_sw + 0.1`（idle 基线通常≈1.0，比较增量 0.1）| **REQ-F-048 / ACC-P13-004** ✔（颜色未覆盖，见 §5.1）|
 | 21 | `test_trace_panel_accumulates_call_records` | Start → wait 8s → `#tlist .ti` count `>= 3` | draft 写 `>= 5`，实际代码是 `>= 3`。**推导**：wait 8s，每 call 产生 3-5 条 trace entry × bursty factor 0.5 = 3 下限 | **REQ-F-042 / ACC-P12-005**（**前版错标 REQ-F-047 gauge**——trace 是 AS per-call event stream）|
 | 22 | `test_trace_filter_narrows_list` | ① 取 `total_before = #tlist .ti count` ② **若 0 → `pytest.skip()`** ③ 输入 `"zzzzzzzNoMatchzzzzz"`（必然不匹配的字符串）④ assert `after_nomatch <= total_before` | **⚠️ smoke-only**（R2-P2-1）：断言在 filter 完全失效时也会通过。**已修** P0-3（import pytest），但 `pytest.skip()` 是否实际被调用仍是随机的（generator 是否够活跃产生 ≥1 条 trace）。强化路径：改首条 trace 的 Call-ID 片段作为过滤词，断言 `after == 1` + `total_before > 1` | **REQ-F-042 / ACC-P12-005** ✔ |
+| 43 | `test_trace_filter_shows_multiple_rows_for_one_call_id` | Start → deadline 25s 轮询 JS `tc[]` 直到某 `call_id` 同时含 `call_started` + `call_routed` + `call_ended`（≥3 条）→ `page.fill("#filt", call_id)` → assert `#tlist .ti` count **≥ 3** 且每行 `.cid` 均为该 Call-ID | **补 #22 缺口**：用户 filter 后只见一行 `call_routed` 时此测应红；验 filter 展示**同一 Call-ID 的生命周期多行**，不是 pool 总行数 | **REQ-F-042 / ACC-P12-005** |
+
+> **#43 等待策略**：读浏览器内 `tc`（Live Trace 的内存源），不读 REST `/api/v1/traces`。成功路由的 translation AS 呼叫应产生 3 个 P12 事件；若 WS 在 `call_started` 前未连上或 UI 只保留最后一事件，测试失败并暴露回归。
+
+> **分层说明（2026-09-24）**：此 bug 在 **AS P12 事件路径**，单通 ``trunk_pair`` 即可复现，**不依赖** call-load generator 或 4 进程 demo stack。**主回归**在 integration ``test_p12_call_events.py`` + unit ``test_p12_call_controller.py``（见 ``docs/testing/integration-plan.md`` §3.8）；本 E2E #43 验证 **Console filter UI** 在真实浏览器 + WS 下是否展示同一 Call-ID 的多行 lifecycle。
 
 ### 3.5 TestAsRestEndpoints（4 个）—— AS 后端 REST API
 
@@ -224,6 +233,33 @@ python3 -m pytest tests/e2e/test_console_dashboard.py -v -k "Concurrent"
 |---|--------|----------|------------|----------------------|
 | 27 | `test_generator_runs_survives_navigation` | Start generator → 遍历 5 个视图 → 回 Dashboard → generator 仍 running | View 切换不中断 WS；核心语义是 generator 持续运行 + 视图切换存活 | **REQ-F-049 / ACC-P13-005**（前版错标 REQ-F-042——那是 AS event stream）|
 | 28 | `test_stop_after_view_hops_resets` | 同上 + Stop → drain 到 0 | 并发 Stop 正常 | **REQ-F-049 / ACC-P13-005** ✔ |
+
+### 3.7 TestStatisticsMetrics（3 个）—— phase3-gap-audit item 1
+
+> **动机**：`GET /api/v1/metrics` 返回 6 字段，旧 `#9` 只验 `#statsCard` 存在。gap audit 要求 disposition / errors / rule_hits / peer_status 四表渲染 + rule-link 联动。
+
+| # | 测试名 | 核心断言 | 为什么重要 | REQ / ACC |
+|---|--------|----------|------------|-----------|
+| 37 | `test_peer_status_section_renders` | 打开 Statistics → `#statsCard` inner 含 `"Peer status"` | peer_status 自 AS 启动即有（startup self-check） | **REQ-F-011 / REQ-F-012** |
+| 38 | `test_metric_sections_after_generator_calls` | Start → REST 轮询直到 `calls_total>0` 且 `rule_hits` 非空 → 等 `fm()` 3s 刷新 → Statistics → inner 含 `Disposition` + `Rule hits` + `Peer status`；若 REST 有 `errors_by_code` 则含 `Errors by code` | 验 AS metrics → console `md` → `rs()` 全链路 | **REQ-F-011 / ACC-P13-008** |
+| 39 | `test_rule_hit_link_navigates_to_rules` | 同上积累 rule_hits → Statistics → 点 `#statsCard .rule-link` → `#vw-rules.act` | rule_hits 表格与 Rules 视图联动 | **REQ-F-012 / ACC-P13-008** |
+
+**等待策略**：先 REST 权威源（`_as_get /api/v1/metrics`），再 `page.wait_for_timeout(3500)` 等 `setInterval(fm, 3000)` 刷新 `md`，最后点 Statistics（`md` 已存在时 `sv()` 不调 `fm()`，必须靠 interval 更新）。
+
+### 3.8 TestBindingConstraintUI（1 个）—— phase3-gap-audit item 2（浏览器层）
+
+> **与 T-HY4 `TestBindingConstraint` 的关系**：HY4 只验 generator REST；本类验 **Dashboard `#bindInd`** 消费 `binding_constraint`（`pollLd` 5s + `onPoolStatus` WS）。
+
+| # | 测试名 | 核心断言 | 为什么重要 | REQ / ACC |
+|---|--------|----------|------------|-----------|
+| 40 | `test_bind_ind_reflects_generator_config` | ① 初始 `#bindInd` 含 `concurrency`（默认 rate=3.0, target=10）② `_put_config` `{rate:0.1}` → deadline 8s 轮询 `#bindInd` 含 `rate` | ADR-0013 Little's Law 演示必须在浏览器可见 | **ADR-0013 / ACC-P13-005** |
+
+### 3.9 TestAsSummary（2 个）—— phase3-gap-audit item 3
+
+| # | 测试名 | 核心断言 | 为什么重要 | REQ / ACC |
+|---|--------|----------|------------|-----------|
+| 41 | `test_as_summary_shows_top_rule_after_calls` | Start → REST `rule_hits` 非空 → 等 3.5s → `#asSummary` inner 含 `top rule:` | Dashboard 累计快照（非 WS 实时） | **REQ-F-011 / ACC-P13-008** |
+| 42 | `test_as_summary_statistics_link` | `#asSumLink` 存在 → click → `#vw-statistics.act` | AS summary → Statistics 导航 | **REQ-F-012 / ACC-P13-008** |
 
 ---
 
@@ -324,13 +360,15 @@ assert _gen_status(gen_base)["running"] is True
 | phase3-plan 出处 | 要求 | 本 28 测试现状 |
 |---|---|---|
 | §P13 Stage 4 E2E step (5)(6) + §6 风险表第 4 行（High） | "slide to 5 → verify chart drops"——target concurrency slider → REST `/load/config` → pool → WS → gauge chart **完整闭环** | 本文件无任何 slider E2E。#17 用 `requests.put /load/config` 禁用 T4 作为测试前置，但**不**断言 slider UI → REST → pool 响应链路。phase3-plan 将其列为影响 High 风险 |
-| **D6 Little's Law 教育性设计 + ACC-P13-005**（R2-P1-1） | 双滑块（target concurrency 0-20 + call rate 0.1-10）的 Little's Law 交互：改 call_rate → `/load/status.binding_constraint` 从 "concurrency" 翻转为 "rate"；binding-constraint 指示器是 ADR-0013 的标志性演示特性 | **零覆盖**。#17 的 `PUT /load/config` 只改 `target_concurrency` + `enabled_call_types`，**从不碰 `call_rate`**。binding_constraint 字段（`tools/call_load_generator.py` L252）从未在 28 个测试中断言 |
+| **D6 Little's Law 教育性设计 + ACC-P13-005**（R2-P1-1） | 双滑块 + binding-constraint 指示器（ADR-0013） | **部分覆盖**：`TestBindingConstraint` REST 翻转 ✅；`TestBindingConstraintUI` `#bindInd` 浏览器翻转 ✅；**slider UI → REST 闭环仍缺** |
+| **phase3-gap-audit Statistics 四表** | `errors_by_code` / `rule_hits` / `peer_status` / disposition 表格 | **已覆盖** `TestStatisticsMetrics` #37–39 ✅ |
+| **phase3-gap-audit AS summary** | `#asSummary` 累计 + Statistics 链接 | **已覆盖** `TestAsSummary` #41–42 ✅ |
 | REQ-F-049 | call type toggles E2E | 无 |
 | REQ-F-048 / §P13 Stage 3 step 7 | 拓扑按 hop 颜色（绿/红/橙） | 本文件只测 `#l1 stroke-width`，颜色（stroke CSS var）未测 |
 | §P13 "chained demo compatibility" / D8 | 拓扑为固定四节点 `S-SBC → anti-fraud → translation → S-SBC ret`；P14 起按模式淡化未参与节点（simple 淡化 anti-fraud，fraud 淡化 translation），chained 换用含 iFC + UAS 的图 | conftest 只起 1 个 AS（translation），无 anti-fraud 进程。拓扑最左两跳在 E2E 栈里不存在。**chained 拓扑覆盖在 `test_chained_call_flows.py`（非浏览器 E2E）和 `test_chained_topology.py`（integration），console dashboard 的拓扑图渲染链式场景未测** |
 
 → **建议**（按优先级）：
-1. **最高优先**（R3-P0-1 / ADR-0013 教育性演示）：补一个 **REST 级 E2E**（不需要浏览器断言）来验证 `binding_constraint` 翻转。**配方方向必须按下面写**——`compute_binding_constraint()`（generator L238）判定是 `call_rate × AVG_DURATION_SECONDS(10.4) >= target_concurrency → "concurrency"`，**`call_rate` 越大越倾向于 "concurrency"**，反之才是 "rate"（HY4 B-1 指出原版方向写反）：
+1. ~~**最高优先**（R3-P0-1）REST `binding_constraint` 翻转~~ ✅ `TestBindingConstraint`；~~浏览器 `#bindInd`~~ ✅ `TestBindingConstraintUI`。**仍缺**：slider UI → REST 闭环。原 REST 配方：
 
    | 目标 | PUT 到 `/load/config` 的 body | 判定依据 |
    |---|---|---|

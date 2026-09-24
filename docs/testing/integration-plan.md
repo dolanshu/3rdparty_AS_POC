@@ -1,7 +1,7 @@
 # Integration 测试计划
 
-> 状态：已实现 · 更新日期：2026-09-23
-> 对应目录：`tests/integration/`（7 个文件，44 tests）
+> 状态：已实现 · 更新日期：2026-09-24
+> 对应目录：`tests/integration/`（8 个文件，45 tests）
 > 标签：`pytest.mark.integration`
 
 ---
@@ -13,7 +13,7 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 | 层 | 进程 | 浏览器 | 测试数量 | 典型耗时 |
 |---|---|---|---|---|
 | unit | 无 | 无 | 182 | ~20s |
-| **integration** | **1（测试进程内 bind）** | **无** | **44** | **~30s** |
+| **integration** | **1（测试进程内 bind）** | **无** | **45** | **~30s** |
 | e2e (call flows) | 1 | 无 | 9 | ~10s |
 | e2e (dashboard) | 4 独立进程 | Chromium headless | 28 | ~130s |
 
@@ -33,7 +33,7 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 
 ---
 
-## 三、测试用例清单（44 个 / 7 文件）
+## 三、测试用例清单（45 个 / 8 文件）
 
 ### 3.1 test_translation.py（7 tests）—— Routing + Hot Reload + Error 分支
 
@@ -74,7 +74,7 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 |---|--------|----------|
 | 1 | `test_ten_concurrent_calls_through_translation_as` | 10 calls 并行 → 全部 completed；无 deadlock |
 | 2 | `test_ten_concurrent_calls_get_distinct_outbound_call_ids` | 每 call 的 outbound Call-ID 都不同（`outbound_call_id(trunk_call_id)` 生成）|
-| 3 | `test_ten_concurrent_calls_emit_p12_events_via_fanout` | `TraceRecorder.calls` 里看到每个 call 的 P12 events（call_started, call_routed, call_ended）|
+| 3 | `test_ten_concurrent_calls_emit_p12_events_via_fanout` | internal API fanout **结构**就绪（``broadcast`` / ``publisher`` / ``_loop``）；**不**断言 payload Call-ID（见 §3.8）|
 | 4 | `test_ten_concurrent_calls_through_anti_fraud_as` | AS-1 版并发，全部 completed 或被正确 reject |
 | 5 | `test_ten_concurrent_calls_through_chained_topology` | iFC 编排的 AS-1 / AS-2 chain 版并发（两次独立 trunk INVITE）|
 | 6 | `test_ten_concurrent_calls_in_chained_topology_do_not_cross_contaminate` | AS-1 的 counters 和 AS-2 的 counters 不互相污染 |
@@ -113,6 +113,14 @@ Integration 层测试**两个或多个真实模块**的交互，但**不**起独
 | 1 | `test_self_check_binds_and_releases_the_signalling_port` | settings self_check → bind + 立即 release → 下次 bind 正常 |
 | 2 | `test_self_check_accepts_a_reloaded_rule_set` | self_check 加载后的 rule_set 可以 reload 而不崩 |
 | 3 | `test_sippy_is_installed_at_the_pinned_version` | sippy 版本和 `pyproject.toml` 里 pin 的一致 |
+
+### 3.8 test_p12_call_events.py（1 test）—— 单通呼叫 P12 Call-ID 对齐
+
+> **定位**：此 bug **不是** load-generator 专属。单通 ``trunk_pair.place_call`` + ``start_internal_api()`` 即可复现/回归。Playwright E2E #43 是浏览器侧附加证据，**主回归在本文件 + unit ``test_p12_call_controller.py``**。
+
+| # | 测试名 | 核心断言 |
+|---|--------|----------|
+| 1 | `test_single_call_p12_events_share_trunk_call_id` | 单通 completed call → broadcast 捕获 ``call_started`` + ``call_routed`` + ``call_ended``，三者 ``call_id`` 均为 trunk Call-ID（≠ ``"-"``）；无 ``call_started`` 落在 ``call_id='-'`` |
 
 ---
 

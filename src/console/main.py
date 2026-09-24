@@ -116,6 +116,17 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 .topo-hint{font-size:10px;color:var(--mut);margin-top:4px;line-height:1.3}
 .topo-wrap svg.dim{opacity:.22}
 #topoChained{display:none}
+.stat-total{color:var(--acc);font-size:14px;font-weight:700;margin-bottom:10px}
+.stat-section{margin-bottom:14px}
+.stat-h{font-size:11px;text-transform:uppercase;color:var(--mut);margin-bottom:6px}
+tr.err-row td{color:var(--err)}
+.bind-ind{font-size:11px;color:var(--mut);margin-top:6px;line-height:1.4}
+.bind-tag{display:inline-block;padding:1px 6px;border-radius:3px;border:1px solid var(--acc);color:var(--acc);font-weight:600;text-transform:lowercase}
+.as-summary{font-size:11px;color:var(--mut);margin-top:8px;line-height:1.5}
+.as-summary a{color:var(--acc);text-decoration:none}
+.as-summary a:hover{text-decoration:underline}
+.rule-link{color:var(--acc);text-decoration:none}
+.rule-link:hover{text-decoration:underline}
 </style></head><body>
 <div class="sb" id="sb">
 <div class="si"><span class="dot" id="aDot"></span><span class="sv" id="aSt">connecting</span></div>
@@ -158,6 +169,8 @@ table{width:100%;border-collapse:collapse}th,td{padding:5px 9px;text-align:left;
 <div class="chart-card">
 <div class="chart-h"><span class="t">Capacity Gauge</span><span class="v" id="gaugeVal">0 / 10</span></div>
 <div class="chart-wrap"><canvas id="gaugeChart"></canvas></div>
+<div class="bind-ind" id="bindInd"></div>
+<div class="as-summary" id="asSummary"><span style="color:var(--mut)">loading AS metrics…</span></div>
 </div>
 </section>
 
@@ -266,9 +279,48 @@ var tc = [], sel = null;
 var CALL_TYPES = ["T1","T2","T3","T4","T5","T6","F1","F2","F3","F4"];
 var enabledTypes = new Set(CALL_TYPES);
 var lineChart, pieChart, gaugeChart;
+var AVG_DURATION = 10.4; // DurationModel.AVG_DURATION_SECONDS (ADR-0013)
+var DISP_LABELS = {completed:"Completed",no_match:"No match (404)",rejected:"Rejected (603)",cancelled:"Cancelled"};
 
 function E(i){return document.getElementById(i)}
 function esc(s){if(s===null||s===undefined)return"";return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+
+function fmtTable(headers, rows, rowCls){
+  if(!rows.length) return "";
+  return '<table><thead><tr>'+headers.map(function(h){return "<th>"+h+"</th>"}).join("")+
+    '</tr></thead><tbody>'+rows.map(function(r){
+      var cls = rowCls ? rowCls(r) : "";
+      return "<tr"+(cls?' class="'+cls+'"':"")+">"+r.map(function(c){return "<td>"+c+"</td>"}).join("")+"</tr>";
+    }).join("")+"</tbody></table>";
+}
+function peerStatusCell(status){
+  var cls = status==="reachable"?"ok":status==="unreachable"?"er":"";
+  return '<span class="dot '+cls+'" style="display:inline-block;margin-right:6px;vertical-align:middle"></span>'+esc(status);
+}
+function updateBindingIndicator(s){
+  var el = E("bindInd"); if(!el) return;
+  var bc = s.binding_constraint;
+  if(!bc){ el.textContent = ""; return; }
+  var rate = s.call_rate != null ? s.call_rate : callRate;
+  var tgt = s.target_concurrency != null ? s.target_concurrency : targetConc;
+  var theoretical = (rate * AVG_DURATION).toFixed(1);
+  el.innerHTML = 'binding: <span class="bind-tag">'+esc(bc)+'</span> (rate×duration='+theoretical+', target='+tgt+')';
+}
+function updateAsSummary(){
+  var el = E("asSummary"); if(!el || !md) return;
+  var parts = [(md.calls_total||0)+' total calls'];
+  var rh = md.rule_hits || {}, topRule = null, topCount = 0;
+  Object.keys(rh).forEach(function(k){ if(rh[k] > topCount){ topCount = rh[k]; topRule = k; }});
+  if(topRule) parts.push('top rule: '+esc(topRule)+' ('+topCount+')');
+  var err = md.errors_by_code || {}, errKeys = Object.keys(err);
+  if(errKeys.length){
+    var errStr = errKeys.sort().map(function(k){ return esc(k)+': '+err[k]; }).join(', ');
+    parts.push('<span style="color:var(--err)">errors: '+errStr+'</span>');
+  }
+  el.innerHTML = parts.join(' · ')+' · <a href="#" id="asSumLink">Statistics →</a>';
+  var link = E("asSumLink");
+  if(link) link.onclick = function(e){ e.preventDefault(); sv("statistics"); return false; };
+}
 
 // --- charts --------------------------------------------------------------
 function initCharts(){
@@ -453,6 +505,7 @@ function onPoolStatus(d){
   updateGauge();
   updateTopology();
   pushLinePoint(activeCalls, 0, 0);
+  updateBindingIndicator(s);
 }
 
 function onCallEvent(d){
@@ -521,7 +574,7 @@ function pollLd(){
       E("rateSlider").value=callRate;E("rateVal").textContent=callRate;
       E("btnStart").disabled=poolRunning;E("btnStop").disabled=!poolRunning;
       E("tgtSlider").disabled=false;E("rateSlider").disabled=false;
-      updateGauge();updateTopology();}
+      updateGauge();updateTopology();updateBindingIndicator(s);}
   }).catch(function(){});
 }
 function connLd(){
@@ -549,7 +602,9 @@ async function ff(){if(!FRAUD_URL)return;try{var r=await fetch(FRAUD_URL+"/healt
   E("fSt").textContent=fd.status;E("fDot").className="dot "+(fd.status==="ok"?"ok":"er")}catch(e){E("fSt").textContent="unreachable";E("fDot").className="dot er"}}
 
 async function fm(){try{var r=await fetch(AS_URL+"/api/v1/metrics");if(!r.ok)return;md=await r.json();
-  E("aCal").textContent=md.calls_total||0}catch(e){}}
+  E("aCal").textContent=md.calls_total||0;
+  if(cv==="statistics") rs();
+  if(cv==="dashboard") updateAsSummary()}catch(e){}}
 
 // --- load generator REST ------------------------------------------------
 async function ldStart(){try{await fetch(LD_URL+"/load/start",{method:"POST"})}catch(e){}}
@@ -569,7 +624,7 @@ function sv(v){cv=v;
   if(v==="dashboard"){dash.style.display="";if(el)el.classList.remove("act")}
   else{dash.style.display="none";if(el)el.classList.add("act")}
   if(v==="rules"){if(!rd)fr();else rr()}if(v==="screening"){if(!sd)fs();else rsd()}
-  if(v==="statistics"){if(!md)fm();else rs()}}
+  if(v==="statistics"){if(!md)fm().then(function(){if(cv==="statistics")rs()});else rs()}}
 
 function buildToggles(){
   var c = E("typeToggles"); c.innerHTML = "";
@@ -596,8 +651,29 @@ function rsd(){if(!sd)return;var c=E("scrCard");
   c.innerHTML='<p style="color:var(--mut);font-size:12px;margin-bottom:8px">data set: '+esc(sd.name||"-")+'</p>'+
   '<p style="color:var(--mut);font-size:12px">block list: '+(sd.block_list||[]).length+' entries · allow list: '+(sd.allow_list||[]).length+' entries</p>'}
 function rs(){if(!md)return;var c=E("statsCard");
-  c.innerHTML='<p style="color:var(--acc);font-size:14px;font-weight:700;margin-bottom:8px">'+(md.calls_total||0)+' total calls</p>'+
-  '<p style="color:var(--mut);font-size:12px">disposition: '+JSON.stringify(md.calls_by_disposition||{})+'</p>'}
+  var html='<p class="stat-total">'+(md.calls_total||0)+' total calls</p>';
+  var disp=md.calls_by_disposition||{};
+  var dispRows=Object.keys(disp).sort().map(function(k){return [DISP_LABELS[k]||k,disp[k]];});
+  if(dispRows.length) html+='<div class="stat-section"><div class="stat-h">Disposition</div>'+
+    fmtTable(["Disposition","Count"],dispRows)+'</div>';
+  var err=md.errors_by_code||{};
+  var errRows=Object.keys(err).sort().map(function(k){return [esc(k),err[k]];});
+  if(errRows.length) html+='<div class="stat-section"><div class="stat-h">Errors by code</div>'+
+    fmtTable(["Error code","Count"],errRows,function(){return "err-row";})+'</div>';
+  var rh=md.rule_hits||{};
+  var ruleRows=Object.keys(rh).sort(function(a,b){return rh[b]-rh[a];}).map(function(k){
+    return ['<a href="#" class="rule-link" data-rule="'+esc(k)+'">'+esc(k)+'</a>',rh[k]];});
+  if(ruleRows.length) html+='<div class="stat-section"><div class="stat-h">Rule hits</div>'+
+    fmtTable(["Rule ID","Hits"],ruleRows)+'</div>';
+  var ps=md.peer_status||{};
+  var peerRows=Object.keys(ps).sort().map(function(k){return [esc(k),peerStatusCell(ps[k])];});
+  if(peerRows.length) html+='<div class="stat-section"><div class="stat-h">Peer status</div>'+
+    fmtTable(["Peer","Status"],peerRows)+'</div>';
+  if(!dispRows.length&&!errRows.length&&!ruleRows.length&&!peerRows.length)
+    html+='<p class="empty">No metrics yet</p>';
+  c.innerHTML=html;
+  c.querySelectorAll(".rule-link").forEach(function(a){
+    a.onclick=function(e){e.preventDefault();sv("rules");return false;};});}
 
 // --- init ----------------------------------------------------------------
 E("apiUrl").textContent = AS_URL; E("loadUrl").textContent = LD_URL;

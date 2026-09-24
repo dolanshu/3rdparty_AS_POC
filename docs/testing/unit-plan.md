@@ -1,7 +1,7 @@
 # Unit 测试计划
 
 > 状态：已实现 · 更新日期：2026-09-23
-> 对应目录：`tests/unit/`（17 个文件，约 182 tests）
+> 对应目录：`tests/unit/`（18 个文件，约 184 tests）
 > 标签：`pytest.mark.unit`
 
 ---
@@ -12,7 +12,7 @@ Unit 层测试**单个模块**的纯逻辑——不 bind socket、不起进程�
 
 | 层 | Socket | 进程 | 浏览器 | 测试数量 |
 |---|---|---|---|---|
-| **unit** | **否** | **否** | **否** | **~182** |
+| **unit** | **否** | **否** | **否** | **~184** |
 | integration | 是（fixture bind） | 否（同一进程） | 否 | 44 |
 | e2e (call flows) | 是 | 否 | 否 | 9 |
 | e2e (dashboard) | 是 | 4 独立进程 | Chromium headless | 28 |
@@ -31,6 +31,7 @@ Unit 层测试**单个模块**的纯逻辑——不 bind socket、不起进程�
 | `src/as_app/routing/rules.py` + `routing_engine.py` | `test_routing_rules.py`, `test_routing_engine.py` | ~23 |
 | `src/as_app/observability/` | `test_observability.py`, `test_errors.py` | ~8 |
 | `src/as_app/internal_api.py` | `test_internal_api.py` | ~4 |
+| `src/as_app/call_controller.py`（P12 emit 时机）| `test_p12_call_controller.py` | 2 |
 | `src/as_app/bootstrap.py` | `test_bootstrap.py` | ~7 |
 | `src/as_app/sip_adapter.py` | `test_sip_adapter.py` | ~11 |
 | `src/anti_fraud_as/config/` + `error_model.py` | `test_fraud_configuration.py`, `test_fraud_error_model.py` | ~28 |
@@ -128,6 +129,15 @@ Unit 层测试**单个模块**的纯逻辑——不 bind socket、不起进程�
 | 2 | `test_health_payload_reports_rule_set_state` | healthz payload 有 `rules_loaded: bool` |
 | 3 | `test_metrics_payload_exposes_the_counters` | metrics payload 有 `counters: dict` |
 | 4 | `test_rules_payload_is_serialisable_and_read_only` | rules payload 是纯 dict，没有任何 mutable object（比如 `RuleSet` 实例）被直接 JSON 化 |
+
+### 3.6a test_p12_call_controller.py（2 tests）—— P12 ``call_started`` 发射时机
+
+> **定位**：Call-ID 对齐 bug 不是 load/E2E 专属。构造阶段 ``call_id=='-'`` 时不得 emit；``recv_request`` 后必须用 trunk Call-ID。
+
+| # | 测试名 | 断言 |
+|---|--------|------|
+| 1 | `test_call_started_is_not_emitted_during_construction` | ``CallController(...)`` 后 captured broadcast 无 ``call_started`` |
+| 2 | `test_recv_request_emits_call_started_with_trunk_call_id` | mock ``recv_request`` 设 trunk Call-ID → 唯一 ``call_started`` 且 ``call_id`` 等于该值（≠ ``"-"``）|
 
 ### 3.7 test_bootstrap.py（~7 tests）—— AS 启动配置 + Self-Check
 

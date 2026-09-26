@@ -35,6 +35,21 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   ruff violations, and 4 mypy errors (event-loop `union-attr`, `BaseCallMap.app`
   attr-defined).
 - `.env.example` — `FRAUD_SBC_PEER_PORT` default corrected to `15062`.
+- **CI e2e connection-refused storm (11 tests)** — the function-scoped
+  `demo_stack_chained` fixture reused the session-stack ports (5060/8080/8765/8081);
+  pytest's fixture-based test reordering schedules the two stack families in one
+  session, so the chained stack's kill-loop murdered the session stack and every
+  later simple-stack test got `[Errno 111] Connection refused`. The chained stack
+  now runs on fully isolated ports (6060/6063/6080/6082/6070-6073/6091/6099/6765)
+  via the demo script's env overrides.
+- **Generator local-SIP-port collision** — both stacks' generators bound UDP 5099
+  (`SO_REUSEADDR` permits duplicate binds); on some kernels SIP responses are then
+  delivered to the wrong generator and every load call hangs. Added a `GEN_SIP`
+  env override to `scripts/phase3-demo.sh` (passed as `--local-port`); the chained
+  fixture uses 6099.
+- `TestBottleneckDiagnostic.test_high_rate_triggers_fraud_rate_limit` — the sample
+  count no longer depends on a fixed 12 s sleep; it polls until 50 calls accumulate
+  (up to 30 s), removing machine-load flakiness.
 
 ## [1.1.0] - 2026-09-23 — P14 Live-load demo × P9b alignment
 

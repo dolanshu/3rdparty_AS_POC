@@ -108,8 +108,8 @@ class TestChainedBoot:
         assert s["topology"] == "chained", (
             f"expected generator topology=chained, got {s.get('topology')!r}"
         )
-        assert s["ingress_port"] == 5063, (
-            f"chained generator should ingress on fraud AS :5063, got {s.get('ingress_port')}"
+        assert s["ingress_port"] == 6063, (
+            f"chained generator should ingress on fraud AS :6063, got {s.get('ingress_port')}"
         )
 
     def test_both_as_apis_reachable(self, demo_stack_chained):
@@ -386,9 +386,7 @@ class TestBottleneckDiagnostic:
         return demo_stack_chained["gen"]
 
     def _fraud(self, demo_stack_chained):
-        # demo_stack_chained dict may carry fraud URL; derive from ports
-        base = demo_stack_chained["console"].rsplit(":", 1)[0].rsplit("//", 1)[-1]
-        return f"http://{base}:8082"
+        return demo_stack_chained["fraud_api"]
 
     def _get(self, url):
         import urllib.request as ur
@@ -439,14 +437,23 @@ class TestBottleneckDiagnostic:
             },
         )
         self._post(f"{gen}/load/start")
-        _t.sleep(12)  # let window accumulate
+        # Poll until enough calls have accumulated; a fixed sleep makes the
+        # sample count depend on machine load (rate=10 cps is a target, not a
+        # guarantee when the suite has just torn down 20+ full stacks).
+        deadline = _t.monotonic() + 30
+        while _t.monotonic() < deadline:
+            total = self._get(f"{fraud}/api/v1/metrics").get("calls_total", 0)
+            if total >= 50:
+                break
+            _t.sleep(1)
 
         fraud_metrics = self._get(f"{fraud}/api/v1/metrics")
         err = fraud_metrics.get("errors_by_code", {})
         rate_exceeded = err.get("AS-FRAUD-002", 0)
         total = fraud_metrics.get("calls_total", 0)
 
-        # After 12s at rate=10: ~120 calls, but max 5 pass per 60s window
+        # The 60s per-caller window caps passes at 5; waiting longer (still
+        # within one window) can only raise the rejection share.
         assert total >= 50, f"Expected many Fraud AS calls, got {total}"
         if rate_exceeded > 0:
             pct = rate_exceeded / total * 100

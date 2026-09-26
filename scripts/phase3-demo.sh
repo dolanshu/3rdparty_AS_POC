@@ -42,6 +42,7 @@ IMS_TERM="${IMS_TERM:-5072}"
 IMS_PCSCF="${IMS_PCSCF:-5073}"
 GEN_HTTP="${GEN_HTTP:-8765}"
 CONSOLE_HTTP="${CONSOLE_HTTP:-8081}"
+GEN_SIP="${GEN_SIP:-5099}"
 
 PIDS=()
 
@@ -73,7 +74,7 @@ free_ports() {
   local port
   for port in "$CORE_SIP" "$CORE_UAC" "$AS_TRANS_SIP" "$AS_TRANS_API" \
               "$AS_FRAUD_SIP" "$AS_FRAUD_API" "$IMS_RETURN" "$IMS_FORWARD" \
-              "$IMS_TERM" "$IMS_PCSCF" "$GEN_HTTP" "$CONSOLE_HTTP"; do
+              "$IMS_TERM" "$IMS_PCSCF" "$GEN_HTTP" "$CONSOLE_HTTP" "$GEN_SIP"; do
     if command -v lsof >/dev/null 2>&1; then
       lsof -ti ":$port" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
     fi
@@ -175,6 +176,8 @@ uv run python tools/call_load_generator.py \
   --ingress-port "$GEN_INGRESS" \
   --as-port "$GEN_INGRESS" \
   "${GEN_ROUTE_RETURN_ARGS[@]}" \
+  --local-address "127.0.0.1" \
+  --local-port "$GEN_SIP" \
   --http-address "$BIND_ADDR" \
   --http-port "$GEN_HTTP" \
   > "$LOG_DIR/gen.log" 2>&1 &

@@ -267,9 +267,10 @@ All configuration is environment based; copy `.env.example` to `.env` and adjust
 
 The **load generator** itself is configured by CLI flags (not `.env`): `--topology`
 (`simple` / `fraud` / `chained`), `--as-port`, `--http-port` (8765), `--local-port`
-(5099), and the initial `--call-rate` (3.0/s) and `--target-concurrency` (10); all four
-are changeable at runtime via `PUT /load/config`. The **console** binds port 8081 by
-default (`--port`).
+(5099), and the initial `--call-rate` (3.0/s) and `--target-concurrency` (10). At
+runtime `PUT /load/config` changes the topology, call rate, target concurrency and
+enabled call types (T1–T6, F1–F4); the ports are bind-time only. The **console** binds
+port 8081 by default (`--port`).
 
 Switching from the mock to a real S-SBC is a change of `SBC_PEER_*`, `ALLOWED_PEERS` and the
 next-hop addresses in the active rule set: the AS originates the second leg to the hop the

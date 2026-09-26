@@ -13,7 +13,7 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `AGENT.md` §1–§5, §15 | ready | Positioning, boundaries, non-goals, delivery standards, roadmap |
 | `docs/architecture/hld.md` | ready | System context, deployment view, interface view, quality attributes, key flows — including the second AS instance (§8) |
 | `docs/architecture/lld.md` | ready | Modules, data structures, state machines, error codes, process model, log fields — including the anti-fraud AS (§9) |
-| `docs/architecture/adr/` | ready | ADR-0001 … ADR-0016: 0001 sippy, 0002 process separation, 0003 UDP only (superseded for the library's pluggable seam by ADR-0010), 0004 YAML rules, 0005 mock strategy, 0006 signalling only, 0007 anti-fraud AS / `608 Rejected`, 0008 chained topology (**historical** — per-leg `Call-ID`; decision 1 superseded by 0014), 0009 platform library extraction / `path` consumption, 0010 P11 TLS + Redis + capacity harness verification, 0011 vendored Chart.js, 0012 load-generator boundary, 0013 two generator controls (Little's Law), 0014 iFC-orchestrated chain (the one that ships), 0015 Phase 3 × P9b alignment, **0016 Call Trace sequence view + phased SIP API** |
+| `docs/architecture/adr/` | ready | ADR-0001 … ADR-0016: 0001 sippy, 0002 process separation, 0003 UDP only (superseded for the library's pluggable seam by ADR-0010), 0004 YAML rules, 0005 mock strategy, 0006 signalling only, 0007 anti-fraud AS / `608 Rejected`, 0008 chained topology (**historical** — per-leg `Call-ID`; decision 1 superseded by 0014), 0009 platform library extraction / `path` consumption, 0010 P11 TLS + Redis + capacity harness verification, 0011 vendored Chart.js, 0012 load-generator boundary, 0013 two generator controls (Little's Law), 0014 iFC-orchestrated chain (the one that ships), 0015 live-load × P9b alignment, **0016 Call Trace sequence view + phased SIP API** |
 | `docs/architecture/future/sip-engine-seam.md` | ready | **Future direction (not scheduled):** stack-agnostic `B2buaEngine` seam in `as_platform` — what would need to move so a stack swap is platform-only after a one-time app migration |
 | `../as_platform/` (the platform library) | ready | The shared skeleton both AS instances build on, in its own repository checked out beside this one and consumed through a `path` source (`editable = true`). Carries its own `ruff` / `mypy` / `pytest` gate and its library-standard documents — API reference, integration guide, compatibility matrix (`REQ-NF-019`, `REQ-NF-021`, ADR-0009) |
 | `docs/production-gaps.md` | ready | Every POC shortcut and what production would require |
@@ -33,7 +33,7 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `docs/specs/message-samples/` | ready | Real SIP messages on the trunk, generated with `make capture` and gitignored (only the folder `README.md` is tracked); the `office-to-mobile` call is 14 files, the translated outbound INVITE included. The anti-fraud AS's own calls are narrated live by `make demo-fraud`, and the iFC-chained topology (`ims_mock`, ADR-0014) by `make demo-chained` |
 | `tools/README.md` | ready | Probe, rule viewer, capture helper and the call capture tool |
 | `.github/workflows/ci.yml` | ready | The five-layer gate (lint → type → unit → integration → e2e); only `main` triggers it |
-| `docs/ci-merge-phase3-blockers.md` | ready | **Open work** — what will go red when `phase3` lands on `main`, with the fix order |
+| `docs/ci-merge-phase3-blockers.md` | ready | Merge-readiness analysis for the 2026-09-26 merge into `main`; all blockers resolved |
 
 ## Deployment and operations
 
@@ -54,6 +54,6 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `docs/roadmap.md` | ready | Milestone status, handover notes, open items |
 | `docs/phase2-plan.md` | ready | Phase 2: strategic decisions, the P8a–P11 work sequence, repository and branch strategy. The single detailed source for what follows P1–P7 — `docs/roadmap.md` links here instead of duplicating it. The full text is on the `phase2` branch and is also present in this checkout; read and edit it on `phase2` |
 | `docs/chained-topology-plan.md` | ready | **P9b** — iFC-orchestrated chained demo (`src/ims_mock/`, ADR-0014). Implemented 2026-09-23 |
-| `docs/phase3-plan.md` | ready | **P12/P13** — Call Load + Enhanced Console (v1.0.0). Single source for Phase 3 scope |
-| `docs/phase3-p9b-alignment-plan.md` | ready | **P14** — align Phase 3 live-load demo + console with P9b chained topology. Implemented 2026-09-23 |
+| `docs/phase3-plan.md` | ready | **P12/P13** — Call Load + Enhanced Console (v1.0.0). Single source for the call-load scope |
+| `docs/phase3-p9b-alignment-plan.md` | ready | **P14** — align the live-load demo + console with P9b chained topology. Implemented 2026-09-23 |
 | `CHANGELOG.md` / `VERSION` | ready | Version history and the current version |

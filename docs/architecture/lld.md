@@ -1773,8 +1773,8 @@ console (FastAPI)        | —             | 127.0.0.1:8081| consumes AS /ws/eve
 ```
 
 Ports 8080/8082 are the AS's existing internal API ports (`INTERNAL_API_PORT` /
-`FRAUD_INTERNAL_API_PORT`, already in Phase 2's `.env.example`). Port 8765 is new for the
-generator (Phase 3 `.env.example` delta, `make gen`). Console stays 8081.
+`FRAUD_INTERNAL_API_PORT`, already in `.env.example`). Port 8765 is new for the
+generator (`.env.example` delta, `make gen`). Console stays 8081.
 
 ### 12.9 What P12 changes in the codebase
 
@@ -1787,7 +1787,7 @@ generator (Phase 3 `.env.example` delta, `make gen`). Console stays 8081.
 | **Extended** — `.env.example` | root | Add generator config vars (none required for default behavior) |
 | **New tests** | `tests/integration/`, `tests/e2e/` | Concurrent-call isolation tests (≥ 10 concurrent), P8a timer independence under load |
 | **NEW ADRs** | `docs/architecture/adr/0012-*.md`, `0013-*.md` | Two decisions per §12.10 |
-| **Updated** — AGENT.md | §4.4 (Phase 3, P13's vendored lib amendment — P12 does not touch) | P13's job |
+| **Updated** — AGENT.md | §4.4 (P13's vendored lib amendment — P12 does not touch) | P13's job |
 
 ### 12.10 Structural changes for the implementation commit
 
@@ -1802,7 +1802,7 @@ together. For P12 Stage 3 (Implementation):
 | Test files for concurrent isolation | `tests/integration/`, `tests/e2e/` |
 | `.env.example` generator vars | root |
 | ADR-0012, ADR-0013 committed with implementation | `docs/architecture/adr/` |
-| Generator run command documented | `docs/README.md` (Phase 3 delta) |
+| Generator run command documented | `docs/README.md` (delta) |
 
 ### 12.11 The staged sequence
 

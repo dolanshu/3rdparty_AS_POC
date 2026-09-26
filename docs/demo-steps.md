@@ -21,7 +21,7 @@ own AS and mock on ephemeral ports, does one thing and exits. **Part 2** is the 
 console, which needs long-running processes and a browser. The two parts do not depend on
 each other — run either one without the other.
 
-**Part 3 (Phase 3)** is the live-load dashboard: a long-running AS chain, the load
+**Part 3** is the live-load dashboard: a long-running AS chain, the load
 generator driving real SIP traffic, and the enhanced console showing live charts and
 topology. It builds on Part 2 by adding the generator and the Dashboard view.
 
@@ -313,14 +313,14 @@ message flow with direction colours, a Call-ID filter, a payload viewer, the mat
 highlighted, a statistics dashboard and an SVG topology view — all inline, with no
 third-party front-end libraries, so it works offline.
 
-### Part 3 — Phase 3: Live-load dashboard (long-running, browser)
+### Part 3 — Live-load dashboard (long-running, browser)
 
 The enhanced console (P13) plus the load generator (P12) demonstrate real concurrent SIP
 traffic visualised as live charts and a dynamic topology diagram.
 
 Two flavours: **simple** (translation AS only, 3 terminals) and **full** (chained topology
 with both AS instances, 5 terminals). Start with the simple one; add the chain if you want
-to show the full Phase 2 + Phase 3 picture.
+to show the full chained picture.
 
 #### 3.0 Common prep: start the mock S-SBC return side (UAS)
 
@@ -510,5 +510,5 @@ Watch active calls drain to zero over ~5–10 seconds as in-flight calls complet
 - `make demo` is repeatable and writes nothing.
 - Capture evidence with `./tools/capture.sh`; never commit the capture.
 - If a command fails, fix the script and the code rather than improvising.
-- The Phase 3 dashboard demo works fully offline once the page is loaded — all assets
+- The dashboard demo works fully offline once the page is loaded — all assets
   (including Chart.js) are served from the console process itself.

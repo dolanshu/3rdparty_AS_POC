@@ -9,7 +9,7 @@ the rule data, a real translated call, the failure branches and the operations c
 one of them rehearsed for M4. Sections 5a and 5b are the Phase 2 additions: §5a is
 `make demo-fraud`, the anti-fraud AS, rehearsed for P8; §5b is `make demo-chained`, the
 iFC-orchestrated chain of P9b (ADR-0014) — not the obsolete trunk-to-trunk P9 chain.
-Section 7 is Phase 3 (P12/P13 live load). The runs that recorded the evidence are in
+Section 7 is the live-load dashboard (P12/P13). The runs that recorded the evidence are in
 `docs/acceptance/report.md`.
 
 ## 0. Setup (before the audience arrives)
@@ -176,7 +176,7 @@ locally vendored Chart.js bundle permitted by ADR-0011.
 `make demo` (section 4) runs its own AS and mock on ephemeral ports, so those calls do not
 appear in a console pointed at the long-running AS — use `make dev` + `make mock` here.
 
-## 7. Phase 3 — Live-load dashboard (3 minutes)
+## 7. Live-load dashboard (3 minutes)
 
 **Duration.** 3 minutes for the simple variant, 5–6 with the full chained topology.
 **Preparation.** Start the mock S-SBC (whose return side answers the AS's outbound INVITE),
@@ -280,8 +280,8 @@ Click **Stop**.
 
 ### 7h. What this proves
 
-> "Phase 1 proved the AS works for one call. Phase 2 proved it chains and rejects. Phase 3
-> proves it holds **N concurrent calls under load** — a real external tool driving real SIP,
+> "This proves the AS holds **N concurrent calls under load** — not just one call or a
+> chained sequence, but a real external tool driving real SIP,
 > visualised live. And everything you see on this page is driven by WebSocket events from
 > the AS and the generator. No polling. No batch jobs."
 

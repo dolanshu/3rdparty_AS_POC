@@ -258,7 +258,8 @@ src/anti_fraud_as/       the second AS: caller screening, 608 Rejected (ADR-0007
   caller_state.py        process-level call-rate window and reputation decay
   screening_data.py      screening data model, validation, reload
   internal_api.py        routes and payloads over the library's internal-API shell
-src/console/             FastAPI + plain HTML/CSS/JS, separate process
+src/console/             FastAPI + plain HTML/CSS/JS, separate process — Dashboard,
+                         topology and per-call trace views
 src/s_sbc_mock/          mock S-SBC: forward side (INVITE + Route) + return side
 tests/{unit,integration,e2e}/
 tools/                   sippy probe, 608 probe, rule viewer, capture helper, demos
@@ -293,9 +294,10 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 | `docs/requirements/functional-and-nonfunctional.md` | `REQ-F-*` / `REQ-NF-*` capability list |
 | `docs/architecture/hld.md` | context, deployment and interface views, message flows |
 | `docs/architecture/lld.md` | modules, data structures, state machines, error codes, log fields |
-| `docs/architecture/adr/` | ADR-0001 … ADR-0014: 0008 chained topology (historical), 0014 iFC-orchestrated chain mock (P9b), 0009 platform library, 0010 P11 TLS + Redis + harness |
+| `docs/architecture/adr/` | ADR-0001 … ADR-0016: 0008 chained topology (historical), 0009 platform library, 0010 P11 TLS + Redis + harness, 0014 iFC-orchestrated chain mock (P9b), 0015 live-load × P9b alignment, 0016 call trace sequence view |
 | `../as_platform/` (the platform library) | the shared skeleton both AS instances build on, in its own repository checked out beside this one, with its own gate and its library-standard documents (API reference, integration guide, compatibility matrix) |
 | `docs/specs/index.md`, `docs/specs/message-samples/` | normative references and real message samples; the generated samples are gitignored, only the folder `README.md` is tracked |
+| `docs/features/call-trace-message-flow/` | feature package for the Call Trace view: SVG sequence diagram + verbatim SIP popup (plan, design, testing-plan, reviews) |
 | `docs/operations/deployment.md` | topology, port matrix, health checks |
 | `docs/operations/runbook.md` | start, stop, reload rules and screening data, inspect state |
 | `docs/operations/troubleshooting.md` | symptom → cause → action |

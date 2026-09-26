@@ -136,7 +136,8 @@ sequenceDiagram
 | 0012 | Load generator is an external process (SIP in, WebSocket out) |
 | 0013 | Two generator controls coupled by Little's Law |
 | 0014 | iFC-orchestrated chained topology (`src/ims_mock/`) — **the chain that ships** |
-| 0015 | Phase 3 × P9b demo alignment (generator topology modes, mode-aware console) |
+| 0015 | Live-load demo × P9b alignment (generator topology modes, mode-aware console) |
+| 0016 | Call Trace sequence view + phased SIP API |
 
 ## 8. The second AS instance — anti-fraud (P8)
 
@@ -598,14 +599,14 @@ stack swaps would be platform-only**; mock and tools could keep sippy on the wir
 
 ## 11. Call Load capability (P12)
 
-Phase 3's first item. Demonstrates that the AS handles N concurrent SIP calls of mixed
+P12 — Call Load. Demonstrates that the AS handles N concurrent SIP calls of mixed
 types, mixed durations, and independent lifecycles — not just single-call functional
 correctness. Phase 1/2 validated one call at a time; P12 is the first time we run N calls
 in parallel and show them progressing independently on an operations dashboard.
 
 ### 12.1 System context
 
-The Phase 3 architecture adds **one new process** — the load generator — alongside the
+The call-load architecture adds **one new process** — the load generator — alongside the
 two AS processes already shown in section 8. The generator is a **standalone Python process**
 that talks to AS processes via SIP and observes via WebSocket event streams. It is
 neither an AS component nor an `as_platform` consumer (ADR-0012).
@@ -733,7 +734,7 @@ event. The console (P13) displays it so the reviewer understands the interaction
 
 ### 12.7 What P12 does NOT change
 
-Phase 3's design intent ("demonstrate what exists, not invent what doesn't") means
+The call-load design intent ("demonstrate what exists, not invent what doesn't") means
 P12 touches deliberately nothing that works:
 
 - **No SIP signalling changes.** No new headers, no message rewriting, no B2BUA behaviour change.
@@ -745,7 +746,7 @@ P12 touches deliberately nothing that works:
   `*_SBC_PEER_*` only as the fallback peer for a trunk INVITE that carries no `Route`.
 - **No sippy source modifications.** `AGENT.md section 6` forbids this.
 - **No HLD/LLD changes to sections 1–10.** P12 is additive — delta at the tail, never rewrite.
-- **No gap closure from the production gap register.** Phase 3 closes zero registered gaps
+- **No gap closure from the production gap register.** P12 closes zero registered gaps
   (phase3-plan.md §8).
 - **Generator is not launched by `make demo`.** `make demo` stays self-contained. P12 generator
   is an **additional** process for interactive demos.

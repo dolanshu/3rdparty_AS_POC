@@ -824,12 +824,12 @@ every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
   Plan: **`docs/chained-topology-plan.md`**; acceptance: `docs/acceptance/report.md` (P9b section).
 
 - **P10 — platform extraction. [Status: Done]** (2026-09-20, on `feat/platform-extraction`,
-  merged into `phase2`; the library itself lives in its own repository and has never been pushed).
+  merged into `phase2`; the library is published at github.com/dolanshu/as_platform).
   A pointer only: the plan, status, review-gate findings and the P11 entry state live in
   `docs/phase2-plan.md` §3 on `phase2`; the acceptance evidence is in `docs/acceptance/report.md`.
   This item's **deliverable is a second repository** — the `as-platform` library, checked out
   beside this one at `../as_platform` — and this repository becomes its reference implementation
-  (ADR-0009). Not merged into `main` and not tagged.
+  (ADR-0009). Merged into `main` via phase3 on 2026-09-26; not tagged.
 
 - **P11 — platform verification. [Status: Done]** (2026-09-20, worked directly on `main` of the
   library repository and on `phase2` of this repository). A pointer only: the plan, status,
@@ -840,10 +840,9 @@ every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
   widened from `Literal["udp"]` to `Literal["udp", "tls"]` as a purely additive change — zero
   consumer code change required. Library bumped `0.1.0 → 0.2.0`, this repository bumped
   `0.8.0 → 0.9.0`. Both repositories' gates are green — library `make check` 99 passed / 5
-  skipped Redis, POC unit tests 210 passed. Not merged into `main`, not tagged; the library
-  has no remote to push to.
+  skipped Redis, POC unit tests 210 passed. Merged into `main` via phase3 on 2026-09-26; not tagged.
 
-## Phase 3 (`phase3` branch)
+## Call Load, Enhanced Console and Chained Alignment (merged into `main` 2026-09-26)
 
 - **P12 — Call Load. [Status: Done]** (2026-09-22). Interactive load generator
   (`tools/call_load_generator.py`), AS per-call WebSocket events, genuine concurrent-load
@@ -853,11 +852,17 @@ every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
 - **P13 — Enhanced Console. [Status: Done]** (2026-09-22). Dashboard with vendored Chart.js,
   SVG topology, load controls. Acceptance: ACC-P13-*. Version `1.0.0`.
 
-- **P14 — Phase 3 × P9b alignment. [Status: Done]** (2026-09-23). Closes the gap
+- **P14 — Live-load demo × P9b alignment. [Status: Done]** (2026-09-23). Closes the gap
   between v1.0.0 live-load demo and P9b iFC chain: `scripts/phase3-demo.sh full`,
   generator `topology=chained`, console mode-aware UI (dual AS event streams, honest SVG).
   Plan: **`docs/phase3-p9b-alignment-plan.md`**. Explicitly **excludes**
-  `tools/capacity_probe.py`. Target version `1.1.0`.
+  `tools/capacity_probe.py`. Version `1.1.0`.
+
+- **P15 — Call Trace message flow. [Status: Done]** (2026-09-24). The Call Trace nav
+  view is restored as an SVG sequence diagram plus an event-detail modal, with a
+  verbatim-SIP popup via the new `/api/v1/traces/{call_id}/messages` endpoint. Feature
+  package: `docs/features/call-trace-message-flow/`; ADR-0016; REQ-F-056/057,
+  REQ-NF-031; ACC-P15-001/002. Version `1.2.0`.
 
 ## Future directions (not scheduled)
 

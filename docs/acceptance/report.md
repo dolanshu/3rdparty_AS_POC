@@ -3345,7 +3345,7 @@ P10 the §16 item-1 wording "from a clean checkout" is really "from **two** sibl
 `REQ-F-032`** (an explicit recorded exception, ADR-0009 decision 8), and this record does not
 present it as more than it is. Nothing is pushed and nothing is tagged (`AGENT.md` §13/§15).
 
-## Phase 3 — P12 Call Load (executed 2026-09-22) — evidence not recorded here
+## P12 Call Load (executed 2026-09-22) — evidence not recorded here
 
 `docs/acceptance/criteria.md` records P12 as executed on 2026-09-22 with `ACC-P12-001 … 011`.
 **No evidence section for it was written into this report** at the time; this placeholder
@@ -3359,10 +3359,10 @@ uv run python tools/call_load_generator.py --target-concurrency 10 --call-rate 3
 
 Do not mark the row accepted on the strength of `criteria.md` alone (`AGENT.md` §4.8).
 
-## Phase 3 — P13 Enhanced Console (2026-09-22)
+## P13 Enhanced Console (2026-09-22)
 
 **Version.** `VERSION` = `1.0.0` (P13 is the v1.0 release milestone — Dashboard + load controls +
-charts + topology + vendored Chart.js completes the Phase 3 deliverable).
+charts + topology + vendored Chart.js completes the v1.0 deliverable).
 
 **Scope.** P13 enhances the existing M3 console with a Dashboard view containing live charts, a
 dynamic SVG topology, and load generator controls. It consumes — but does not modify — the P12
@@ -3491,7 +3491,7 @@ All checks passed!
 no-external-scripts test, net +0 due to test count consolidation, but +1 overall when including
 the new chartjs canvases test). Ruff lint clean.
 
-### Phase 3 gate summary
+### P13 gate summary
 
 | # | Item | Status |
 |---|------|--------|
@@ -3509,7 +3509,7 @@ the new chartjs canvases test). Ruff lint clean.
 | 12 | No secrets or real traffic captures committed | **Passed** — private-key scan clean, no `.env`, `git status` shows only expected P13 files |
 
 **Honest declaration.** P13 is the v1.0 release. The Dashboard is the new default view and the
-primary user-facing surface for Phase 3 demo scenarios. Chart.js is vendored (ADR-0011 controlled
+primary user-facing surface for live-load demo scenarios. Chart.js is vendored (ADR-0011 controlled
 exception) — there is **no CDN, no npm, no build step**, keeping the "one Python file + static
 assets" deployment model of the original M3 console. No AS source code is modified; the enhanced
 console is purely a consumer of the P12 event stream and REST API. Nothing is pushed and nothing
@@ -3517,7 +3517,7 @@ is tagged (`AGENT.md` §13/§15).
 
 ---
 
-## Phase 3 — P15 Call Trace message flow (executed 2026-09-24)
+## P15 Call Trace message flow (executed 2026-09-24)
 
 Feature package: `docs/features/call-trace-message-flow/` · ADR-0016 · REQ-F-056/057 · REQ-NF-031.
 
@@ -3557,7 +3557,7 @@ Observed: `GET /api/v1/traces/{call_id}/messages` returns `messages[].text` star
 
 ---
 
-## Phase 3 — P14 Phase 3 × P9b alignment (executed 2026-09-23) — evidence not recorded here
+## P14 Live-load demo × P9b alignment (2026-09-23) — evidence not recorded here
 
 `docs/acceptance/criteria.md` records P14 as executed on 2026-09-23 with `ACC-P14-001 … 008`
 (generator `topology=chained`, multi-process `ims_mock` runtime, mode-aware console). **No

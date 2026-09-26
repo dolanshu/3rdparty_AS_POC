@@ -124,7 +124,7 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | ACC-P11-005 | `UdpTransport` and `InMemoryStateStore` **remain the defaults** and require **no wiring change** in the application repositories. P10 and earlier consumer code continues to instantiate them without modification — the Protocol lifecycle methods (`start`/`stop`) that P11 added are **no-op** on the existing implementations, and `make demo` / the three application test layers stay green against the updated library | `make check` (as_platform); `uv run pytest -q tests/unit/ tests/integration/` (POC) | `99 passed, 5 skipped` on the library; `210 passed` on this repository's unit layer; then `154 passed` across the integration layer. The **only code change** required on the application side was zero — no import rewiring, no constructor change, no configuration new — the `hasattr`-free Protocol methods are satisfied by `start`/`stop` no-ops on `UdpTransport` and `InMemoryStateStore` | REQ-NF-024 |
 | ACC-P11-006 | sippy's native lack of TLS/TCP is **recorded as a verified fact** (not assumed) and the bridge approach is what `TlsTransport` implements — the gap row "Transport" in `docs/production-gaps.md` is partially closed and the ADR records that `TlsTransport` terminates TLS outside sippy | `grep -A5 'sippy 2.4.2' docs/architecture/adr/0010-platform-verification-tls-redis-harness.md | head -20`; `grep 'Transport' docs/production-gaps.md | head -5` | The ADR carries "sippy has no SIP TLS support" / "sippy has no TCP transport either" / "Wss_server does use TLS — for WebSocket only" / "sippy's transport init is hard-wired to UDP" under its "Verified facts" heading, each quoting `SipTransactionManager.py` line numbers; the gaps row carries "UDP only" → "UDP + TLS; TLS mandatory on public-internet trunks" and P11 closes the first half (UDP + TLS now exists), leaving "TLS mandatory" as open | REQ-NF-022, REQ-NF-026 |
 
-## Phase 3 — P12 Call Load capability (executed 2026-09-22)
+## P12 Call Load capability (executed 2026-09-22)
 
 | ID | Criterion | Verification command | Expected result | Requirement |
 | --- | --- | --- | --- | --- |
@@ -140,7 +140,7 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | ACC-P12-010 | Generator is an external tool — it does **not** import `src/as_app`, `src/anti_fraud_as` or `as_platform`. It talks via SIP (mock S-CSCF UAC → AS INVITEs) and observes via event streams | `grep -rn "import.*as_app\|import.*anti_fraud_as\|import as_platform\|from as_app\|from anti_fraud_as\|from as_platform" tools/call_load_generator.py`; echo $? | **Exit code 1** — zero matches. Generator imports only stdlib (`argparse`, `asyncio`, `time`, `socket`, `dataclasses`, `random`) + third-party (`sippy`, `FastAPI`, `uvicorn`) + internal (`s_sbc_mock.uac.CallScenario`) — no AS source imports | REQ-NF-029 |
 | ACC-P12-011 | P12 integration/e2e tests use **genuine concurrent load** — ≥10 concurrent calls, NOT sequential one-call-at-a-time. All 7 P12 integration tests place calls back-to-back without yielding to the sippy event loop | `grep -A3 "_place_n\|place_call.*for.*scenario" tests/integration/test_concurrent_load.py | head -20` | The helper `_place_n(trunk_pair, scenarios)` loops `place_call()` over all scenarios back-to-back — no `await asyncio.sleep`, no `run_until` between calls, no sequential waiting. All 10 INVITEs are sent before any sippy `CCEvent*` fires, so the tests exercise genuine concurrent interleaving | REQ-NF-030 |
 
-## Phase 3 — P13 Enhanced Console (executed 2026-09-22)
+## P13 Enhanced Console (executed 2026-09-22)
 
 | ID | Criterion | Verification command | Expected result | Requirement |
 | --- | --- | --- | --- | --- |
@@ -154,7 +154,7 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | ACC-P13-008 | The console preserves all legacy M3/P8 views (Call Trace, Rules, Screening, Statistics, About) accessible via the left navigation. Dashboard is the new default view but all existing panels are retained | `uv run pytest tests/integration/test_console.py -v -k "screening or operations_ui"` | Navigation entries for all 6 views (Dashboard, Call Trace, Rules, Screening, Statistics, About) are present; `vw-screening`, `vw-statistics`, `vw-rules`, `vw-call-trace`, `vw-about` containers exist | REQ-F-012 |
 | ACC-P13-009 | Full test suite passes (307+ tests, 0 failures, 0 errors) and ruff lint is clean after P13 changes | `uv run pytest -q && uv run ruff check .` | 307 passed (was 306 before P13 +1 console test); `All checks passed!` from ruff | REQ-NF-004 |
 
-## Phase 3 — P14 Phase 3 × P9b alignment (executed 2026-09-23)
+## P14 Live-load demo × P9b alignment (executed 2026-09-23)
 
 | ID | Criterion | Verification command | Evidence | Requirement |
 | --- | --- | --- | --- | --- |
@@ -167,7 +167,7 @@ Legend: **accepted** — executed with evidence · **open** — not executed yet
 | ACC-P14-007 | `make demo` unchanged; generator remains external | `grep -L call_load_generator Makefile` | `make demo` target does not launch generator | REQ-NF-029 |
 | ACC-P14-008 | Unit + integration suite green (307 tests) | `NO_PROXY=127.0.0.1,localhost uv run pytest tests/unit tests/integration -q` | 307 passed | REQ-NF-004 |
 
-## Phase 3 — P15 Call Trace message flow (executed 2026-09-24)
+## P15 Call Trace message flow (executed 2026-09-24)
 
 | ID | Criterion | Verification command | Evidence | Requirement |
 | --- | --- | --- | --- | --- |

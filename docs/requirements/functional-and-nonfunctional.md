@@ -100,9 +100,9 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
 | REQ-NF-024 | `InMemoryStateStore` is the default at every `BaseAsStack` site and at every test layer, so `make demo` and the three application test layers plus CI remain fully self-contained. Redis is enabled only when the application's configuration explicitly selects it (for example, via an environment variable), and its absence in an application that does not select it is not an error (D9: in-memory stays the default). | done | P11 | ACC-P11-004 |
 | REQ-NF-025 | The capacity harness does **not publish benchmark numbers** (D10, REQ-NF-009). Its output — call completion counts, loop gap samples, any observable degradation at a given offered level — is passed back to the caller, logged as trace events, or written to counters. No number from a harness run appears in README, `docs/`, CHANGELOG or acceptance evidence as a "this AS handles X calls per second" claim; the harness is a measurement capability, not a performance benchmark. | done | P11 | ACC-P11-005 |
 | REQ-NF-026 | TLS certificates and private keys are never committed (`AGENT.md §9`). The repository ships only a **certificate-generation script** (openssl-based) and a README section explaining how to create self-signed certificates locally. The script is excluded from the gate (no `make certs` target) because certificate generation is a one-off pre-deployment step. | done | P11 | ACC-P11-006 |
-| REQ-NF-027 | **Phase 3 (P12 + P13) does not modify the `as_platform` library.** No new Transport, StateStore, error-code family, or BaseAsStack method moves into `../as_platform`. The event stream emissions `REQ-F-042` requests are AS-local — they extend the existing internal_api WebSocket handler that each AS instance already has (`as_app` and `anti_fraud_as`), not the library's skeleton. | accepted | P12 | ACC-P12-008 |
-| REQ-NF-028 | Each AS instance (translation and anti-fraud) runs as its **own process with its own sippy `ED2` event loop**. The concurrent call isolation `REQ-F-043` validates holds **per-AS**, not cross-AS: each AS's process handles multiple concurrent calls independently. Phase 2 P9 already proved chained isolation; P12 proves **within-AS** concurrent isolation for the first time. | accepted | P12 | ACC-P12-009 |
-| REQ-NF-029 | The load generator is an **external tool, not an AS component**. It talks to AS processes only via SIP (INVITE from a mock S-CSCF) and observes via event streams (`REQ-F-042`). It does not import `as_platform`, `src/as_app` or `src/anti_fraud_as`. Running the generator is an **additional** process that `make demo` does not launch — `make demo` stays self-contained for Phase 3's development cycle. | accepted | P12 | ACC-P12-010 |
+| REQ-NF-027 | **P12 + P13 do not modify the `as_platform` library.** No new Transport, StateStore, error-code family, or BaseAsStack method moves into `../as_platform`. The event stream emissions `REQ-F-042` requests are AS-local — they extend the existing internal_api WebSocket handler that each AS instance already has (`as_app` and `anti_fraud_as`), not the library's skeleton. | accepted | P12 | ACC-P12-008 |
+| REQ-NF-028 | Each AS instance (translation and anti-fraud) runs as its **own process with its own sippy `ED2` event loop**. The concurrent call isolation `REQ-F-043` validates holds **per-AS**, not cross-AS: each AS's process handles multiple concurrent calls independently. The P9b chained tests already proved chained isolation; P12 proves **within-AS** concurrent isolation for the first time. | accepted | P12 | ACC-P12-009 |
+| REQ-NF-029 | The load generator is an **external tool, not an AS component**. It talks to AS processes only via SIP (INVITE from a mock S-CSCF) and observes via event streams (`REQ-F-042`). It does not import `as_platform`, `src/as_app` or `src/anti_fraud_as`. Running the generator is an **additional** process that `make demo` does not launch — `make demo` stays self-contained. | accepted | P12 | ACC-P12-010 |
 | REQ-NF-030 | P12's integration and e2e tests exercise **genuine concurrent load** — not sequential one-call-at-a-time that happens to run in the same test file. The test suite must prove the `REQ-F-043` isolation property by: (a) launching N (≥ 10) concurrent calls through the AS process, (b) verifying each call reaches its own independent end, and (c) asserting that one call's timer cancellation did not affect any other call's armed timer (`REQ-F-043` is the claim, and a test that launches one call at a time is not a proof of that claim). | accepted | P12 | ACC-P12-011 |
 | REQ-NF-031 | Verbatim SIP capture for the console (REQ-F-057) is **bounded in-memory demo data** only: capped message count per process, not durable storage, not published in acceptance evidence as a throughput claim. Payload display follows `SECURITY.md` (off by default in production posture). | accepted | P15-B | ACC-P15-002 |
 
@@ -312,11 +312,11 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
   and `REQ-NF-027 … REQ-NF-030` are P12's own rows; **no earlier requirement is changed**.
   P11 (`REQ-F-034 … REQ-F-037` / `REQ-NF-022 … REQ-NF-026`) remains `planned` in its rows
   because P11 was merged into `main` with P8–P11 content — updating those statuses is a
-  Phase 3 housekeeping item, not P12's job. Five boundaries are stated here because they
+  later housekeeping, not P12's job. Five boundaries are stated here because they
   are P12's most likely failure modes.
 
-  **As-library isolation is the structural constraint (`REQ-NF-027`, D1).** Phase 3 is
-  the first phase since P10 that **does not move anything into `as_platform`** — the
+  **As-library isolation is the structural constraint (`REQ-NF-027`, D1).** P12/P13 are
+  the first items since P10 that **do not move anything into `as_platform`** — the
   deliberate break from P10/P11 which together transferred Transport, StateStore and
   capacity harness into the library. The event stream emissions `REQ-F-042` requests are
   AS-local extensions to each AS instance's existing internal_api WebSocket handler
@@ -355,10 +355,10 @@ Status values: `planned` — not implemented yet · `partial` — partly in plac
   generator is an **additional** process for interactive demos, not a required component
   of the development cycle or CI.
 
-  **What P12 does NOT change.** Phase 3's purpose statement (`docs/post-phase2-directions.md`
+  **What P12 does NOT change.** The call-load purpose statement (`docs/post-phase2-directions.md`
   Part B D1) says "demonstrate what already exists, not invent what doesn't". P12 does not
   change SIP signalling, routing rules, number translation, anti-fraud verdict logic,
   the chained topology wiring, or any sippy behaviour. It validates these under load
   and adds a tool to show that validation. The gap table from Part A §7 still shows
-  Phase 3 closing **zero** registered gaps — that is an explicit decision, not an
+  P12/P13 closing **zero** registered gaps — that is an explicit decision, not an
   oversight.

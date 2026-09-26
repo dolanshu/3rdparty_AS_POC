@@ -8,7 +8,35 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-09-23 — P14 Phase 3 × P9b alignment
+## [1.2.0] - 2026-09-26 — P15 Call Trace message flow + CI hardening
+
+### Added
+
+- **P15 Call Trace message flow** (REQ-F-056/057, REQ-NF-031, ADR-0016) — the Call Trace
+  nav view renders an SVG sequence diagram (trunk / AS-internal / return legs) from
+  `GET /api/v1/traces/{call_id}` with an event-detail modal; clicking an arrow also shows
+  verbatim SIP via the new `GET /api/v1/traces/{call_id}/messages` endpoint, backed by a
+  bounded in-memory `SipMessageRecorder`.
+- **Chromium install in the CI e2e job** — `playwright install --with-deps chromium` so
+  the 65 browser-based e2e tests can execute.
+- **Pinned `as_platform` clone** — `AS_PLATFORM_REF` in ci.yml checks out commit
+  `4935cdb` in every job, preventing silent upstream HEAD drift.
+
+### Changed
+
+- P12–P15 work merged into `main` (`--no-ff`); all five CI layers are green: ruff
+  format/check, mypy, 265 unit, 49 integration, 88 e2e collected.
+
+### Fixed
+
+- Three unit test files missing the `unit` marker now carry
+  `pytestmark = pytest.mark.unit`, restoring 39 silently deselected tests (226 → 265).
+- Lint/type debt across the merged content: ruff formatting for 30 files, remaining
+  ruff violations, and 4 mypy errors (event-loop `union-attr`, `BaseCallMap.app`
+  attr-defined).
+- `.env.example` — `FRAUD_SBC_PEER_PORT` default corrected to `15062`.
+
+## [1.1.0] - 2026-09-23 — P14 Live-load demo × P9b alignment
 
 ### Added
 
@@ -20,7 +48,7 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   fraud/translation WebSocket streams and health when `--fraud-api-url` is set (REQ-F-053/054).
 - **Topology-aware call-type toggles** — T* disabled in fraud-only, F* disabled in simple
   (REQ-F-055).
-- **ADR-0015** — Phase 3 live-load demo aligned with P9b.
+- **ADR-0015** — live-load demo aligned with P9b.
 
 ### Changed
 
@@ -28,7 +56,7 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   instances peer to S-SBC return, not core directly.
 - **`ChainedOrchestrator`** — lazy subscriber sessions for external load generator.
 
-## [1.0.0] - 2026-09-22 — P13 Enhanced Console (Phase 3, v1.0 release)
+## [1.0.0] - 2026-09-22 — P13 Enhanced Console (v1.0 release)
 
 ### Added
 
@@ -80,7 +108,7 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   single-page console). All configuration is done through the load generator controls and the
   Rules / Screening views.
 
-## [0.10.0] - 2026-09-22 — P12 Call Load capability (Phase 3)
+## [0.10.0] - 2026-09-22 — P12 Call Load capability
 
 ### Added
 
@@ -88,7 +116,7 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
   (`tools/call_load_generator.py`) that drives the AS instances through real SIP
   INVITEs at configurable concurrency (1–50) and call-rate (0.1–10/sec), with
   a leaky-bucket pool + Little's Law bound-rate interaction (D6, REQ-F-038/039).
-  The generator supports all 10 Phase 1/2 call types (T1–T6, F1–F4) and four
+  The generator supports all 10 call types (T1–T6, F1–F4) and four
   duration classes (D1 fast 30%, D2 medium 50%, D3 long 15%, D4 timeout 5%).
   REST control surface: `POST /load/start|stop`, `PUT /load/config`,
   `GET /load/status` (REQ-F-040/041/044).

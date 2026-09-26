@@ -215,3 +215,83 @@ def demo_stack(tmp_path_factory):
     # N-3: close log handles so tmp_path_factory can clean up
     for lf in log_files:
         lf.close()
+
+
+# ---------------------------------------------------------------------------
+# Chained-mode fixture — full anti-fraud + translation AS + ims_mock + generator + console
+# ---------------------------------------------------------------------------
+
+_CHAINED_PORTS = [5060, 5063, 8080, 8082, 8765, 8081, 5070, 5071, 5072, 5073]
+
+
+@pytest.fixture(scope="function")
+def demo_stack_chained():
+    """Phase 3 chained stack via ``scripts/phase3-demo.sh full``.
+
+    Function scope so a chained test session does not race with
+    ``demo_stack`` (which is session scope and occupies 5060/8080/8765/8081).
+    Each test starts its own full stack and tears it down cleanly.
+    """
+    for port in _CHAINED_PORTS:
+        _kill_port(port)
+
+    env = _env_with_local_no_proxy()
+    proc = subprocess.Popen(
+        ["bash", str(pathlib.Path(PROJECT_ROOT) / "scripts" / "phase3-demo.sh"), "full"],
+        cwd=PROJECT_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    ready = True
+    last_port = None
+    # HTTP services first (fast signal), then UDP
+    http_endpoints = [
+        ("fraud AS API", 8082, "/healthz"),
+        ("translation AS API", 8080, "/healthz"),
+        ("console", 8081, "/healthz"),
+        ("generator", 8765, "/load/status"),  # no /healthz on generator
+    ]
+    for label, port, path in http_endpoints:
+        last_port = port
+        if not _wait_http(f"http://127.0.0.1:{port}{path}", 35):
+            ready = False
+            break
+    if ready:
+        for label, port in [("ims_mock return", 5070), ("fraud AS SIP", 5063), ("translation AS SIP", 5060)]:
+            last_port = port
+            if not _wait_udp_port(port, 35):
+                ready = False
+                break
+
+    if not ready:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        for p in _CHAINED_PORTS:
+            _kill_port(p)
+        raise RuntimeError(
+            f"demo_stack_chained failed — port {last_port} / {label} not ready within 35s"
+        )
+
+    yield {
+        "console": "http://127.0.0.1:8081",
+        "as_api": "http://127.0.0.1:8080",
+        "fraud_api": "http://127.0.0.1:8082",
+        "gen": "http://127.0.0.1:8765",
+    }
+
+    # --- teardown ---
+    try:
+        proc.send_signal(signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    for port in _CHAINED_PORTS:
+        _kill_port(port)

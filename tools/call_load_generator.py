@@ -33,7 +33,8 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import Any, ClassVar, Final, Literal
+from urllib.parse import quote as _urllib_quote
 
 Topology = Literal["simple", "fraud", "chained"]
 TOPOLOGIES: Final[frozenset[str]] = frozenset({"simple", "fraud", "chained"})
@@ -514,23 +515,63 @@ class MockSipUac:
     # Number selection per call type
     # ------------------------------------------------------------------
 
+    # Per-type caller pool — independent numeric range so per-caller rate
+    # window (P8 max_calls=5 / 60s) never caps aggregate generator rate.
+    # All callers are plain numeric (no leading "+") — sippy's From header
+    # parser does NOT accept unencoded "+" in SIP URI user part.
+    # ``_sip_user_encoded`` adds "+" prefix AND percent-encodes reserved chars
+    # when building the P-Asserted-Identity header (ISC-flavoured).
+    CALLER_POOL_SIZE: Final[int] = 50
+
+    _CALLER_POOLS: Final[dict[str, list[str]]] = {
+        # T1 caller prefix +86138001380 hits allow_list "+86138001380" (PAID)
+        "T1": [f"8613800138{i:02d}" for i in range(CALLER_POOL_SIZE)],
+        # T2 caller +86216180000 hits allow_list number (PAID)
+        "T2": [f"8621618000{i:02d}" for i in range(CALLER_POOL_SIZE)],
+        "T3": [f"1415555{i:04d}" for i in range(CALLER_POOL_SIZE)],
+        "T4": [f"8613800138{i:02d}" for i in range(50, 100)],
+        "T5": [f"8613900139{i:02d}" for i in range(CALLER_POOL_SIZE)],
+        "T6": [f"8613700137{i:02d}" for i in range(CALLER_POOL_SIZE)],
+        # F1/F2/F3 callers align with caller_screening.yaml (PAID with "+" prefix)
+        "F1": [f"8621618000{i:02d}" for i in range(CALLER_POOL_SIZE)],
+        "F2": [f"861340000000{i}" for i in range(1, 10)],
+        "F3": [f"861340000000{i}" for i in range(11, 20)],
+        "F4": [f"8613800138{i:02d}" for i in range(CALLER_POOL_SIZE)],
+    }
+
+    # Fixed called numbers per call type (unchanged from original HLD §12.3)
+    CALLED_NUMBERS: Final[dict[str, str]] = {
+        "T1": "+8613800138000",
+        "T2": "02112345678",
+        "T3": "0014155551234",
+        "T4": "1234",
+        "T5": "+8613900139000",
+        "T6": "+8613700137000",
+        "F1": "+8613800138000",
+        "F2": "+8613800138000",
+        "F3": "+8613800138000",
+        "F4": "+8613800138000",
+    }
+
+    _caller_offsets: ClassVar[dict[str, int]] = {k: 0 for k in _CALLER_POOLS}
+
     def numbers_for(self, call_type: str) -> tuple[str, str]:
-        """Return ``(called, caller)`` for a call type (HLD §12.3)."""
-        table: dict[str, tuple[str, str]] = {
-            "T1": ("+8613800138000", "1001"),
-            "T2": ("02112345678", "1001"),
-            "T3": ("0014155551234", "1001"),
-            "T4": ("1234", "1001"),
-            "T5": ("+8613900139000", "1001"),
-            "T6": ("+8613700137000", "1001"),
-            "F1": ("+8613800138000", "1001"),
-            "F2": ("+8613800138000", "1999"),
-            "F3": ("+8613800138000", "1998"),
-            "F4": ("+8613800138000", "1001"),
-        }
-        if call_type not in table:
+        """Return ``(called, caller)`` for a call type (HLD §12.3).
+
+        Caller is drawn from a per-type rotating pool so every call uses
+        a different PAID user part — critical to avoid P8 rate-window caps
+        when the generator runs at >0.083 cps.
+        """
+        if call_type not in self.CALLED_NUMBERS:
             raise ValueError(f"Unknown call type: {call_type}")
-        return table[call_type]
+
+        # Rotate through pool
+        pool = self._CALLER_POOLS[call_type]
+        offset = MockSipUac._caller_offsets[call_type]
+        caller = pool[offset % len(pool)]
+        MockSipUac._caller_offsets[call_type] = offset + 1
+
+        return (self.CALLED_NUMBERS[call_type], caller)
 
     # ------------------------------------------------------------------
     # Real sippy UAC send — schedules onto ED2.loop() via sippy.Timeout
@@ -614,6 +655,20 @@ class MockSipUac:
 
     # --- ISC headers (mirror s_sbc_mock/uac.py) -------------------------
 
+    @staticmethod
+    def _sip_user_encoded(user: str) -> str:
+        """Percent-encode characters that are reserved in SIP URI user part.
+
+        RFC 3261 §25.1 — unreserved = alphanum / "-" / "." / "_" / "~".
+        ``+`` is a reserved separator in SIP URI and MUST be ``%2B``.
+
+        The caller pool itself keeps plain digits (sippy's From header parser
+        would reject unencoded "+"). We add "+" only when building the
+        P-Asserted-Identity header so ISC-flavoured screening matches
+        ``caller_screening.yaml`` E.164 entries like ``+86138001380``.
+        """
+        return _urllib_quote(user, safe="-._~")
+
     def _isc_headers(self, caller: str, call_id: str) -> tuple[Any, ...]:
         """Build ISC-flavoured context headers like the mock S-SBC."""
         from sippy.SipHeader import SipHeader
@@ -629,8 +684,11 @@ class MockSipUac:
                 )
             )
         if caller:
+            # PAID must use E.164 with "+" prefix so Fraud AS screening matches.
+            # Caller pool is plain digits → prepend "+" then pct-encode just in case.
+            encoded = self._sip_user_encoded("+" + caller)
             headers.append(
-                SipHeader(s=f"P-Asserted-Identity: <sip:{caller}@{_IMS_DOMAIN}>")
+                SipHeader(s=f"P-Asserted-Identity: <sip:{encoded}@{_IMS_DOMAIN}>")
             )
         return (
             *headers,

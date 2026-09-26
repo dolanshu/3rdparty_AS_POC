@@ -1,7 +1,9 @@
 # P13 Dashboard — Playwright E2E 测试计划
 
-> 状态：已按 review-20260923 两轮修订（含 review-kimi 第二轮） · 编写日期：2026-09-22 · 最后修订：2026-09-23
-> 对应文件：`tests/e2e/test_console_dashboard.py`（**46 测试 / 9 类**，含 2026-09-24 P15 Call Trace sequence + SIP modal）
+> 状态：已按 review-20260923 两轮修订 + 2026-09-24 全量执行（simple 50/50 + chained 8/8 = 58 E2E ✅） · 编写日期：2026-09-22 · 最后修订：2026-09-24
+> 对应文件：
+>   - `tests/e2e/test_console_dashboard.py`（**50 测试 / 11 类**，含 2026-09-24 新增 TestSliderToRestLoop / TestCallTypeToggleUI / topology link color）
+>   - `tests/e2e/test_console_chained_dashboard.py`（**8 测试 / 2 类**，2026-09-24 新增 demo_stack_chained fixture + chained topology console 验证）
 > 目标：用真实浏览器（Chromium headless）完整走通 Enhanced Dashboard 用户旅程生命周期，覆盖事件流每一环。
 
 ### 代码修复状态（review 两轮 + HY4 第三轮行动项）
@@ -11,7 +13,7 @@
 | **P0-3** | `test_console_dashboard.py` L1 | 文件头加 `import pytest`（L436 `pytest.skip` 之前会 NameError） | ✅ **已修复** 2026-09-23 | generator 启动慢时 #22 正确 skip 而非假失败 |
 | **P0-2a** | `test_console_dashboard.py` L21 | 加 `pytestmark = pytest.mark.e2e` | ✅ **已修复** 2026-09-23 | `pytest tests/e2e -m e2e` 收集 28 dashboard + 9 call flows = 37 |
 | **P0-2b** | `conftest.py` L26 | PROJECT_ROOT 改 `pathlib.Path(__file__).resolve().parents[2]` | ✅ **已修复** 2026-09-23 | 换机器 clone 到别处不炸 |
-| **P0-2c** | `pyproject.toml` dev 组 | 加 `pytest-playwright`（提供 `page` fixture）+ `playwright`（driver） | **待补** | 裸环境下 `uv run pytest ...` 可跑；**不是只加 `playwright`**（HY4 B-2） |
+| **P0-2c** | `pyproject.toml` dev 组 | 加 `pytest-playwright`（提供 `page` fixture）+ `playwright`（driver） | ✅ **已修复** 2026-09-24 | 裸环境下 `uv run pytest ...` 可跑；`playwright install chromium` 一次装 driver |
 | **P0-2d** | `pyproject.toml` dev 组 | ⚠️ `requests` 已被移除（M-4 改 stdlib urllib），**不再需要声明** | ✅ 已解决 | — |
 | **M-4** | `test_console_dashboard.py` L335-424 | 去 `requests`、改 `_put_config`、#17 try/finally 恢复原配置 | ✅ **已修复** 2026-09-23 | `pytest -k test_console_gauge_rises_then_falls_with_generator` 与全量顺序跑结果一致 |
 | **M-5** | `test_console_dashboard.py` L46-79 | `_reset_gen` 区分不可达（立刻 fail）与超时（带诊断 fail） | ✅ **已修复** 2026-09-23 | 手动 kill generator 进程 → pytest.fail 给出清晰错误信息 |
@@ -28,6 +30,10 @@
 | **R3-P0-3 / B-3** | `Makefile` L65 + `pyproject.toml` + `.github/workflows/ci.yml` | **CI 接入方式待 maintainer 拍板**：正式接入（dev 组加 deps + `playwright install chromium`）vs 显式豁免（拆 `make e2e-ui` 进 gap register） | **待决策** | `ci.yml` 行为与本文档一致 |
 | **R3-P2-3 / M-8** | `docs/production-gaps.md` | 登记端口硬编码 / `kill -9` / 浏览器依赖三条 | **待登记** | register 三行可追溯到本计划 |
 | **R3-P2-4 / M-9** | `docs/acceptance/report.md` + `ci.yml` artifacts | E2E 证据路径 + 失败产出 `artifacts/` | **待落地** | `ci.yml` e2e-trace artifact 能拿到有效内容 |
+| **P3-gap-5** | `TestDashboardLive::test_topology_link_color_changes_on_active` | 拓扑连线 idle-gray → active-green + AS 节点 default border → err-red（ADR-0013 方案 C 验证） | ✅ **已补测试** 2026-09-24 | `getAttribute('stroke')` 断言 `var(--mut)` → `var(--in)`；nTrans 节点 must NOT remain `var(--bd)` |
+| **P3-gap-6** | `TestSliderToRestLoop::test_target_slider_puts_generator_config` | Slider `#tgtSlider` → `ldConfig()` PUT → generator REST `target_concurrency` → gauge target 文本联动 | ✅ **已补测试** 2026-09-24 | Playwright `dispatchEvent('change')` 触发 onchange → 轮询 REST + gauge 文本，assert `saw_target == 5` + gauge 含 `/ 5` |
+| **P3-gap-7** | `TestCallTypeToggleUI` 2 测 | simple 模式 F1-F4 UI gating（disabled + opacity 0.35 + unchecked） + 服务端 PUT 带 F types → HTTP 400 | ✅ **已补测试** 2026-09-24 | 验证 `#tog_F1.disabled==True` + `parent.style.opacity=='0.35'`；`pytest.raises(HTTPError)` + `e.code==400` |
+| **P3-gap-8** | `conftest.py::demo_stack_chained` + `test_console_chained_dashboard.py` 8 测 | chained（full）模式完整 E2E：fixture 跑 `phase3-demo.sh full` + 6 节点 5 连线 SVG + cross-AS hint + 双 AS API + 活跃 traffic 连线染色 | ✅ **已补** 2026-09-24 | Function scope fixture，35s 启动；8/8 绿（总 E2E 58/58 ✅） |
 
 → 原第一轮追踪表的 6 项：P0-2/P0-3/R2-P0-1/R2-P1-1/R2-P2-3/R2-P2-4 已在此表重写，见上。
 
@@ -155,7 +161,7 @@ python3 -m pytest tests/e2e/test_console_dashboard.py -v -k "Concurrent"
 
 ---
 
-## 三、测试用例清单（43 个 / 9 类）
+## 三、测试用例清单（50 simple + 8 chained = 58 个 / 13 类 · 全绿 ✅ 2026-09-24）
 
 ### 3.1 TestPageLoad（5 个）—— 基础连通性，失败则中止后续
 
@@ -358,35 +364,18 @@ assert _gen_status(gen_base)["running"] is True
 
 ### 5.1 相对于 phase3-plan.md 的覆盖缺口（review P1-1 + R2-P1-1）
 
-`docs/phase3-plan.md` P13 Stage 4 对 E2E 有明确要求，本 28 测试**未覆盖**的项：
+> ✅ = 已补（2026-09-24 本轮全量执行后）· ⚠️ = 仍有
 
-| phase3-plan 出处 | 要求 | 本 28 测试现状 |
+| phase3-plan 出处 | 要求 | 当前 E2E 覆盖 |
 |---|---|---|
-| §P13 Stage 4 E2E step (5)(6) + §6 风险表第 4 行（High） | "slide to 5 → verify chart drops"——target concurrency slider → REST `/load/config` → pool → WS → gauge chart **完整闭环** | 本文件无任何 slider E2E。#17 用 `requests.put /load/config` 禁用 T4 作为测试前置，但**不**断言 slider UI → REST → pool 响应链路。phase3-plan 将其列为影响 High 风险 |
-| **D6 Little's Law 教育性设计 + ACC-P13-005**（R2-P1-1） | 双滑块 + binding-constraint 指示器（ADR-0013） | **部分覆盖**：`TestBindingConstraint` REST 翻转 ✅；`TestBindingConstraintUI` `#bindInd` 浏览器翻转 ✅；**slider UI → REST 闭环仍缺** |
-| **phase3-gap-audit Statistics 四表** | `errors_by_code` / `rule_hits` / `peer_status` / disposition 表格 | **已覆盖** `TestStatisticsMetrics` #37–39 ✅ |
-| **phase3-gap-audit AS summary** | `#asSummary` 累计 + Statistics 链接 | **已覆盖** `TestAsSummary` #41–42 ✅ |
-| REQ-F-049 | call type toggles E2E | 无 |
-| REQ-F-048 / §P13 Stage 3 step 7 | 拓扑按 hop 颜色（绿/红/橙） | 本文件只测 `#l1 stroke-width`，颜色（stroke CSS var）未测 |
-| §P13 "chained demo compatibility" / D8 | 拓扑为固定四节点 `S-SBC → anti-fraud → translation → S-SBC ret`；P14 起按模式淡化未参与节点（simple 淡化 anti-fraud，fraud 淡化 translation），chained 换用含 iFC + UAS 的图 | conftest 只起 1 个 AS（translation），无 anti-fraud 进程。拓扑最左两跳在 E2E 栈里不存在。**chained 拓扑覆盖在 `test_chained_call_flows.py`（非浏览器 E2E）和 `test_chained_topology.py`（integration），console dashboard 的拓扑图渲染链式场景未测** |
-
-→ **建议**（按优先级）：
-1. ~~**最高优先**（R3-P0-1）REST `binding_constraint` 翻转~~ ✅ `TestBindingConstraint`；~~浏览器 `#bindInd`~~ ✅ `TestBindingConstraintUI`。**仍缺**：slider UI → REST 闭环。原 REST 配方：
-
-   | 目标 | PUT 到 `/load/config` 的 body | 判定依据 |
-   |---|---|---|
-   | `"rate"` 绑定 | `{target_concurrency: 10, call_rate: 0.1, ...}` | `0.1 × 10.4 = 1.04 < 10` → 回 `"rate"` |
-   | `"concurrency"` 绑定 | `{target_concurrency: 10, call_rate: 2.0, ...}` | `2.0 × 10.4 = 20.8 >= 10` → 回 `"concurrency"` |
-
-   **重要**：PUT `/load/config` 的响应体**不含** `binding_constraint` 字段（generator L776 只 echo config），所以新测试必须 PUT 后再 **GET `/load/status`** 读取该字段。建议复用已有的 `_put_config` helper + 新增 `_gen_status` 断言，约 15 行。验收口径：在 `test_call_pool.py` L198-221 的现有语义下稳定变绿（`target=10, rate=10.0 → "concurrency"`；`target=50, rate=1.0 → "rate"`）。
-
-2. **次优先**：补 slider 改 target_concurrency → gauge/target 读数随 pool_status_update 变化闭环测试。
-
-3. **DOM 唯一性**（R3-P1-2 / M-3 #1）：每个 `#vw-{view}` 必须全局唯一——当前 `locator.evaluate` 只作用于首个匹配元素，若未来 `.vw` 又被复制（正是 B3 历史根因），28 个测试照样全绿。建议补一条：`assert page.locator("#vw-rules").count() == 1`（可参数化到 5 个视图），约 6 行。
-
-4. **WS 离线重连**（R3-P1-2 / M-3 #2）：console JS 实现了 `ewsEv()` / `ewsLd()`（console L423 / L445）3s 重连 + `fh()` catch 分支把 `#aSt` 置 `"unreachable"`。可用 `page.context().set_offline(True/False)` 做纯前端测试（零额外进程成本），覆盖"演示中抖网会不会白屏"这个真实评审场景。
-
-5. 其余缺口在 `docs/testing/e2e-call-flows-plan.md` 和 `docs/testing/integration-plan.md` 有覆盖，不再此处重列。
+| **P13 Stage 4 E2E step (5)(6) + §6 风险表第 4 行（High）** | "slide to 5 → verify chart drops"——slider UI → `ldConfig()` PUT `/load/config` → generator REST → WS → gauge target 闭环 | ✅ **已覆盖** `TestSliderToRestLoop`（2026-09-24 新增）。Playwright 用 `dispatchEvent('change')` 触发 onchange → 轮询 REST `target_concurrency==5` → 轮询 gauge 文本含 `/ 5` |
+| **D6 Little's Law + ACC-P13-005 / R2-P1-1** | 双滑块 + binding-constraint 指示器 | ✅ **全链路覆盖**：`TestBindingConstraint`（REST 翻转）+ `TestBindingConstraintUI`（#bindInd 浏览器翻转）+ `TestSliderToRestLoop`（slider UI → REST） |
+| **phase3-gap-audit Statistics 四表** | errors_by_code / rule_hits / peer_status / disposition | ✅ `TestStatisticsMetrics` 三段覆盖 |
+| **phase3-gap-audit AS summary** | #asSummary 累计 + Statistics 链接 | ✅ `TestAsSummary` 两段 |
+| **REQ-F-049** | call type toggles E2E（simple 模式 F types UI gating + 服务端校验） | ✅ **已覆盖** `TestCallTypeToggleUI` 2 测（2026-09-24 新增）。F1-F4 disabled + opacity 0.35 + unchecked；PUT 带 F types → HTTP 400 |
+| **REQ-F-048 / §P13 Stage 3 step 7** | 拓扑按 hop 颜色（方案 C）：连线 idle-gray → active-green + AS 节点 default border → err-red/warn-orange | ✅ **已覆盖** `TestDashboardLive::test_topology_link_color_changes_on_active`（2026-09-24 新增）。`getAttribute('stroke')` 断言 `var(--mut)` → `var(--in)` |
+| **§P13 "chained demo compatibility" / D8** | chained 拓扑（anti-fraud + translation + ims_mock + cross-AS hint）console 完整渲染 | ✅ **已覆盖** `test_console_chained_dashboard.py` 8 测（2026-09-24 新增）+ `conftest::demo_stack_chained` fixture（function scope，跑 `phase3-demo.sh full`）。6 节点 5 连线 SVG + #topoHint cross-AS note + 双 AS API 可达 + 活跃 traffic 连线染色 |
+| **§P13 messages 路由细分** | 入站/出站/内部 messages 的 trace 面板过滤（按 peer 或 direction） | ⚠️ 未覆盖——现有 TestDashboardLive 只测 `#filt` 按 Call-ID，未测方向过滤（低风险：Call-ID 过滤已覆盖主路径） |
 
 ---
 

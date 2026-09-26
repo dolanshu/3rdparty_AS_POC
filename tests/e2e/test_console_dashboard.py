@@ -306,9 +306,13 @@ class TestNavigation:
     def test_screening_view_renders(self, page, demo_stack):
         _open_console(page, demo_stack)
         _click_nav(page, "screening")
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(1200)  # async fs()
         assert page.locator("#vw-screening").evaluate("el => el.classList.contains('act')")
         assert page.locator("#scrCard").count() == 1
+        # Simple mode has no Fraud AS → placeholder
+        text = page.locator("#scrCard").inner_text()
+        assert ("Anti-fraud AS" in text or "not active" in text), \
+            f"Simple mode: expected placeholder, got: {text[:200]}"
 
     def test_statistics_view_renders(self, page, demo_stack):
         _open_console(page, demo_stack)
@@ -486,11 +490,11 @@ class TestGeneratorLifecycle:
         # active_calls stays > 0 long enough for pool_feed to see it.
         # Only enable call types that the demo routing table actually
         # matches — T4 ("1234") has no route and AS rejects it instantly.
-        valid_types = ["T1", "T2", "T3", "T5", "T6", "F1", "F2", "F3", "F4"]
+        # simple topology rejects fraud-only call types (F1-F4).
         _put_config(demo_stack["gen"], {
             "target_concurrency": 10,
             "call_rate": 3.0,
-            "enabled_call_types": valid_types,
+            "enabled_call_types": _SIMPLE_CALL_TYPES,
         })
 
         # try/finally ensures config restores even if assertions fail
@@ -646,6 +650,66 @@ class TestDashboardLive:
         assert "call_ended" in event_text, event_text
         _click_visible(page, "#btnStop")
 
+    def test_topology_link_color_changes_on_active(self, page, demo_stack):
+        """Links go from idle-gray to active-green; AS node turns err-red on rejects.
+
+        Reads the raw SVG attribute (``getAttribute('stroke')``) — we set
+        CSS var references (``var(--mut)`` / ``var(--in)`` / ``var(--err)``),
+        so the assertion is string equality on those keywords, not on the
+        computed RGB value. This is the simplest reliable check across themes.
+
+        Two-phase polling avoids races where ``topoVal`` updates from the
+        generator pool_status_update (fast, 1s cadence) but ``paintLinks``
+        runs slightly later because it depends on both pool_status_update
+        and AS event WS ``counters.*`` counters.
+        """
+        _open_console(page, demo_stack)
+
+        # Idle state: links = --mut, AS node = --bd (default border)
+        idle_l1 = page.locator("#l1").evaluate("el => el.getAttribute('stroke')")
+        idle_l2 = page.locator("#l2").evaluate("el => el.getAttribute('stroke')")
+        idle_ntrans = page.locator("#nTrans").evaluate("el => el.getAttribute('stroke')")
+        assert idle_l1 == "var(--mut)", f"idle l1 stroke expected var(--mut), got {idle_l1!r}"
+        assert idle_l2 == "var(--mut)", f"idle l2 stroke expected var(--mut), got {idle_l2!r}"
+        assert idle_ntrans == "var(--bd)", f"idle nTrans stroke expected var(--bd), got {idle_ntrans!r}"
+
+        # Start generator
+        _click_visible(page, "#btnStart")
+
+        # --- Phase 1: wait until topoVal confirms traffic is flowing ---
+        deadline = time.time() + 25
+        topo_text = None
+        while time.time() < deadline:
+            topo_text = page.locator("#topoVal").inner_text()
+            if "idle" not in topo_text.lower() and "active" in topo_text.lower() or "calls" in topo_text.lower():
+                break
+            time.sleep(0.5)
+        assert "idle" not in (topo_text or "idle"), (
+            f"topoVal still idle after 25s — generator traffic never arrived"
+        )
+
+        # --- Phase 2: confirm JS paintLinks/paintNodes have applied colors ---
+        deadline = time.time() + 15
+        active_l1 = None
+        active_ntrans = None
+        while time.time() < deadline:
+            active_l1 = page.locator("#l1").evaluate("el => el.getAttribute('stroke')")
+            active_ntrans = page.locator("#nTrans").evaluate("el => el.getAttribute('stroke')")
+            if active_l1 == "var(--in)" and active_ntrans != "var(--bd)":
+                break
+            time.sleep(0.5)
+        _click_visible(page, "#btnStop")
+
+        assert active_l1 == "var(--in)", (
+            f"active l1 stroke expected var(--in), got {active_l1!r}; "
+            f"topoVal={page.locator('#topoVal').inner_text()}"
+        )
+        # Node stroke: either err-red (rejected calls), warn-orange (timeouts)
+        # or active-green — any is correct; just must NOT still be idle --bd.
+        assert active_ntrans != "var(--bd)", (
+            f"active nTrans still at default border after traffic started: {active_ntrans!r}"
+        )
+
 
 # ===========================================================================
 # T5 — AS REST endpoints
@@ -719,6 +783,151 @@ class TestConcurrentViewSwitchAndGenerator:
 
 
 # ===========================================================================
+# T7 — Slider UI → REST → gauge 闭环（plan §5.1 High priority）
+# ===========================================================================
+
+
+class TestSliderToRestLoop:
+    """console slider drag → ldConfig() PUT /load/config → generator rest → gauge target update.
+
+    This is the phase3-plan High-risk "slide to 5 → verify chart drops"
+    end-to-end loop. The console onchange handler ``ldConfig()``
+    (console L760) PUTs ``{target_concurrency, call_rate,
+    enabled_call_types, topology}`` and the generator echoes back
+    ``target_concurrency`` on ``/load/status``. The gauge reads
+    ``target_concurrency`` from the pool_status_update WS feed.
+    """
+
+    def test_target_slider_puts_generator_config(self, page, demo_stack):
+        """#tgtSlider onchange → generator REST target_concurrency changes."""
+        _open_console(page, demo_stack)
+
+        # Save original
+        orig = _gen_status(demo_stack["gen"])
+        orig_target = orig.get("target_concurrency", 10)
+
+        # Start generator — sliders become enabled only after pool_status_update
+        _click_visible(page, "#btnStart")
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            s = _gen_status(demo_stack["gen"])
+            if s.get("running"):
+                break
+            time.sleep(0.5)
+
+        # Trigger slider change — console uses onchange (not oninput), so we
+        # must explicitly dispatch the change event after setting value.
+        page.evaluate("""() => {
+            var el = document.getElementById('tgtSlider');
+            el.value = '5';
+            el.dispatchEvent(new Event('change'));
+        }""")
+        page.wait_for_timeout(1500)
+
+        # Poll until generator REST sees the new target_concurrency
+        deadline = time.time() + 10
+        saw_target = None
+        while time.time() < deadline:
+            saw_target = _gen_status(demo_stack["gen"]).get("target_concurrency")
+            if saw_target == 5:
+                break
+            time.sleep(0.5)
+        assert saw_target == 5, (
+            f"slider → PUT /load/config did not reach generator REST: got target_concurrency={saw_target}"
+        )
+
+        # Gauge target text also updates (reads pool_status_update WS).
+        deadline = time.time() + 8
+        gauge_ok = False
+        while time.time() < deadline:
+            gauge_text = page.locator("#gaugeVal").inner_text()
+            if "5" in gauge_text.split("/")[-1]:
+                gauge_ok = True
+                break
+            time.sleep(0.5)
+
+        # Restore original
+        _put_config(demo_stack["gen"], {
+            "target_concurrency": orig_target,
+            "call_rate": orig.get("call_rate", 3.0),
+            "enabled_call_types": _SIMPLE_CALL_TYPES,
+            "topology": "simple",
+        })
+        _click_visible(page, "#btnStop")
+
+        assert gauge_ok, (
+            f"gauge target did not update to 5 after slider change; "
+            f"gauge={page.locator('#gaugeVal').inner_text()!r}, "
+            f"topoVal={page.locator('#topoVal').inner_text()!r}"
+        )
+
+
+# ===========================================================================
+# T8 — Call type toggle UI gating + server-side validation
+# ===========================================================================
+
+
+class TestCallTypeToggleUI:
+    """simple mode → F-types disabled (UI) + PUT with F-types rejected (server)."""
+
+    _T_TYPES = ["T1", "T2", "T3", "T5", "T6"]
+
+    def test_simple_topology_disables_fraud_toggles(self, page, demo_stack):
+        """simple topology: F1-F4 checkboxes disabled, T1-T6 enabled."""
+        _open_console(page, demo_stack)
+
+        topology = page.locator("#topoMode").inner_text()
+        assert topology == "Simple", f"expected Simple mode, got {topology!r}"
+
+        for t in self._T_TYPES:
+            el = page.locator(f"#tog_{t}")
+            assert el.count() == 1, f"missing toggle #tog_{t}"
+            assert not el.evaluate("el => el.disabled"), (
+                f"T-type #tog_{t} should NOT be disabled in simple topology"
+            )
+            parent_opacity = page.locator(f"#tog_{t}").evaluate("el => el.parentElement.style.opacity")
+            assert parent_opacity != "0.35", (
+                f"T-type #tog_{t} label opacity unexpectedly disabled: {parent_opacity}"
+            )
+
+        for ft in ["F1", "F2", "F3", "F4"]:
+            el = page.locator(f"#tog_{ft}")
+            assert el.count() == 1, f"missing toggle #tog_{ft}"
+            disabled = el.evaluate("el => el.disabled")
+            opacity = el.evaluate("el => el.parentElement.style.opacity")
+            assert disabled, f"F-type #tog_{ft} should be disabled in simple topology"
+            assert opacity == "0.35", (
+                f"F-type #tog_{ft} parent opacity should be 0.35 (gated), got {opacity!r}"
+            )
+            assert not el.evaluate("el => el.checked"), (
+                f"F-type #tog_{ft} should be unchecked when disabled"
+            )
+
+    def test_server_rejects_fraud_types_in_simple_topology(self, demo_stack):
+        """PUT /load/config with F-types on simple topology → HTTP 400."""
+        import json as _json
+        _reset_gen(demo_stack["gen"])
+        body = _json.dumps({
+            "target_concurrency": 10,
+            "call_rate": 3.0,
+            "enabled_call_types": ["T1", "T2", "F1", "F2"],
+            "topology": "simple",
+        }).encode()
+        req = urlrequest.Request(
+            f"{demo_stack['gen']}/load/config",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
+        with pytest.raises(urlrequest.HTTPError) as excinfo:
+            urlrequest.urlopen(req, timeout=5)
+        assert excinfo.value.code == 400, (
+            f"expected HTTP 400, got {excinfo.value.code}; "
+            f"body={excinfo.value.read()}"
+        )
+
+
+# ===========================================================================
 # HY4 新增测试 —— 填补三轮 review 发现的覆盖缺口
 # ===========================================================================
 
@@ -734,7 +943,7 @@ class TestBindingConstraint:
     config），所以 PUT 后必须再 GET /load/status 读取。
     """
 
-    _VALID_TYPES = ["T1", "T2", "T3", "T5", "T6", "F1", "F2", "F3", "F4"]
+    _VALID_TYPES = _SIMPLE_CALL_TYPES  # demo_stack uses simple topology; F1-F4 need chained
 
     def test_rate_bound(self, demo_stack):
         """{target_concurrency:10, call_rate:0.1} → 'rate'.
@@ -920,3 +1129,133 @@ class TestWsOfflineReconnect:
                 pass
             time.sleep(0.3)
         assert recovered, f"WS did not recover after back online — ev={ev_txt!r} ld={ld_txt!r}"
+
+
+# ---------------------------------------------------------------------------
+# TestSimpleSvgVisual — P0 regression guard: SVG must render with non-zero
+# bounding box, not just exist in DOM. The CSS `display:none` cascade bug
+# (#topoChained{display:none} + JS style.display="" clearing) caused chained
+# SVG children to have rect_w=0 rect_h=0 for months without being caught.
+# Simple mode SVG must also render with actual dimensions.
+# ---------------------------------------------------------------------------
+
+_SIMPLE_TOPO_NODES = ["nSsbc", "nTrans", "nRet"]
+_SIMPLE_TOPO_LINKS = ["l1", "l2"]
+
+
+class TestSimpleSvgVisual:
+    """Simple mode SVG renders with non-zero bounding boxes."""
+
+    def test_simple_svg_parent_has_dimensions(self, page, demo_stack):
+        """#topoSimple SVG rect_w > 0, rect_h > 0 — not hidden by CSS."""
+        _open_console(page, demo_stack)
+        rect = page.locator("#topoSimple").bounding_box()
+        assert rect is not None, "#topoSimple has no bounding_box — likely display:none"
+        assert rect["width"] > 0, f"#topoSimple width=0 (CSS display:none cascade?)"
+        assert rect["height"] > 0, f"#topoSimple height=0"
+
+    def test_simple_topo_nodes_have_dimensions(self, page, demo_stack):
+        """All 3 simple-mode SVG nodes have rect_w > 0."""
+        _open_console(page, demo_stack)
+        for node_id in _SIMPLE_TOPO_NODES:
+            loc = page.locator(f"#{node_id}")
+            assert loc.count() == 1, f"#{node_id} missing from DOM"
+            rect = loc.bounding_box()
+            assert rect is not None, f"#{node_id} has no bounding_box"
+            assert rect["width"] > 0, f"#{node_id} width=0 (not rendering?)"
+            assert rect["height"] > 0, f"#{node_id} height=0"
+
+    def test_simple_topo_links_have_dimensions(self, page, demo_stack):
+        """All 2 simple-mode SVG links have rect_w > 0."""
+        _open_console(page, demo_stack)
+        for link_id in _SIMPLE_TOPO_LINKS:
+            loc = page.locator(f"#{link_id}")
+            assert loc.count() == 1, f"#{link_id} missing from DOM"
+            rect = loc.bounding_box()
+            assert rect is not None, f"#{link_id} has no bounding_box"
+            # <line> elements have height=0 by nature but width > 0 means they span
+            assert rect["width"] > 0, f"#{link_id} width=0 (degenerate?)"
+
+
+# ---------------------------------------------------------------------------
+# Chart header stability — CSS .chart-h .v { min-width: 92px; flex-shrink: 0 }
+# ---------------------------------------------------------------------------
+
+class TestChartHStability:
+    """Chart header .v width stays constant regardless of text content.
+
+    Before fix: .v had no min-width, so "idle" → "21 calls total" caused
+    .chart-h to grow → parent grid column shifted → card visibly jumped.
+    After fix: min-width: 92px + text-align:right + flex-shrink:0 locks width.
+    """
+
+    # .v IDs that change their text during a run
+    _VAR_VALUES = ["topoVal", "gaugeVal", "liveVal", "pieVal"]
+
+    def test_chart_h_v_min_width(self, page, demo_stack):
+        """Every .chart-h .v element has computed width >= 92px (CSS min-width)."""
+        _open_console(page, demo_stack)
+        page.wait_for_timeout(1200)
+        for vid in self._VAR_VALUES:
+            rect = page.locator(f"#{vid}").bounding_box()
+            assert rect is not None, f"#{vid} not in DOM"
+            assert rect["width"] >= 92.0, \
+                f"#{vid} width={rect['width']:.1f}px < 92px min-width (card jump bug!)"
+
+    def test_chart_h_parent_width_stable_across_value_change(self, page, demo_stack):
+        """topoVal text change must NOT shift the parent .chart-h width.
+
+        Strategy: capture parent rect at idle → start generator via REST
+        → poll until topoVal text changes → re-capture → assert delta < 1px.
+        """
+        _reset_gen(demo_stack["gen"])
+        _open_console(page, demo_stack)
+        page.wait_for_timeout(1500)
+
+        # Idle snapshot — parent of #topoVal (the .chart-h div)
+        idle_parent_w = page.evaluate("""() => {
+            var el = document.getElementById('topoVal');
+            if (!el || !el.parentElement) return null;
+            return el.parentElement.getBoundingClientRect().width;
+        }""")
+        idle_text = page.locator("#topoVal").inner_text()
+        assert idle_parent_w is not None, "topoVal parent not found"
+        assert "idle" in idle_text.lower(), f"Expected idle, got {idle_text!r}"
+
+        # Configure + start generator via REST (inline, no helper)
+        import json as _json
+        body = _json.dumps({
+            "target_concurrency": 5,
+            "call_rate": 1.0,
+            "enabled_call_types": ["T1","T2","T3","T4","T5","T6"],
+        }).encode()
+        req = urlrequest.Request(f"{demo_stack['gen']}/load/config", data=body,
+                                  headers={"Content-Type": "application/json"}, method="PUT")
+        urlrequest.urlopen(req, timeout=5).read()
+        req2 = urlrequest.Request(f"{demo_stack['gen']}/load/start", data=b"", method="POST")
+        urlrequest.urlopen(req2, timeout=5).read()
+
+        # Poll until topoVal text changes away from "idle"
+        deadline = time.time() + 15
+        changed = False
+        while time.time() < deadline:
+            cur_text = page.locator("#topoVal").inner_text()
+            if "idle" not in cur_text.lower():
+                changed = True
+                break
+            time.sleep(0.5)
+        assert changed, f"topoVal never left 'idle' — generator not producing calls?"
+
+        # Capture again
+        active_parent_w = page.evaluate("""() => {
+            var el = document.getElementById('topoVal');
+            if (!el || !el.parentElement) return null;
+            return el.parentElement.getBoundingClientRect().width;
+        }""")
+
+        delta = abs(active_parent_w - idle_parent_w)
+        assert delta < 1.0, \
+            f"chart-h width shifted by {delta:.1f}px (idle={idle_parent_w:.1f}px, active={active_parent_w:.1f}px) — card jump bug!"
+
+        # Cleanup
+        _reset_gen(demo_stack["gen"])

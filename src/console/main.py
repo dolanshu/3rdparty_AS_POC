@@ -70,7 +70,8 @@ html,body{width:100%;height:100%;margin:0;padding:0}
 .chart-card{flex:1;min-height:0;min-width:0;padding:10px 14px;border-bottom:1px solid var(--bd);display:flex;flex-direction:column}
 .chart-card:last-child{border-bottom:none}
 .chart-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.chart-h .t{font-size:12px;font-weight:600;color:var(--acc)}.chart-h .v{font-size:11px;color:var(--mut)}
+.chart-h .t{font-size:12px;font-weight:600;color:var(--acc);flex-shrink:0}
+.chart-h .v{font-size:11px;color:var(--mut);min-width:92px;text-align:right;flex-shrink:0}
 .chart-wrap{flex:1;min-height:0;position:relative}
 
 /* Right panel — doughnut + topology */
@@ -147,7 +148,7 @@ tr.err-row td{color:var(--err)}
 <div class="si"><span class="sl">uptime</span><span class="sv" id="aUp">-</span></div>
 <div class="si"><span class="sl">calls</span><span class="sv" id="aCal">0</span></div>
 <div class="si"><span class="sl">active</span><span class="sv" id="aAct">0</span></div>
-<div class="si"><span class="sl">target</span><span class="sv" id="aTgt">-</span></div>
+<div class="si"><span class="sl">concurrent</span><span class="sv" id="aTgt">-</span></div>
 <div class="sp"></div>
 <div class="si ws" id="wsEv">trans ws: offline</div>
 <div class="si ws" id="wsEvF" style="display:none">fraud ws: offline</div>
@@ -164,7 +165,7 @@ tr.err-row td{color:var(--err)}
 <button data-v="about">About</button>
 <div class="ctl">
 <div class="h">Load Generator</div>
-<div class="ctl-row"><label>Target</label><input type="range" id="tgtSlider" min="1" max="50" value="10" disabled><span class="val" id="tgtVal">10</span></div>
+<div class="ctl-row"><label>Concurrent</label><input type="range" id="tgtSlider" min="1" max="50" value="10" disabled><span class="val" id="tgtVal">10</span></div>
 <div class="ctl-row"><label>Call rate</label><input type="range" id="rateSlider" min="0.1" max="10" step="0.1" value="3.0" disabled><span class="val" id="rateVal">3.0</span></div>
 <div class="btns"><button id="btnStart" disabled>Start</button><button id="btnStop" disabled>Stop</button></div>
 <div class="h" style="margin-top:10px">Call Types</div>
@@ -222,7 +223,6 @@ tr.err-row td{color:var(--err)}
 </div>
 <div class="sm-card g">
 <div class="chart-h"><span class="t">Network Topology</span><span class="topo-mode" id="topoMode">Simple</span><span class="v" id="topoVal">idle</span></div>
-<div class="topo-hint" id="topoHint" style="display:none">Cross-AS trace: correlate on ICID (P-Charging-Vector), not Call-ID.</div>
 <div class="topo-wrap">
 <svg viewBox="0 0 320 120" xmlns="http://www.w3.org/2000/svg" id="topoSimple">
 <rect x="4" y="48" width="54" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nSsbc"/>
@@ -234,24 +234,24 @@ tr.err-row td{color:var(--err)}
 <rect x="196" y="48" width="70" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="nRet"/>
 <text x="231" y="64" text-anchor="middle" fill="var(--mut)" font-size="10">S-SBC ret</text>
 </svg>
-<svg viewBox="0 0 400 120" xmlns="http://www.w3.org/2000/svg" id="topoChained">
-<rect x="2" y="48" width="40" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
-<text x="22" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">Gen</text>
-<line id="cl1" x1="42" y1="60" x2="58" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="58" y="48" width="44" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
-<text x="80" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">S-SBC</text>
-<line id="cl2" x1="102" y1="60" x2="118" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="118" y="48" width="56" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="cAS1"/>
-<text x="146" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">Anti-fraud</text>
-<line id="cl3" x1="174" y1="60" x2="190" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="190" y="48" width="36" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
-<text x="208" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">iFC</text>
-<line id="cl4" x1="226" y1="60" x2="242" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="242" y="48" width="56" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)" id="cAS2"/>
-<text x="270" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">Translation</text>
-<line id="cl5" x1="298" y1="60" x2="314" y2="60" stroke="var(--mut)" stroke-width="2"/>
-<rect x="314" y="48" width="36" height="24" rx="4" fill="var(--p2)" stroke="var(--bd)"/>
-<text x="332" y="64" text-anchor="middle" fill="var(--mut)" font-size="9">UAS</text>
+<svg viewBox="0 0 500 280" xmlns="http://www.w3.org/2000/svg" id="topoChained">
+<!-- Placeholder lines (cl1, cl3, cl5) — no visual role; skipped by paintLinks -->
+<line id="cl1" x1="0" y1="0" x2="0" y2="0" stroke="none" stroke-width="0"/>
+<line id="cl3" x1="0" y1="0" x2="0" y2="0" stroke="none" stroke-width="0"/>
+<line id="cl5" x1="0" y1="0" x2="0" y2="0" stroke="none" stroke-width="0"/>
+<!-- Row 1: AS layer -->
+<rect x="60" y="35" width="120" height="40" rx="6" fill="var(--p2)" stroke="var(--bd)" id="cAS1"/>
+<text x="120" y="60" text-anchor="middle" fill="var(--mut)" font-size="12">Anti-fraud</text>
+<rect x="320" y="35" width="120" height="40" rx="6" fill="var(--p2)" stroke="var(--bd)" id="cAS2"/>
+<text x="380" y="60" text-anchor="middle" fill="var(--mut)" font-size="12">Translation</text>
+<!-- Vertical links: Core box → AS nodes -->
+<line id="cl2" x1="120" y1="140" x2="120" y2="75" stroke="var(--mut)" stroke-width="2"/>
+<line id="cl4" x1="380" y1="140" x2="380" y2="75" stroke="var(--mut)" stroke-width="2"/>
+<!-- Row 2: Core network box -->
+<rect x="50" y="140" width="400" height="110" rx="8" fill="none" stroke="var(--bd)" stroke-width="1.5"/>
+<line x1="60" y1="195" x2="440" y2="195" stroke="var(--bd)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="250" y="175" text-anchor="middle" fill="var(--int)" font-size="13" font-weight="bold">S-SBC</text>
+<text x="250" y="225" text-anchor="middle" fill="var(--int)" font-size="13" font-weight="bold">S-SCSF (iFC)</text>
 </svg>
 </div>
 </div>
@@ -325,7 +325,7 @@ function updateBindingIndicator(s){
   var rate = s.call_rate != null ? s.call_rate : callRate;
   var tgt = s.target_concurrency != null ? s.target_concurrency : targetConc;
   var theoretical = (rate * AVG_DURATION).toFixed(1);
-  el.innerHTML = 'binding: <span class="bind-tag">'+esc(bc)+'</span> (rate×duration='+theoretical+', target='+tgt+')';
+  el.innerHTML = 'binding: <span class="bind-tag">'+esc(bc)+'</span> (rate×duration='+theoretical+', max='+tgt+')';
 }
 function updateAsSummary(){
   var el = E("asSummary"); if(!el || !md) return;
@@ -468,13 +468,12 @@ function setTopologyMode(mode){
   topologyMode = mode || "simple";
   var labels = {simple: "Simple", fraud: "Fraud only", chained: "Chained (iFC)"};
   E("topoMode").textContent = labels[topologyMode] || topologyMode;
-  E("topoHint").style.display = topologyMode === "chained" ? "" : "none";
   var simple = E("topoSimple"), chained = E("topoChained");
   if(topologyMode === "chained"){
     if(simple) simple.style.display = "none";
-    if(chained) chained.style.display = "";
+    if(chained) chained.style.display = "inline";
   } else {
-    if(simple) simple.style.display = "";
+    if(simple) simple.style.display = "inline";
     if(chained) chained.style.display = "none";
   }
   applyToggleGating();
@@ -489,7 +488,7 @@ function applyToggleGating(){
     var isT = t.charAt(0) === "T", disabled = (tOnly && isT) || (fOnly && !isT);
     el.disabled = disabled;
     if(disabled){ el.checked = false; if(lab) lab.classList.remove("on"); }
-    else if(el.checked && lab) lab.classList.add("on");
+    else { el.checked = true; if(lab) lab.classList.add("on"); }
     if(lab) lab.style.opacity = disabled ? "0.35" : "1";
   });
 }
@@ -497,7 +496,7 @@ function applyToggleGating(){
 function updateTopology(){
   var m = topoIntensity();
   if(topologyMode === "chained"){
-    paintLinks(["cl1","cl2","cl3","cl4","cl5"], m.intensity, m.linkColor);
+    paintLinks(["cl2","cl4"], m.intensity, m.linkColor);
     paintNodes(["cAS1","cAS2"], m.nodeStroke);
   } else {
     paintLinks(["l1","l2"], m.intensity, m.linkColor);
@@ -718,6 +717,7 @@ function pollLd(){
   fetch(LD_URL+"/load/status").then(function(r){return r.json()}).then(function(s){
     if(s){targetConc=s.target_concurrency||targetConc;callRate=s.call_rate||callRate;
       activeCalls=s.active_calls||0;poolRunning=s.running||false;
+      if(s.topology) setTopologyMode(s.topology);  // close race window: REST also updates topology
       E("tgtSlider").value=targetConc;E("tgtVal").textContent=targetConc;
       E("rateSlider").value=callRate;E("rateVal").textContent=callRate;
       E("btnStart").disabled=poolRunning;E("btnStop").disabled=!poolRunning;
@@ -795,11 +795,39 @@ function rr(){if(!rd)return;var c=E("rulesCard");
     var a=r.action||{},as=a.kind==="route"?'<span class="tag rt">route</span>':'<span class="tag rj">reject '+a.status+'</span>';
     return"<tr><td>"+esc(r.rule_id)+"</td><td>"+r.priority+"</td><td>"+as+"</td><td>"+esc(r.description||"")+"</td></tr>"}).join("")+
   "</tbody></table>"}
-async function fs(){try{var r=await fetch(AS_URL+"/api/v1/screening");if(!r.ok)return;sd=await r.json();
+async function fs(){
+  if(!FRAUD_URL){sd={noFraud:true};rsd();return}
+  try{var r=await fetch(FRAUD_URL+"/api/v1/screening");if(!r.ok)return;sd=await r.json();
   if(cv==="screening")rsd()}catch(e){}}
-function rsd(){if(!sd)return;var c=E("scrCard");
-  c.innerHTML='<p style="color:var(--mut);font-size:12px;margin-bottom:8px">data set: '+esc(sd.name||"-")+'</p>'+
-  '<p style="color:var(--mut);font-size:12px">block list: '+(sd.block_list||[]).length+' entries · allow list: '+(sd.allow_list||[]).length+' entries</p>'}
+function rsd(){
+  var c=E("scrCard");
+  if(sd&&sd.noFraud){c.innerHTML='<div class="empty">Screening is provided by the Anti-fraud AS (not active in this topology).</div>';return}
+  if(!sd)return;
+  var w=sd.window||{},rp=sd.reputation||{},bl=sd.block_list||[],al=sd.allow_list||[];
+  var h='<h3 style="margin:0 0 4px;font-size:13px;color:var(--acc)">'+esc(sd.name||"-")+'</h3>';
+  h+='<p style="margin:0 0 12px;color:var(--mut);font-size:11px">'+esc(sd.description||"")+'</p>';
+  // Window + Reputation 参数（2 列）
+  h+='<table style="font-size:11px;margin-bottom:12px"><thead><tr><th colspan="2">Window</th><th colspan="2">Reputation</th></tr></thead><tbody>';
+  h+='<tr><td>max_calls</td><td>'+w.max_calls+' / '+w.seconds+'s</td><td>default_score</td><td>'+rp.default_score+'</td></tr>';
+  h+='<tr><td colspan="2"></td><td>reject_below</td><td>'+rp.reject_below+'</td></tr>';
+  h+='<tr><td colspan="2"></td><td>reject_penalty</td><td>'+rp.reject_penalty+'</td></tr>';
+  h+='<tr><td colspan="2"></td><td>half_life</td><td>'+rp.half_life_seconds+'s</td></tr>';
+  h+='<tr><td colspan="2"></td><td>max_tracked_callers</td><td>'+(rp.max_tracked_callers||"-")+'</td></tr>';
+  h+='</tbody></table>';
+  // Block list
+  h+='<h4 style="margin:0 0 4px;font-size:12px;color:var(--rj)">Block List ('+bl.length+')</h4>';
+  h+='<table style="font-size:11px"><thead><tr><th>Entry ID</th><th>Number / Prefix</th><th>Reason</th></tr></thead><tbody>';
+  h+=bl.map(function(e){return'<tr><td>'+esc(e.entry_id||"")+'</td><td>'+esc(e.value||"")+'</td><td>'+esc(e.reason||"")+'</td></tr>'}).join("");
+  if(!bl.length)h+='<tr><td colspan="3" style="color:var(--mut)">— empty —</td></tr>';
+  h+='</tbody></table>';
+  // Allow list
+  h+='<h4 style="margin:10px 0 4px;font-size:12px;color:var(--rt)">Allow List ('+al.length+')</h4>';
+  h+='<table style="font-size:11px"><thead><tr><th>Entry ID</th><th>Number / Prefix</th><th>Reason</th></tr></thead><tbody>';
+  h+=al.map(function(e){return'<tr><td>'+esc(e.entry_id||"")+'</td><td>'+esc(e.value||"")+'</td><td>'+esc(e.reason||"")+'</td></tr>'}).join("");
+  if(!al.length)h+='<tr><td colspan="3" style="color:var(--mut)">— empty —</td></tr>';
+  h+='</tbody></table>';
+  c.innerHTML=h;
+}
 function rs(){if(!md)return;var c=E("statsCard");
   var html='<p class="stat-total">'+(md.calls_total||0)+' total calls</p>';
   var disp=md.calls_by_disposition||{};

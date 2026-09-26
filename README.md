@@ -70,8 +70,9 @@ make demo               # places a real call and narrates the translation (see b
 make demo-fraud         # screens two real calls: one allowed, one answered 608 Rejected
 make demo-chained       # iFC chain: S-CSCF#1 -> S-SBC -> anti-fraud -> S-SBC -> S-CSCF#2 -> S-SBC -> translation -> S-SBC -> S-CSCF -> P-CSCF -> UAS
 
-make gen                # SIP load generator: REST/WebSocket control on http://127.0.0.1:8765
-make console            # operations dashboard on http://127.0.0.1:8081 (see live-load demo below)
+./scripts/phase3-demo.sh simple   # one command: mock + AS + generator + console, then open http://127.0.0.1:8081
+./scripts/phase3-demo.sh full     # chained: both AS instances in the iFC chain (see demo below)
+make gen                          # generator only (REST/WebSocket on 8765); make console (8081) alone
 ```
 
 `uv sync` resolves the `as-platform` dependency from `../as_platform` (a `path` source with
@@ -205,27 +206,22 @@ Every leg derives its own dialog `Call-ID`, so the four AS-leg values differ (`X
 preserved, but no observability surface is keyed on it (a registered gap). The demo is a
 guard: it exits non-zero if any of those properties fails. It writes nothing.
 
-**The live-load dashboard puts the stack under real concurrent traffic.** The load
-generator places real SIP INVITEs at the AS while the console renders the event stream as
-live charts (counters, call outcomes, rate) and a dynamic topology diagram whose link
-width and node colour track active calls. Load controls on the page start/stop the pool
-and set the call rate (0.1–10.0/s), the concurrency ceiling and which call types (T1–T6,
-F1–F4) are generated. The simple variant is four local processes:
+**The live-load dashboard puts the stack under real concurrent traffic.** One command
+starts the whole stack — the mock, the AS, the load generator and the console — in a
+single terminal, and Ctrl+C stops them all:
 
 ```bash
-# Terminal A — S-SBC return side (UAS, answers 200 OK)
-make mock-return
-# Terminal B — translation AS (SIP 5060, internal API 8080)
-SBC_PEER_PORT=5061 make dev
-# Terminal C — load generator pointing at the AS (REST/WS on 8765)
-make gen
-# Terminal D — console, then open http://127.0.0.1:8081
-make console
+./scripts/phase3-demo.sh simple     # translation AS + mock S-SBC (topology: simple)
+./scripts/phase3-demo.sh full       # iFC chain: anti-fraud AS -> translation AS (topology: chained)
 ```
 
-The **chained** flavour (both AS instances plus the iFC orchestrator, five terminals) is
-scripted by `scripts/phase3-demo.sh full`. Full step-by-step for both flavours:
-`docs/demo-steps.md` Part 3.
+Then open **http://127.0.0.1:8081** and press **Start** in the Load Generator panel. The
+console renders the event stream as live charts (counters, call outcomes, rate) and a
+dynamic topology diagram whose link width and node colour track active calls; the panel
+sets the call rate (0.1–10.0/s), the concurrency ceiling and which call types (T1–T6,
+F1–F4) are generated. Per-process logs go to `/tmp/p3-demo/`. Under WSL, bind
+`0.0.0.0` is used automatically and the page opens via the WSL IP (printed at startup).
+For the manual multi-terminal steps instead, see `docs/demo-steps.md` Part 3.
 
 **The Call Trace view reconstructs a single call.** Selecting a call draws an SVG sequence
 diagram across the trunk, AS-internal and return legs from the recorded trace events;

@@ -62,9 +62,7 @@ def _install_broadcast_capture(app: Any) -> list[dict[str, Any]]:
     return captured
 
 
-def _events_for_call_id(
-    captured: list[dict[str, Any]], call_id: str
-) -> list[dict[str, Any]]:
+def _events_for_call_id(captured: list[dict[str, Any]], call_id: str) -> list[dict[str, Any]]:
     return [event for event in captured if event.get("call_id") == call_id]
 
 
@@ -90,9 +88,7 @@ def test_single_call_p12_events_share_trunk_call_id(trunk_pair) -> None:
     )
     call_id = str(trunk_pair.place_call(scenario))
     finished = trunk_pair.run_until(
-        lambda: (
-            (outcome := trunk_pair.outcome_for(call_id)) is not None and outcome.released
-        ),
+        lambda: (outcome := trunk_pair.outcome_for(call_id)) is not None and outcome.released,
         timeout_seconds=15.0,
     )
     assert finished, "the call did not finish within the timeout"
@@ -110,6 +106,6 @@ def test_single_call_p12_events_share_trunk_call_id(trunk_pair) -> None:
     assert not any(event.get("call_id") == "-" for event in per_call)
 
     dash_started = [event for event in captured if event.get("call_id") == "-"]
-    assert not any(
-        event.get("event") == "call_started" for event in dash_started
-    ), "call_started must not be emitted under placeholder call_id '-'"
+    assert not any(event.get("event") == "call_started" for event in dash_started), (
+        "call_started must not be emitted under placeholder call_id '-'"
+    )

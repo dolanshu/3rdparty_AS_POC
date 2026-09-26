@@ -154,6 +154,7 @@ def demo_stack_script(tmp_path):
 # Test 1: demo script correctly rewrites routing_rules.yaml (port rewrite)
 # ===========================================================================
 
+
 def test_demo_rewrites_routing_rules_ports(demo_stack_script):
     """demo script 必须把 routing_rules.yaml 所有 next_hop port 改成 CORE_SIP.
 
@@ -177,6 +178,7 @@ def test_demo_rewrites_routing_rules_ports(demo_stack_script):
 # ===========================================================================
 # Test 2: demo script 起的 generator → AS → metrics 有 calls_total > 0
 # ===========================================================================
+
 
 def test_demo_call_flow_reaches_as_metrics(demo_stack_script):
     """真实用户路径：Start generator → 等 15s → AS metrics calls_total > 0.
@@ -226,6 +228,7 @@ def test_demo_call_flow_reaches_as_metrics(demo_stack_script):
 # Test 3: generator /load/status reflects real activity (not self-reported)
 # ===========================================================================
 
+
 def test_demo_gen_status_has_real_activity(demo_stack_script):
     """generator /load/status.active_calls 必须曾 > 0（证明 INVITE 真发出了）."""
     gen = demo_stack_script["gen"]
@@ -245,6 +248,6 @@ def test_demo_gen_status_has_real_activity(demo_stack_script):
         time.sleep(0.5)
 
     assert peak_active > 0, (
-        f"generator /load/status.active_calls never rose above 0 in 15s — "
-        f"generator may not be sending INVITEs, or SIP port is wrong."
+        "generator /load/status.active_calls never rose above 0 in 15s — "
+        "generator may not be sending INVITEs, or SIP port is wrong."
     )

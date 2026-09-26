@@ -38,8 +38,6 @@ for path in (str(REPO_ROOT / "src"), str(TOOLS_DIR)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from as_app.observability.logging import configure_logging  # noqa: E402
-from as_app.sip_adapter import outbound_call_id  # noqa: E402
 from chained_helpers import (  # noqa: E402
     _LABEL_WIDTH,
     build_chained_stack,
@@ -48,7 +46,10 @@ from chained_helpers import (  # noqa: E402
     received_invite_icid,
     verdict_attributes,
 )
-from s_sbc_mock.uac import CallOutcome, CallScenario  # noqa: E402
+
+from as_app.observability.logging import configure_logging  # noqa: E402
+from as_app.sip_adapter import outbound_call_id  # noqa: E402
+from s_sbc_mock.uac import CallScenario  # noqa: E402
 
 ALLOWED_CALLER = "+86216180001"
 BLOCKED_CALLER = "+8613400000001"
@@ -104,9 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         draw_loop_until(
-            lambda cid=uac_call_id, first=outcome: bool(
-                (stack.outcome_for(cid) or first).released
-            )
+            lambda cid=uac_call_id, first=outcome: bool((stack.outcome_for(cid) or first).released)
         )
         final = stack.outcome_for(uac_call_id) or outcome
 
@@ -148,10 +147,9 @@ def main(argv: list[str] | None = None) -> int:
             strict=True,
         ):
             print(f"{label:<{_LABEL_WIDTH}}: {value}")
-        per_leg_ok = (
-            str(as1_out.call_id) == outbound_call_id(uac_call_id)
-            and str(as2_out.call_id) == outbound_call_id(as2_trunk)
-        )
+        per_leg_ok = str(as1_out.call_id) == outbound_call_id(uac_call_id) and str(
+            as2_out.call_id
+        ) == outbound_call_id(as2_trunk)
         distinct_ok = len(set(hop_ids)) == 4
         print(f"{'distinct Call-IDs':<{_LABEL_WIDTH}}: {len(set(hop_ids))}")
         print(f"{'Call-ID per leg':<{_LABEL_WIDTH}}: {per_leg_ok}")

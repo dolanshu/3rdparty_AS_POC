@@ -35,15 +35,15 @@ for path in (str(REPO_ROOT / "src"), str(TOOLS_DIR)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from as_app.observability.logging import configure_logging  # noqa: E402
-from as_app.sip_adapter import outbound_call_id  # noqa: E402
 from chained_helpers import (  # noqa: E402
     _LABEL_WIDTH,
     build_chained_stack,
     draw_loop_until,
     received_invite_icid,
-    verdict_attributes,
 )
+
+from as_app.observability.logging import configure_logging  # noqa: E402
+from as_app.sip_adapter import outbound_call_id  # noqa: E402
 from s_sbc_mock.uac import CallScenario  # noqa: E402
 
 ALLOWED_CALLER = "+86216180001"
@@ -88,9 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         if outcome is None:
             return 1
         draw_loop_until(
-            lambda cid=uac_call_id, first=outcome: bool(
-                (stack.outcome_for(cid) or first).released
-            )
+            lambda cid=uac_call_id, first=outcome: bool((stack.outcome_for(cid) or first).released)
         )
         final = stack.outcome_for(uac_call_id) or outcome
 
@@ -106,10 +104,9 @@ def main(argv: list[str] | None = None) -> int:
             if m.direction == "out" and m.text.startswith("INVITE ")
         ][0]
         hop_ids = [uac_call_id, str(as1_out.call_id), as2_trunk, str(as2_out.call_id)]
-        per_leg_ok = (
-            str(as1_out.call_id) == outbound_call_id(uac_call_id)
-            and str(as2_out.call_id) == outbound_call_id(as2_trunk)
-        )
+        per_leg_ok = str(as1_out.call_id) == outbound_call_id(uac_call_id) and str(
+            as2_out.call_id
+        ) == outbound_call_id(as2_trunk)
         distinct_ok = len(set(hop_ids)) == 4
         icids = [
             received_invite_icid(stack.as1_messages),

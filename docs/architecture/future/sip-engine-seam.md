@@ -140,6 +140,7 @@ class OutboundInviteSpec:
     max_forwards: int | None
     extra_headers: tuple[HeaderField, ...]  # or platform copies from trunk automatically
 
+
 @dataclass(frozen=True)
 class PolicyDecision:
     action: PolicyAction

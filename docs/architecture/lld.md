@@ -1433,40 +1433,55 @@ The generator does **not** import: `as_platform`, `src/as_app`, `src/anti_fraud_
 ```python
 # tools/call_load_generator.py
 
+
 @dataclass
 class CallInstance:
     """One call being driven by the generator."""
-    call_id: str               # generator-generated unique ID
-    call_type: str             # "T1"…"T6" | "F1"…"F4"
-    duration_class: str        # "D1" | "D2" | "D3" | "D4"
-    state: str                 # "pending" | "invited" | "answered" | "ended"
-    far_end_behavior: str      # "answer_and_bye" | "timeout_no_answer"
-    started_at: float          # time.monotonic() of INVITE launch
-    ended_at: float | None     # time.monotonic() of end event or None
+
+    call_id: str  # generator-generated unique ID
+    call_type: str  # "T1"…"T6" | "F1"…"F4"
+    duration_class: str  # "D1" | "D2" | "D3" | "D4"
+    state: str  # "pending" | "invited" | "answered" | "ended"
+    far_end_behavior: str  # "answer_and_bye" | "timeout_no_answer"
+    started_at: float  # time.monotonic() of INVITE launch
+    ended_at: float | None  # time.monotonic() of end event or None
 
 
 @dataclass
 class PoolConfig:
     """Immutable pool configuration (set once per /load/config)."""
-    target_concurrency: int       # 1..50
-    call_rate: float              # 0.1..10.0 calls/sec
+
+    target_concurrency: int  # 1..50
+    call_rate: float  # 0.1..10.0 calls/sec
     enabled_call_types: set[str]  # {"T1","T2","T5","F1","F2",...}
 
 
 class CallModel:
     """Weighted-random selection for call types."""
+
     # phase3-plan.md §D7 / HLD §12.3 weights
     # Implementation: each type has a weight; random.choices() with weights=
-    WEIGHTS: dict[str, float] = { "T1":1, "T2":1, "T3":1, "T4":1, "T5":1, "T6":1,
-                                  "F1":1, "F2":1, "F3":1, "F4":1 }
+    WEIGHTS: dict[str, float] = {
+        "T1": 1,
+        "T2": 1,
+        "T3": 1,
+        "T4": 1,
+        "T5": 1,
+        "T6": 1,
+        "F1": 1,
+        "F2": 1,
+        "F3": 1,
+        "F4": 1,
+    }
 
 
 class DurationModel:
     """Fixed-weight duration classes."""
+
     # phase3-plan.md §D7 / HLD §12.4
-    WEIGHTS: dict[str, float] = { "D1":0.30, "D2":0.50, "D3":0.15, "D4":0.05 }
+    WEIGHTS: dict[str, float] = {"D1": 0.30, "D2": 0.50, "D3": 0.15, "D4": 0.05}
     # Midpoints used for far-end BYE timing
-    MIDPOINTS: dict[str, float] = { "D1":2.5, "D2":11.5, "D3":25.0, "D4":3.0 }
+    MIDPOINTS: dict[str, float] = {"D1": 2.5, "D2": 11.5, "D3": 25.0, "D4": 3.0}
 ```
 
 ### 12.3 Pool model — tick loop + race handling
@@ -1478,10 +1493,10 @@ class CallPool:
     """Leaky-bucket concurrency pool with refill throttle."""
 
     def __init__(self):
-        self._lock = asyncio.Lock()           # guards active_calls + rate_budget
+        self._lock = asyncio.Lock()  # guards active_calls + rate_budget
         self.active_calls: int = 0
         self.active_instances: dict[str, CallInstance] = {}  # call_id → instance
-        self._rate_budget: float = 10.0       # per-second budget, starts at max
+        self._rate_budget: float = 10.0  # per-second budget, starts at max
         self._last_budget_reset: float = time.monotonic()
         self._running: bool = False
 
@@ -1560,9 +1575,9 @@ def compute_binding_constraint(self) -> str:
     AVG_DURATION = 9.5  # design constant, HLD §12.4
     theoretical = self._config.call_rate * AVG_DURATION
     if theoretical >= self._config.target_concurrency:
-        return "concurrency"   # 池子上限
+        return "concurrency"  # 池子上限
     else:
-        return "rate"          # Call Rate 限速
+        return "rate"  # Call Rate 限速
 ```
 
 ### 12.4 Mock S-CSCF UAC — far-end behaviour control
@@ -1574,9 +1589,14 @@ far-end behavior:
 class MockSipUac:
     """Sends real SIP INVITEs, receives real SIP responses, controls far-end behavior."""
 
-    def send_invite(self, to: str, caller: str, call_id: str,
-                    duration_class: str,
-                    on_call_ended: Callable[[str, str], Awaitable[None]]):
+    def send_invite(
+        self,
+        to: str,
+        caller: str,
+        call_id: str,
+        duration_class: str,
+        on_call_ended: Callable[[str, str], Awaitable[None]],
+    ):
         # Create sippy UACStateIdle (same as tools/chained_as_probe.py pattern)
         # Send INVITE to AS's SIP listen port
         # ...

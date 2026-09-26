@@ -32,9 +32,7 @@ __all__ = ["parse_top_route_target"]
 _ROUTE_URI_RE = re.compile(r"<sip:([^:>;\s]+)(?::(\d+))?[^>]*>")
 
 
-def parse_top_route_target(
-    request: Any, *, default_port: int = 5060
-) -> tuple[str, int] | None:
+def parse_top_route_target(request: Any, *, default_port: int = 5060) -> tuple[str, int] | None:
     """Return the ``(host, port)`` of the top Route URI, or ``None``.
 
     Args:

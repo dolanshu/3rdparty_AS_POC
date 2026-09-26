@@ -11,6 +11,7 @@ sippy + as_platform + FastAPI installed).
 
 from __future__ import annotations
 
+import contextlib
 import os
 import pathlib
 import signal
@@ -51,6 +52,7 @@ def _env_with_local_no_proxy(base: dict[str, str] | None = None) -> dict[str, st
 # ---------------------------------------------------------------------------
 # Port / health helpers
 # ---------------------------------------------------------------------------
+
 
 def _kill_port(port: int) -> None:
     try:
@@ -133,7 +135,7 @@ def demo_stack(tmp_path_factory):
     log_files: list = []
 
     def _log_path(name: str):
-        h = open(session_tmp / f"{name}.log", "w")
+        h = open(session_tmp / f"{name}.log", "w")  # noqa: SIM115 — caller manages lifetime
         log_files.append(h)
         return h
 
@@ -141,11 +143,15 @@ def demo_stack(tmp_path_factory):
     #    --trunk-port avoids the default "listen_port - 1" = 5060, which would
     #    collide with the AS SIP port below.
     _core_log = _log_path("core-mock")
-    procs.append(subprocess.Popen(
-        [VENV_PY, "-m", "s_sbc_mock.main",
-         "--listen-port", "5061", "--trunk-port", "15060"],
-        cwd=PROJECT_ROOT, env=env, stdout=_core_log, stderr=subprocess.STDOUT,
-    ))
+    procs.append(
+        subprocess.Popen(
+            [VENV_PY, "-m", "s_sbc_mock.main", "--listen-port", "5061", "--trunk-port", "15060"],
+            cwd=PROJECT_ROOT,
+            env=env,
+            stdout=_core_log,
+            stderr=subprocess.STDOUT,
+        )
+    )
 
     # 2. Translation AS  (SIP UDP :5060, API HTTP :8080)
     env_as = env.copy()
@@ -153,25 +159,49 @@ def demo_stack(tmp_path_factory):
     env_as["SBC_PEER_PORT"] = "5061"
     env_as["RULES_FILE"] = str(_rules_dst)
     _as_log = _log_path("as")
-    procs.append(subprocess.Popen([VENV_PY, "-m", "as_app.main"], cwd=PROJECT_ROOT, env=env_as, stdout=_as_log, stderr=subprocess.STDOUT))
+    procs.append(
+        subprocess.Popen(
+            [VENV_PY, "-m", "as_app.main"],
+            cwd=PROJECT_ROOT,
+            env=env_as,
+            stdout=_as_log,
+            stderr=subprocess.STDOUT,
+        )
+    )
 
     # 3. Load generator  (HTTP :8765, SIP client → AS :5060)
     _gen_log = _log_path("generator")
-    procs.append(subprocess.Popen(
-        [VENV_PY, "tools/call_load_generator.py",
-         "--as-port", "5060", "--http-port", "8765"],
-        cwd=PROJECT_ROOT, env=env, stdout=_gen_log, stderr=subprocess.STDOUT,
-    ))
+    procs.append(
+        subprocess.Popen(
+            [VENV_PY, "tools/call_load_generator.py", "--as-port", "5060", "--http-port", "8765"],
+            cwd=PROJECT_ROOT,
+            env=env,
+            stdout=_gen_log,
+            stderr=subprocess.STDOUT,
+        )
+    )
 
     # 4. Enhanced console  (HTTP :8081)
     _console_log = _log_path("console")
-    procs.append(subprocess.Popen(
-        [VENV_PY, "-m", "console.main",
-         "--port", "8081",
-         "--as-api-url", "http://127.0.0.1:8080",
-         "--load-api-url", "http://127.0.0.1:8765"],
-        cwd=PROJECT_ROOT, env=env, stdout=_console_log, stderr=subprocess.STDOUT,
-    ))
+    procs.append(
+        subprocess.Popen(
+            [
+                VENV_PY,
+                "-m",
+                "console.main",
+                "--port",
+                "8081",
+                "--as-api-url",
+                "http://127.0.0.1:8080",
+                "--load-api-url",
+                "http://127.0.0.1:8765",
+            ],
+            cwd=PROJECT_ROOT,
+            env=env,
+            stdout=_console_log,
+            stderr=subprocess.STDOUT,
+        )
+    )
 
     # Wait for health checks
     ok = (
@@ -201,10 +231,8 @@ def demo_stack(tmp_path_factory):
 
     # --- teardown ---
     for p in procs:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             p.send_signal(signal.SIGTERM)
-        except ProcessLookupError:
-            pass
     for p in procs:
         try:
             p.wait(timeout=5)
@@ -246,6 +274,7 @@ def demo_stack_chained():
 
     ready = True
     last_port = None
+    failed_label = ""
     # HTTP services first (fast signal), then UDP
     http_endpoints = [
         ("fraud AS API", 8082, "/healthz"),
@@ -256,12 +285,18 @@ def demo_stack_chained():
     for label, port, path in http_endpoints:
         last_port = port
         if not _wait_http(f"http://127.0.0.1:{port}{path}", 35):
+            failed_label = label
             ready = False
             break
     if ready:
-        for label, port in [("ims_mock return", 5070), ("fraud AS SIP", 5063), ("translation AS SIP", 5060)]:
+        for label, port in [
+            ("ims_mock return", 5070),
+            ("fraud AS SIP", 5063),
+            ("translation AS SIP", 5060),
+        ]:
             last_port = port
             if not _wait_udp_port(port, 35):
+                failed_label = label
                 ready = False
                 break
 
@@ -274,7 +309,7 @@ def demo_stack_chained():
         for p in _CHAINED_PORTS:
             _kill_port(p)
         raise RuntimeError(
-            f"demo_stack_chained failed — port {last_port} / {label} not ready within 35s"
+            f"demo_stack_chained failed — port {last_port} / {failed_label} not ready within 35s"
         )
 
     yield {
@@ -285,10 +320,8 @@ def demo_stack_chained():
     }
 
     # --- teardown ---
-    try:
+    with contextlib.suppress(ProcessLookupError):
         proc.send_signal(signal.SIGTERM)
-    except ProcessLookupError:
-        pass
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:

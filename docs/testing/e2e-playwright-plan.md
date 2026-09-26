@@ -114,7 +114,7 @@ def demo_stack():
 
 ```python
 def _open_console(page, demo_stack):
-    _reset_gen(demo_stack["gen"])   # POST /load/stop → 等 running=false & active_calls=0
+    _reset_gen(demo_stack["gen"])  # POST /load/stop → 等 running=false & active_calls=0
     page.goto(demo_stack["console"])
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(2000)
@@ -333,6 +333,7 @@ assert labels >= 4  # 实际阈值，不是 6（见 §3.4 #18）
 def _gen_status(gen_base: str) -> dict:
     with urllib.request.urlopen(f"{gen_base}/load/status") as r:
         return json.loads(r.read())
+
 
 # 直接 urllib 不经过浏览器，验证 generator 进程真实状态
 assert _gen_status(gen_base)["running"] is True

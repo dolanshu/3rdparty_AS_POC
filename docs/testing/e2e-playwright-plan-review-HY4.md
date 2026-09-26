@@ -172,11 +172,14 @@ def gen_config(demo_stack):
     """Apply a generator config for one test, restore the original afterwards."""
     original = _gen_status(demo_stack["gen"])
     yield lambda **body: _put_config(demo_stack["gen"], body, expect_status=200)
-    _put_config(demo_stack["gen"], {
-        "target_concurrency": original["target_concurrency"],
-        "call_rate": original["call_rate"],
-        "enabled_call_types": original["enabled_call_types"],
-    })
+    _put_config(
+        demo_stack["gen"],
+        {
+            "target_concurrency": original["target_concurrency"],
+            "call_rate": original["call_rate"],
+            "enabled_call_types": original["enabled_call_types"],
+        },
+    )
 ```
 
 （`_put_config` 也是 B-1 里新测试要用的同一个 helper。）

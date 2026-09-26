@@ -208,7 +208,7 @@ class FraudAsStack(BaseAsStack[FraudAsSettings]):
         # controllers can emit events via app.state.broadcast before any SIP
         # INVITE arrives (call_map is created by stack.start() above).
         if self.call_map is not None:
-            self.call_map.app = server.app
+            self.call_map.app = server.app  # type: ignore[attr-defined]  # P12 injects this attr
         server.start()
         self.internal_api = server
         log_event(

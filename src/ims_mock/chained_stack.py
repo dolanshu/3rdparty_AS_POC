@@ -133,12 +133,16 @@ class ChainedOrchestrator:
     def _session_for_return(self, return_call_id: str) -> CallSession:
         parent = _parent_call_id(return_call_id)
         for session in self._sessions.values():
-            if session.fsm.state == OrchestratorState.AS1_AWAIT_OUTBOUND:
-                if parent == session.subscriber_call_id:
-                    return session
-            if session.fsm.state == OrchestratorState.AS2_AWAIT_OUTBOUND:
-                if session.as2_trunk_call_id == parent:
-                    return session
+            if (
+                session.fsm.state == OrchestratorState.AS1_AWAIT_OUTBOUND
+                and parent == session.subscriber_call_id
+            ):
+                return session
+            if (
+                session.fsm.state == OrchestratorState.AS2_AWAIT_OUTBOUND
+                and session.as2_trunk_call_id == parent
+            ):
+                return session
         if return_call_id.endswith(_B2B_SUFFIX):
             return self._lazy_subscriber_session(parent)
         raise RuntimeError(f"no session for return Call-ID {return_call_id}")
@@ -157,9 +161,7 @@ class ChainedOrchestrator:
         if session.as1_return_ua is not None:
             session.as1_return_ua.recvEvent(event)
 
-    def _relay_final(
-        self, subscriber_call_id: str, code: int, reason: str, body: Any
-    ) -> None:
+    def _relay_final(self, subscriber_call_id: str, code: int, reason: str, body: Any) -> None:
         session = self._session(subscriber_call_id)
         event = CCEventConnect((code, reason, body))
         if session.as2_return_ua is not None:

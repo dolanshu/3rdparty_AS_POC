@@ -17,6 +17,7 @@ Covers (REQ-NF-030 / ADR-0014 / ADR-0015):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from urllib import request as urlrequest
@@ -31,6 +32,7 @@ pytestmark = pytest.mark.e2e
 # Helpers (mirror of test_console_dashboard.py; kept local so chained file
 # is self-contained — no cross-import risk if the simple file ever moves).
 # ---------------------------------------------------------------------------
+
 
 def _gen_status(gen_base: str) -> dict:
     with urlrequest.urlopen(f"{gen_base}/load/status", timeout=2) as r:
@@ -117,15 +119,15 @@ class TestChainedBoot:
         assert fraud_h["status"] == "ok"
         assert trans_h["status"] == "ok"
         assert fraud_h["instance"] == "anti-fraud", f"wrong instance: {fraud_h.get('instance')!r}"
-        assert trans_h["instance"] == "number-translation", f"wrong instance: {trans_h.get('instance')!r}"
+        assert trans_h["instance"] == "number-translation", (
+            f"wrong instance: {trans_h.get('instance')!r}"
+        )
 
     def test_console_topology_mode_badge_shows_chained(self, page, demo_stack_chained):
         """Console reads topology from generator pool_status → badge = Chained (iFC)."""
         _open_console(page, demo_stack_chained)
         badge = page.locator("#topoMode").inner_text()
-        assert "Chained" in badge, (
-            f"expected topoMode badge to show Chained, got {badge!r}"
-        )
+        assert "Chained" in badge, f"expected topoMode badge to show Chained, got {badge!r}"
 
     def test_chained_svg_is_displayed_simple_is_hidden(self, page, demo_stack_chained):
         """topoSimple style.display='none', topoChained display='inline'."""
@@ -133,7 +135,9 @@ class TestChainedBoot:
         simple_display = page.locator("#topoSimple").evaluate("el => el.style.display")
         chained_display = page.locator("#topoChained").evaluate("el => el.style.display")
         assert simple_display == "none", f"#topoSimple should be hidden, display={simple_display!r}"
-        assert chained_display != "none", f"#topoChained should be visible, display={chained_display!r}"
+        assert chained_display != "none", (
+            f"#topoChained should be visible, display={chained_display!r}"
+        )
 
     def test_chained_svg_all_six_nodes_rendered(self, page, demo_stack_chained):
         """All 6 nodes and 5 links present in chained SVG."""
@@ -177,8 +181,7 @@ class TestChainedTopologyLive:
         page.locator("#btnStop").click()
 
         assert all_active, (
-            f"chained links never all became active-green; "
-            f"strokes after 30s: {strokes}"
+            f"chained links never all became active-green; strokes after 30s: {strokes}"
         )
 
     def test_chained_as_nodes_paint_on_traffic(self, page, demo_stack_chained):
@@ -202,9 +205,7 @@ class TestChainedTopologyLive:
             time.sleep(0.5)
         page.locator("#btnStop").click()
 
-        assert changed, (
-            f"chained AS nodes never painted; cAS1={s1!r}, cAS2={s2!r} after traffic"
-        )
+        assert changed, f"chained AS nodes never painted; cAS1={s1!r}, cAS2={s2!r} after traffic"
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +216,7 @@ class TestChainedTopologyLive:
 # ---------------------------------------------------------------------------
 
 _CHAINED_TOPO_AS_NODES = ["cAS1", "cAS2"]
-_CHAINED_TOPO_VISUAL_LINKS = ["cl2", "cl4"]   # 竖向连线；cl1/cl3/cl5 是 stroke="none" 占位
+_CHAINED_TOPO_VISUAL_LINKS = ["cl2", "cl4"]  # 竖向连线；cl1/cl3/cl5 是 stroke="none" 占位
 
 
 class TestChainedSvgVisual:
@@ -226,8 +227,8 @@ class TestChainedSvgVisual:
         _open_console(page, demo_stack_chained)
         rect = page.locator("#topoChained").bounding_box()
         assert rect is not None, "#topoChained has no bounding_box — display:none?"
-        assert rect["width"] > 0, f"#topoChained width=0 (CSS display:none cascade?)"
-        assert rect["height"] > 0, f"#topoChained height=0"
+        assert rect["width"] > 0, "#topoChained width=0 (CSS display:none cascade?)"
+        assert rect["height"] > 0, "#topoChained height=0"
 
     def test_chained_as_nodes_have_dimensions(self, page, demo_stack_chained):
         """Both AS nodes (cAS1, cAS2) have rect_w > 0, rect_h > 0."""
@@ -262,6 +263,7 @@ class TestChainedSvgVisual:
 # Screening view — chained mode (Fraud AS active)
 # ---------------------------------------------------------------------------
 
+
 class TestChainedScreening:
     """Screening view shows full Fraud AS data in chained mode."""
 
@@ -276,7 +278,9 @@ class TestChainedScreening:
         self._click_screening(page)
         card = page.locator("#scrCard")
         text = card.inner_text()
-        assert "not active" not in text, f"Chained mode: got placeholder instead of data: {text[:200]}"
+        assert "not active" not in text, (
+            f"Chained mode: got placeholder instead of data: {text[:200]}"
+        )
         assert "sample-office-screening" in text, f"Expected data set name in: {text[:200]}"
         assert "Block List (7)" in text, f"Expected Block List heading in: {text[:200]}"
         assert "Allow List (2)" in text, f"Expected Allow List heading in: {text[:200]}"
@@ -311,6 +315,7 @@ class TestChainedScreening:
 # Chained dual-WS — REQ-F-054 / ACC-P14-004
 # ---------------------------------------------------------------------------
 
+
 class TestChainedWS:
     """Chained mode opens three WebSockets: AS events (trans), Fraud AS events, Load generator."""
 
@@ -318,6 +323,7 @@ class TestChainedWS:
     def _wait_ws(page: object, locator_id: str, timeout_ms: int = 8000) -> bool:
         """Poll until element text contains 'live'."""
         import time
+
         deadline = time.time() + timeout_ms / 1000
         while time.time() < deadline:
             try:
@@ -338,7 +344,9 @@ class TestChainedWS:
         """Fraud AS events WS (#wsEvF) connects — unique to chained topology."""
         _open_console(page, demo_stack_chained)
         # Fraud WS element must be visible (display != none)
-        display = page.locator("#wsEvF").evaluate("el => el.style.display || getComputedStyle(el).display")
+        display = page.locator("#wsEvF").evaluate(
+            "el => el.style.display || getComputedStyle(el).display"
+        )
         assert display != "none", f"Fraud WS element #wsEvF hidden (display={display!r})"
         assert self._wait_ws(page, "wsEvF"), "fraud WS #wsEvF not live in chained mode"
 
@@ -363,6 +371,7 @@ class TestChainedWS:
 # Bottleneck diagnostic — generator rate vs Fraud AS per-caller window
 # ---------------------------------------------------------------------------
 
+
 class TestBottleneckDiagnostic:
     """P8 call-rate window (max_calls=5 per caller per 60s) limits generator.
 
@@ -383,17 +392,24 @@ class TestBottleneckDiagnostic:
 
     def _get(self, url):
         import urllib.request as ur
+
         return json.loads(ur.urlopen(url, timeout=3).read())
 
     def _post(self, url):
         import urllib.request as ur
-        try: ur.urlopen(ur.Request(url, data=b"", method="POST"), timeout=3).read()
-        except Exception: pass
+
+        with contextlib.suppress(Exception):
+            ur.urlopen(ur.Request(url, data=b"", method="POST"), timeout=3).read()
 
     def _put(self, url, body):
         import urllib.request as ur
-        req = ur.Request(url, data=json.dumps(body).encode(),
-                         headers={"Content-Type": "application/json"}, method="PUT")
+
+        req = ur.Request(
+            url,
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
         ur.urlopen(req, timeout=3).read()
 
     def test_high_rate_triggers_fraud_rate_limit(self, demo_stack_chained):
@@ -403,22 +419,29 @@ class TestBottleneckDiagnostic:
         against per-caller window max_calls=5 / 60s.
         """
         import time as _t
-        GEN = self._gen(demo_stack_chained)
-        FRAUD = self._fraud(demo_stack_chained)
+
+        gen = self._gen(demo_stack_chained)
+        fraud = self._fraud(demo_stack_chained)
 
         # Pre-condition: Fraud AS window max_calls=5
-        scr = self._get(f"{FRAUD}/api/v1/screening")
+        scr = self._get(f"{fraud}/api/v1/screening")
         assert scr["window"]["max_calls"] == 5, "Fraud AS window max_calls mismatch"
 
         # Stop → configure rate=10 → start
-        self._post(f"{GEN}/load/stop"); _t.sleep(1)
-        self._put(f"{GEN}/load/config", {
-            "target_concurrency": 31, "call_rate": 10.0,
-            "enabled_call_types": ["T1"],  # pure T1, same caller "1001"
-        })
-        self._post(f"{GEN}/load/start"); _t.sleep(12)  # let window accumulate
+        self._post(f"{gen}/load/stop")
+        _t.sleep(1)
+        self._put(
+            f"{gen}/load/config",
+            {
+                "target_concurrency": 31,
+                "call_rate": 10.0,
+                "enabled_call_types": ["T1"],  # pure T1, same caller "1001"
+            },
+        )
+        self._post(f"{gen}/load/start")
+        _t.sleep(12)  # let window accumulate
 
-        fraud_metrics = self._get(f"{FRAUD}/api/v1/metrics")
+        fraud_metrics = self._get(f"{fraud}/api/v1/metrics")
         err = fraud_metrics.get("errors_by_code", {})
         rate_exceeded = err.get("AS-FRAUD-002", 0)
         total = fraud_metrics.get("calls_total", 0)
@@ -429,7 +452,7 @@ class TestBottleneckDiagnostic:
             pct = rate_exceeded / total * 100
             assert pct > 30, f"Expected >30% AS-FRAUD-002 rejections at rate=10, got {pct:.1f}%"
 
-        self._post(f"{GEN}/load/stop")
+        self._post(f"{gen}/load/stop")
 
     def test_low_rate_below_window_limit_passes(self, demo_stack_chained):
         """rate=0.16 cps (≈5/30s) → Fraud AS AS-FRAUD-002 rejections <10%.
@@ -437,21 +460,27 @@ class TestBottleneckDiagnostic:
         At 0.16 cps, 12s = ~2 calls, well below the 5/60s window cap.
         """
         import time as _t
-        GEN = self._gen(demo_stack_chained)
-        FRAUD = self._fraud(demo_stack_chained)
 
-        self._post(f"{GEN}/load/stop"); _t.sleep(1)
-        self._put(f"{GEN}/load/config", {
-            "target_concurrency": 31, "call_rate": 0.16,
-            "enabled_call_types": ["T1"],
-        })
-        self._post(f"{GEN}/load/start"); _t.sleep(12)
+        gen = self._gen(demo_stack_chained)
+        fraud = self._fraud(demo_stack_chained)
 
-        fraud_metrics = self._get(f"{FRAUD}/api/v1/metrics")
+        self._post(f"{gen}/load/stop")
+        _t.sleep(1)
+        self._put(
+            f"{gen}/load/config",
+            {
+                "target_concurrency": 31,
+                "call_rate": 0.16,
+                "enabled_call_types": ["T1"],
+            },
+        )
+        self._post(f"{gen}/load/start")
+        _t.sleep(12)
+
+        fraud_metrics = self._get(f"{fraud}/api/v1/metrics")
         err = fraud_metrics.get("errors_by_code", {})
         rate_exceeded = err.get("AS-FRAUD-002", 0)
-        completed = fraud_metrics.get("calls_by_disposition", {}).get("completed", 0)
 
         # At rate=0.16, 12s ≈ 2 calls → all should be within window
         assert rate_exceeded == 0, f"Unexpected AS-FRAUD-002 rejects at low rate: {rate_exceeded}"
-        self._post(f"{GEN}/load/stop")
+        self._post(f"{gen}/load/stop")

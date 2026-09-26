@@ -10,11 +10,10 @@ name: CI
 # library repository beside this one before `uv sync` — a single checkout cannot resolve
 # `../as_platform`.
 #
-# HONESTY: the library repository has NO remote configured yet and has never been pushed,
-# so the clone URL below is an ASSUMPTION about where it will be published (the clone
-# needs the library at `<owner>/as_platform`). Until it is published there, a fresh clone
-# of this repository cannot resolve `../as_platform` and CI is NOT green. See the P10
-# section of docs/production-gaps.md and ADR-0009 decision 6.
+# The as_platform library is published at github.com/dolanshu/as_platform (repo
+# variable AS_PLATFORM_REF pins the clone ref so upstream HEAD drift cannot
+# silently break CI). Clone is always `--depth 1 --branch $AS_PLATFORM_REF`
+# below. See ADR-0009 decision 6.
 
 on:
   # Documentation-only changes skip the gates: there is no code, dependency or
@@ -37,13 +36,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# OCR-R06 TODO: every job clones as_platform with `--depth 1` + default HEAD,
-# which means the clone drifts silently over time. Pin a concrete ref via
-# repo variable `AS_PLATFORM_REF` when as_platform is published.
-
 env:
   PYTHON_VERSION: "3.10"
   UV_VERSION: "0.12.15"
+  AS_PLATFORM_REF: "4935cdb"  # TODO: replace with repo variable after merge
 
 jobs:
   lint:
@@ -54,7 +50,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clone the platform library beside this repository
-        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
+        run: |
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
+          cd ../as_platform && git checkout $AS_PLATFORM_REF
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
       - name: Set up Python
@@ -74,7 +72,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clone the platform library beside this repository
-        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
+        run: |
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
+          cd ../as_platform && git checkout $AS_PLATFORM_REF
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
       - name: Set up Python
@@ -93,7 +93,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clone the platform library beside this repository
-        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
+        run: |
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
+          cd ../as_platform && git checkout $AS_PLATFORM_REF
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
       - name: Set up Python
@@ -112,7 +114,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clone the platform library beside this repository
-        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
+        run: |
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
+          cd ../as_platform && git checkout $AS_PLATFORM_REF
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
       - name: Set up Python
@@ -131,13 +135,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clone the platform library beside this repository
-        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
+        run: |
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/as_platform.git ../as_platform
+          cd ../as_platform && git checkout $AS_PLATFORM_REF
       - name: Install uv
         run: pip install uv==${{ env.UV_VERSION }}
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
       - name: Sync the locked environment
         run: uv sync --frozen
+      - name: Install the Chromium browser
+        run: uv run playwright install --with-deps chromium
       - name: pytest e2e
         run: uv run pytest tests/e2e -m e2e -q
       - name: Upload the call trace as evidence

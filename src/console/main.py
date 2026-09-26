@@ -214,6 +214,25 @@ tr.err-row td{color:var(--err)}
 <p style="margin-bottom:8px">AS API: <span style="color:var(--acc)" id="apiUrl">-</span></p>
 <p>Load generator API: <span style="color:var(--acc)" id="loadUrl">-</span></p>
 <p style="margin-top:8px;color:var(--mut);font-size:11px">Chart.js v4.4.8 — MIT license, vendored under /static/ (see chart.umd.min.js.LICENSE.txt).</p>
+<div class="st2" style="margin-top:16px">Call Types</div>
+<p style="margin-bottom:6px;color:var(--mut);font-size:11px">T1–T6 exercise the <span style="color:var(--acc)">Translation AS</span>; F1–F4 exercise the <span style="color:var(--acc)">Anti-fraud AS</span>.</p>
+<table style="font-size:12px">
+<thead><tr><th>Type</th><th>Input</th><th>Behaviour</th></tr></thead>
+<tbody>
+<tr><td>T1</td><td>+86… E.164</td><td>convert to 0…, relay</td></tr>
+<tr><td>T2</td><td>0… national</td><td>keep format, relay</td></tr>
+<tr><td>T3</td><td>00… international</td><td>convert to +…, relay</td></tr>
+<tr><td>T4</td><td>4-digit short code</td><td>no matching rule → 404</td></tr>
+<tr><td>T5</td><td>reachable next hop</td><td>200 OK</td></tr>
+<tr><td>T6</td><td>unreachable next hop</td><td>3 s timeout → AS fails</td></tr>
+<tr><td>F1</td><td>allow-listed caller</td><td>relay → downstream AS</td></tr>
+<tr><td>F2</td><td>block-listed caller</td><td>608 Rejected</td></tr>
+<tr><td>F3</td><td>high-rate caller</td><td>608 Rejected</td></tr>
+<tr><td>F4</td><td>missing P-Asserted-Identity</td><td>fail-open → relay</td></tr>
+</tbody>
+</table>
+<div class="st2" style="margin-top:16px">Author</div>
+<p style="margin-bottom:8px">Dolan Shu &lt;dolan.d.shu@gmail.com&gt;</p>
 </div>
 
 <aside class="right">
@@ -248,10 +267,10 @@ tr.err-row td{color:var(--err)}
 <line id="cl2" x1="120" y1="140" x2="120" y2="75" stroke="var(--mut)" stroke-width="2"/>
 <line id="cl4" x1="380" y1="140" x2="380" y2="75" stroke="var(--mut)" stroke-width="2"/>
 <!-- Row 2: Core network box -->
-<rect x="50" y="140" width="400" height="110" rx="8" fill="none" stroke="var(--bd)" stroke-width="1.5"/>
+<rect x="50" y="140" width="400" height="110" rx="8" fill="var(--p2)" stroke="var(--bd)" stroke-width="1" id="cCore"/>
 <line x1="60" y1="195" x2="440" y2="195" stroke="var(--bd)" stroke-width="1" stroke-dasharray="4,3"/>
 <text x="250" y="175" text-anchor="middle" fill="var(--int)" font-size="13" font-weight="bold">S-SBC</text>
-<text x="250" y="225" text-anchor="middle" fill="var(--int)" font-size="13" font-weight="bold">S-SCSF (iFC)</text>
+<text x="250" y="225" text-anchor="middle" fill="var(--int)" font-size="13" font-weight="bold">S-CSCF (iFC)</text>
 </svg>
 </div>
 </div>
@@ -279,9 +298,9 @@ tr.err-row td{color:var(--err)}
 <script>
 "use strict";
 var _host = location.hostname;
-var AS_URL = "__AS_API_URL__".replace(/:\/\/[^:/]+/, "://" + _host);
-var FRAUD_URL = "__FRAUD_API_URL__" ? "__FRAUD_API_URL__".replace(/:\/\/[^:/]+/, "://" + _host) : "";
-var LD_URL = "__LOAD_API_URL__".replace(/:\/\/[^:/]+/, "://" + _host);
+var AS_URL = "__AS_API_URL__".replace(/:\\/\\/[^:/]+/, "://" + _host);
+var FRAUD_URL = "__FRAUD_API_URL__" ? "__FRAUD_API_URL__".replace(/:\\/\\/[^:/]+/, "://" + _host) : "";
+var LD_URL = "__LOAD_API_URL__".replace(/:\\/\\/[^:/]+/, "://" + _host);
 var W_EV = AS_URL.replace(/^http/, "ws") + "/ws/p12/events";
 var W_EV_F = FRAUD_URL ? FRAUD_URL.replace(/^http/, "ws") + "/ws/p12/events" : "";
 var W_LD = LD_URL.replace(/^http/, "ws") + "/ws/pool";
@@ -497,7 +516,7 @@ function updateTopology(){
   var m = topoIntensity();
   if(topologyMode === "chained"){
     paintLinks(["cl2","cl4"], m.intensity, m.linkColor);
-    paintNodes(["cAS1","cAS2"], m.nodeStroke);
+    paintNodes(["cAS1","cAS2","cCore"], m.nodeStroke);
   } else {
     paintLinks(["l1","l2"], m.intensity, m.linkColor);
     paintNodes(["nTrans"], m.nodeStroke);

@@ -138,8 +138,7 @@ def test_ten_concurrent_calls_get_distinct_outbound_call_ids(trunk_pair) -> None
         expected = outbound_call_id(inbound_cid)
         seen_outbound.add(expected)
     assert len(seen_outbound) == CONCURRENCY, (
-        f"expected {CONCURRENCY} distinct outbound Call-IDs, "
-        f"got {len(seen_outbound)}"
+        f"expected {CONCURRENCY} distinct outbound Call-IDs, got {len(seen_outbound)}"
     )
 
 
@@ -438,8 +437,7 @@ rules:
 
         def poll() -> None:
             all_released = all(
-                (out.released if (out := mock.uac.outcome_for(cid)) else False)
-                for cid in call_ids
+                (out.released if (out := mock.uac.outcome_for(cid)) else False) for cid in call_ids
             )
             if all_released or time.monotonic() >= deadline:
                 state["done"] = all_released

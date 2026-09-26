@@ -284,12 +284,14 @@ section 9). UDP hairpin is optional only if a test requires wire-level fidelity.
 ```python
 # Contract sketch — final names in P9b-0 ADR / lld.md §10
 
+
 class ReturnPassthroughCallback(Protocol):
     def on_return_request(self, msg: SipMessage, leg: str) -> None:
         """INVITE (and later in-dialog requests) from AS outbound UAC."""
 
     def on_return_response(self, msg: SipMessage, leg: str) -> None:
         """Provisional/final responses on the return leg (200, 180, …)."""
+
 
 # Orchestrator implements the protocol and:
 # 1. on_return_request(INVITE) after AS-1 → fire iFC #2 (D3)

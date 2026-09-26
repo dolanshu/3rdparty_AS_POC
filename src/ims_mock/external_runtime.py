@@ -111,9 +111,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--forward-port", type=int, required=True, help="Orchestrator UAC bind port"
     )
-    parser.add_argument(
-        "--terminating-port", type=int, required=True, help="Terminating UAS port"
-    )
+    parser.add_argument("--terminating-port", type=int, required=True, help="Terminating UAS port")
     parser.add_argument("--pcscf-port", type=int, required=True, help="P-CSCF relay port")
     parser.add_argument(
         "--print-ports",

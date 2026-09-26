@@ -4,10 +4,14 @@ Covers: CallModel (weighted-random call type selection), DurationModel
 (fixed-weight duration classes), PoolConfig (validation), CallInstance
 (dataclass fields). These are pure-Python with no network or sippy.
 """
+
 from __future__ import annotations
 
 import pytest
 from tools.call_load_generator import CallInstance, CallModel, DurationModel, PoolConfig
+
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # CallModel

@@ -47,7 +47,9 @@ class ChainConfig:
     hops: tuple[AsHop, ...]
 
     @classmethod
-    def default_two_as(cls, as1_host: str, as1_port: int, as2_host: str, as2_port: int) -> ChainConfig:
+    def default_two_as(
+        cls, as1_host: str, as1_port: int, as2_host: str, as2_port: int
+    ) -> ChainConfig:
         """Build the shipped two-AS chain (anti-fraud then translation).
 
         Args:

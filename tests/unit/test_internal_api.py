@@ -187,7 +187,9 @@ def test_internal_api_server_eager_builds_app_before_start(rules_file) -> None:
     from as_app.routing.rules import RuleSetStore
 
     server = InternalApiServer(
-        "127.0.0.1", 0, version="0.1.0",
+        "127.0.0.1",
+        0,
+        version="0.1.0",
         rule_set_store=RuleSetStore(rules_file),
         metrics=MetricsRegistry(),
         tracer=TraceRecorder(),
@@ -207,7 +209,9 @@ def test_internal_api_server_app_has_p12_websocket_route(rules_file) -> None:
     from as_app.routing.rules import RuleSetStore
 
     server = InternalApiServer(
-        "127.0.0.1", 0, version="0.1.0",
+        "127.0.0.1",
+        0,
+        version="0.1.0",
         rule_set_store=RuleSetStore(rules_file),
         metrics=MetricsRegistry(),
         tracer=TraceRecorder(),

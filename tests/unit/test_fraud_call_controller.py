@@ -93,7 +93,7 @@ def test_the_no_answer_label_is_a_dash_without_a_serving_hop(screening_file: Pat
 class _RouteRequest:
     """Minimal trunk INVITE carrying one Route entry."""
 
-    def getHFBodys(self, name: str) -> list[str]:
+    def getHFBodys(self, name: str) -> list[str]:  # noqa: N802 — sippy interface
         if name == "route":
             return ["<sip:10.0.0.9:9999;lr>"]
         return []

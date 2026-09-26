@@ -172,11 +172,10 @@ class CallController(BaseCallController):
             except RuntimeError:
                 running = None
             if running is loop:
+                assert loop is not None  # narrowed by the None-check above
                 loop.create_task(self._emit_app.state.broadcast(msg))
             else:
-                _asyncio.run_coroutine_threadsafe(
-                    self._emit_app.state.broadcast(msg), loop
-                )
+                _asyncio.run_coroutine_threadsafe(self._emit_app.state.broadcast(msg), loop)
         except (RuntimeError, AttributeError):
             pass  # asyncio bridge not ready — drop silently
 

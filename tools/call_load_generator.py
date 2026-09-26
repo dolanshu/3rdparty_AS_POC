@@ -23,6 +23,7 @@ WebSocket event streams. See ``docs/architecture/hld.md`` section 12 and
 This module contains the full generator: data models, pool management,
 MockSipUac skeleton, and FastAPI REST/WebSocket surface.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -154,9 +155,7 @@ class PoolConfig:
 
     def __post_init__(self) -> None:
         if not (1 <= self.target_concurrency <= 50):
-            raise ValueError(
-                f"target_concurrency must be 1..50, got {self.target_concurrency}"
-            )
+            raise ValueError(f"target_concurrency must be 1..50, got {self.target_concurrency}")
         if not (0.1 <= self.call_rate <= 10.0):
             raise ValueError(f"call_rate must be 0.1..10.0, got {self.call_rate}")
         if not self.enabled_call_types:
@@ -367,9 +366,7 @@ class CallPool:
         # run_coroutine_threadsafe is safe from any thread, including
         # the ED2 thread that has no asyncio loop of its own.
         try:
-            asyncio.run_coroutine_threadsafe(
-                self._async_on_call_ended(call_id, reason), loop
-            )
+            asyncio.run_coroutine_threadsafe(self._async_on_call_ended(call_id, reason), loop)
         except RuntimeError:
             return  # loop closed during bridge
 
@@ -507,9 +504,7 @@ class MockSipUac:
         if self._loop is None:
             self._loop = asyncio.get_running_loop()
         # Capture sippy objects locally to avoid closure rebinds
-        self._send_invite_real(
-            call_id, call_type, duration_class, on_call_ended
-        )
+        self._send_invite_real(call_id, call_type, duration_class, on_call_ended)
 
     # ------------------------------------------------------------------
     # Number selection per call type
@@ -553,7 +548,7 @@ class MockSipUac:
         "F4": "+8613800138000",
     }
 
-    _caller_offsets: ClassVar[dict[str, int]] = {k: 0 for k in _CALLER_POOLS}
+    _caller_offsets: ClassVar[dict[str, int]] = dict.fromkeys(_CALLER_POOLS, 0)
 
     def numbers_for(self, call_type: str) -> tuple[str, str]:
         """Return ``(called, caller)`` for a call type (HLD §12.3).
@@ -677,19 +672,14 @@ class MockSipUac:
         if self.route_return_port is not None and self.route_return_address is not None:
             headers.append(
                 SipHeader(
-                    s=(
-                        "Route: "
-                        f"<sip:{self.route_return_address}:{self.route_return_port};lr>"
-                    )
+                    s=(f"Route: <sip:{self.route_return_address}:{self.route_return_port};lr>")
                 )
             )
         if caller:
             # PAID must use E.164 with "+" prefix so Fraud AS screening matches.
             # Caller pool is plain digits → prepend "+" then pct-encode just in case.
             encoded = self._sip_user_encoded("+" + caller)
-            headers.append(
-                SipHeader(s=f"P-Asserted-Identity: <sip:{encoded}@{_IMS_DOMAIN}>")
-            )
+            headers.append(SipHeader(s=f"P-Asserted-Identity: <sip:{encoded}@{_IMS_DOMAIN}>"))
         return (
             *headers,
             SipHeader(s="Feature-Caps: *;+sip.608"),
@@ -698,9 +688,7 @@ class MockSipUac:
 
     # --- sippy event handler (runs on ED2 thread) ----------------------
 
-    def _event_handler(
-        self, call_id: str, duration_class: str
-    ) -> Callable[[Any, Any], None]:
+    def _event_handler(self, call_id: str, duration_class: str) -> Callable[[Any, Any], None]:
         """Build the per-call sippy event callback."""
 
         def handler(event: Any, ua: Any) -> None:
@@ -708,9 +696,7 @@ class MockSipUac:
 
         return handler
 
-    def _on_sippy_event(
-        self, event: Any, ua: Any, call_id: str, duration_class: str
-    ) -> None:
+    def _on_sippy_event(self, event: Any, ua: Any, call_id: str, duration_class: str) -> None:
         """Handle one sippy event on the ED2 thread."""
         from sippy.CCEvents import CCEventConnect, CCEventDisconnect, CCEventFail
 
@@ -804,6 +790,7 @@ def _sippy_identity(global_config: dict[str, Any]) -> Iterator[None]:
 try:
     from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
     from pydantic import BaseModel, Field
+
     FASTAPI_AVAILABLE = True
 except ImportError:  # pragma: no cover
     FASTAPI_AVAILABLE = False
@@ -836,6 +823,7 @@ if FASTAPI_AVAILABLE:
 
         # CORS open — same reason as AS's internal API (ADR-0002)
         from fastapi.middleware.cors import CORSMiddleware
+
         app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],
@@ -904,12 +892,14 @@ if FASTAPI_AVAILABLE:
             try:
                 while True:
                     snapshot = (pool_state_getter or _default_getter)()
-                    await ws.send_json({
-                        "timestamp": time.time(),
-                        "source": "load_generator",
-                        "event": "pool_status_update",
-                        "attributes": snapshot,
-                    })
+                    await ws.send_json(
+                        {
+                            "timestamp": time.time(),
+                            "source": "load_generator",
+                            "event": "pool_status_update",
+                            "attributes": snapshot,
+                        }
+                    )
                     await asyncio.sleep(1.0)
             except WebSocketDisconnect:
                 pass
@@ -978,8 +968,11 @@ async def _amain(args: argparse.Namespace) -> int:
 
     # 4. Start uvicorn as a task on this loop
     server_config = uvicorn.Config(
-        app, host=args.http_address, port=args.http_port,
-        log_level="info", access_log=False,
+        app,
+        host=args.http_address,
+        port=args.http_port,
+        log_level="info",
+        access_log=False,
     )
     server = uvicorn.Server(server_config)
     uvicorn_task = asyncio.create_task(server.serve())
@@ -1000,10 +993,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Call Load Generator — P12 standalone SIP load driver",
     )
-    parser.add_argument("--as-address", default="127.0.0.1",
-                        help="AS SIP listen address (default 127.0.0.1)")
-    parser.add_argument("--as-port", type=int, default=5060,
-                        help="AS SIP listen port (default 5060; alias for ingress)")
+    parser.add_argument(
+        "--as-address", default="127.0.0.1", help="AS SIP listen address (default 127.0.0.1)"
+    )
+    parser.add_argument(
+        "--as-port",
+        type=int,
+        default=5060,
+        help="AS SIP listen port (default 5060; alias for ingress)",
+    )
     parser.add_argument(
         "--ingress-port",
         type=int,
@@ -1027,18 +1025,32 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="S-SBC return port for Route header (chained mode)",
     )
-    parser.add_argument("--local-address", default="127.0.0.1",
-                        help="Generator local SIP address (default 127.0.0.1)")
-    parser.add_argument("--local-port", type=int, default=5099,
-                        help="Generator local SIP port (default 5099)")
-    parser.add_argument("--http-address", default="127.0.0.1",
-                        help="Generator REST/WebSocket HTTP bind address")
-    parser.add_argument("--http-port", type=int, default=8765,
-                        help="Generator REST/WebSocket HTTP bind port (default 8765)")
-    parser.add_argument("--target-concurrency", type=int, default=10,
-                        help="Initial pool target concurrency (default 10)")
-    parser.add_argument("--call-rate", type=float, default=3.0,
-                        help="Initial call rate per second (default 3.0)")
+    parser.add_argument(
+        "--local-address",
+        default="127.0.0.1",
+        help="Generator local SIP address (default 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--local-port", type=int, default=5099, help="Generator local SIP port (default 5099)"
+    )
+    parser.add_argument(
+        "--http-address", default="127.0.0.1", help="Generator REST/WebSocket HTTP bind address"
+    )
+    parser.add_argument(
+        "--http-port",
+        type=int,
+        default=8765,
+        help="Generator REST/WebSocket HTTP bind port (default 8765)",
+    )
+    parser.add_argument(
+        "--target-concurrency",
+        type=int,
+        default=10,
+        help="Initial pool target concurrency (default 10)",
+    )
+    parser.add_argument(
+        "--call-rate", type=float, default=3.0, help="Initial call rate per second (default 3.0)"
+    )
     args = parser.parse_args(argv)
     return asyncio.run(_amain(args))
 

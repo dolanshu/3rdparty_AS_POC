@@ -46,9 +46,7 @@ def _complete_call(trunk_pair) -> str:
     )
     call_id = str(trunk_pair.place_call(scenario))
     finished = trunk_pair.run_until(
-        lambda: (
-            (outcome := trunk_pair.outcome_for(call_id)) is not None and outcome.released
-        ),
+        lambda: (outcome := trunk_pair.outcome_for(call_id)) is not None and outcome.released,
         timeout_seconds=15.0,
     )
     assert finished, "call did not complete"

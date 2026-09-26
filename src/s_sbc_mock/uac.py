@@ -390,12 +390,7 @@ class TrunkUac:
             The extra headers to append to the INVITE.
         """
         return (
-            SipHeader(
-                s=(
-                    "Route: "
-                    f"<sip:{self.route_return_address}:{self.route_return_port};lr>"
-                )
-            ),
+            SipHeader(s=(f"Route: <sip:{self.route_return_address}:{self.route_return_port};lr>")),
             SipHeader(s=f"P-Asserted-Identity: <sip:{scenario.calling_number}@{IMS_DOMAIN}>"),
             SipHeader(
                 s=(

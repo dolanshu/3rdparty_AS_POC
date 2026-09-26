@@ -58,9 +58,9 @@ Console dashboard E2E 用的是 Playwright 起 4 个独立进程，覆盖浏览�
 scenario = CallScenario(
     name="complete-call",
     called="+8613800138000",  # 目标号码（会被 AS translate）
-    caller="1001",             # 主叫
-    behaviour="answer_and_bye", # "answer_and_bye" | "cancel_after_200ok" | "no_answer_608"
-    duration_ms=3000,          # 200 OK 后多少毫秒 BYE
+    caller="1001",  # 主叫
+    behaviour="answer_and_bye",  # "answer_and_bye" | "cancel_after_200ok" | "no_answer_608"
+    duration_ms=3000,  # 200 OK 后多少毫秒 BYE
 )
 ```
 

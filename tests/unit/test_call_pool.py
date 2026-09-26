@@ -7,6 +7,7 @@ These unit tests run the CallPool tick loop at speed and verify:
   - binding constraint computes correctly both ways
   - call completion decrements pool, next tick refills
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -15,6 +16,9 @@ from typing import Any
 
 import pytest
 from tools.call_load_generator import CallModel, CallPool, PoolConfig
+
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -55,9 +59,7 @@ class _FakeUac:
         else:
             on_ended(call_id, reason)
 
-    async def _async_complete(
-        self, call_id: str, reason: str, on_ended: Callable
-    ) -> None:
+    async def _async_complete(self, call_id: str, reason: str, on_ended: Callable) -> None:
         # on_ended may be sync or coroutine
         result = on_ended(call_id, reason)
         if asyncio.iscoroutine(result):

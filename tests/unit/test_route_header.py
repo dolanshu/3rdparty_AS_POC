@@ -33,7 +33,7 @@ def _request(route_values: list[str]) -> Any:
         def __init__(self, value: str) -> None:
             self._value = value
 
-        def getCopy(self) -> str:
+        def getCopy(self) -> str:  # noqa: N802 — sippy interface
             return self._value
 
     return SimpleNamespace(

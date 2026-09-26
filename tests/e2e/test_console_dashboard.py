@@ -25,6 +25,7 @@ pytestmark = pytest.mark.e2e
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _put_config(gen_base: str, body: dict) -> dict:
     """PUT /load/config with body, validate HTTP 200, return parsed JSON.
 
@@ -34,7 +35,9 @@ def _put_config(gen_base: str, body: dict) -> dict:
     """
     data = json.dumps(body).encode()
     req = urlrequest.Request(
-        f"{gen_base}/load/config", data=data, method="PUT",
+        f"{gen_base}/load/config",
+        data=data,
+        method="PUT",
         headers={"Content-Type": "application/json"},
     )
     try:
@@ -229,7 +232,10 @@ class TestPageLoad:
         _open_console(page, demo_stack)
         nav = page.locator(".nav button")
         # Nav buttons: Dashboard + Call Trace + Rules + Screening + Statistics + About
-        assert nav.count() >= 5, f"nav buttons count={nav.count()}, texts={[nav.nth(i).inner_text() for i in range(nav.count())]}"
+        assert nav.count() >= 5, (
+            f"nav buttons count={nav.count()}"
+            f", texts={[nav.nth(i).inner_text() for i in range(nav.count())]}"
+        )
         texts = [nav.nth(i).inner_text() for i in range(nav.count())]
         assert "Dashboard" in texts, f"Dashboard not in nav: {texts}"
         assert "Rules" in texts, f"Rules not in nav: {texts}"
@@ -260,7 +266,9 @@ class TestPageLoad:
         _wait_ws(page, "ld")
         _wait_ws(page, "ev")
         # Stop should be disabled — generator confirmed idle via REST
-        assert page.locator("#btnStop").is_disabled(), "btnStop should be disabled when generator idle"
+        assert page.locator("#btnStop").is_disabled(), (
+            "btnStop should be disabled when generator idle"
+        )
         gauge = page.locator("#gaugeVal").inner_text()
         assert gauge.startswith("0 /"), f"gauge should start at 0/N, got '{gauge}'"
         bind = page.locator("#bindInd").inner_text()
@@ -311,8 +319,9 @@ class TestNavigation:
         assert page.locator("#scrCard").count() == 1
         # Simple mode has no Fraud AS → placeholder
         text = page.locator("#scrCard").inner_text()
-        assert ("Anti-fraud AS" in text or "not active" in text), \
+        assert "Anti-fraud AS" in text or "not active" in text, (
             f"Simple mode: expected placeholder, got: {text[:200]}"
+        )
 
     def test_statistics_view_renders(self, page, demo_stack):
         _open_console(page, demo_stack)
@@ -354,7 +363,9 @@ class TestNavigation:
         page.wait_for_timeout(800)
         # centre section visible again
         centre_display = page.locator("#vw-dashboard").evaluate("el => el.style.display")
-        assert centre_display != "none", f"centre still hidden after nav back: display='{centre_display}'"
+        assert centre_display != "none", (
+            f"centre still hidden after nav back: display='{centre_display}'"
+        )
         assert page.locator('.nav button[data-v="dashboard"]').evaluate(
             "b => b.classList.contains('act')"
         )
@@ -370,9 +381,9 @@ class TestNavigation:
         centre_display = page.locator("#vw-dashboard").evaluate("el => el.style.display")
         assert centre_display != "none"
         for view, _ in self.NAV_VIEWS:
-            assert not page.locator(f"#vw-{view}").evaluate(
-                "el => el.classList.contains('act')"
-            ), f"{view} still act after dashboard nav"
+            assert not page.locator(f"#vw-{view}").evaluate("el => el.classList.contains('act')"), (
+                f"{view} still act after dashboard nav"
+            )
 
 
 class TestCallTraceSequence:
@@ -491,11 +502,14 @@ class TestGeneratorLifecycle:
         # Only enable call types that the demo routing table actually
         # matches — T4 ("1234") has no route and AS rejects it instantly.
         # simple topology rejects fraud-only call types (F1-F4).
-        _put_config(demo_stack["gen"], {
-            "target_concurrency": 10,
-            "call_rate": 3.0,
-            "enabled_call_types": _SIMPLE_CALL_TYPES,
-        })
+        _put_config(
+            demo_stack["gen"],
+            {
+                "target_concurrency": 10,
+                "call_rate": 3.0,
+                "enabled_call_types": _SIMPLE_CALL_TYPES,
+            },
+        )
 
         # try/finally ensures config restores even if assertions fail
         try:
@@ -510,7 +524,9 @@ class TestGeneratorLifecycle:
                     saw_active = True
                     break
                 time.sleep(0.5)
-            assert saw_active, f"generator never had active_calls>0: {_gen_status(demo_stack['gen'])}"
+            assert saw_active, (
+                f"generator never had active_calls>0: {_gen_status(demo_stack['gen'])}"
+            )
 
             # Assertion 2: console gauge shows non-zero at least once
             # (gauge reads generator WS which can lag behind REST)
@@ -605,8 +621,13 @@ class TestDashboardLive:
                 topoVal: document.getElementById('topoVal').innerText,
                 l1_sw: document.getElementById('l1').getAttribute('stroke-width')
             })""")
-            assert False, f"topo never changed — idle={idle_sw} active={active_sw} active_attr={active_attr} state={console_state}"
-        assert active_sw > idle_sw + 0.1, f"topo stroke-width unchanged: idle={idle_sw} active={active_sw}"
+            raise AssertionError(
+                f"topo never changed — idle={idle_sw} active={active_sw} "
+                f"active_attr={active_attr} state={console_state}"
+            )
+        assert active_sw > idle_sw + 0.1, (
+            f"topo stroke-width unchanged: idle={idle_sw} active={active_sw}"
+        )
 
     def test_trace_panel_accumulates_call_records(self, page, demo_stack):
         self._open_and_start(page, demo_stack, wait_ms=8000)
@@ -621,7 +642,9 @@ class TestDashboardLive:
         page.fill("#filt", "zzzzzzzNoMatchzzzzz")
         page.wait_for_timeout(500)
         after_nomatch = page.locator("#tlist .ti").count()
-        assert after_nomatch <= total_before, f"filter expanded list: {after_nomatch} > {total_before}"
+        assert after_nomatch <= total_before, (
+            f"filter expanded list: {after_nomatch} > {total_before}"
+        )
 
     def test_trace_filter_shows_multiple_rows_for_one_call_id(self, page, demo_stack):
         """#filt must show every lifecycle event for one Call-ID, not a single row."""
@@ -631,12 +654,15 @@ class TestDashboardLive:
         call_id = lifecycle["call_id"]
         page.fill("#filt", call_id)
         page.wait_for_timeout(400)
-        rows = page.evaluate("""() => Array.from(document.querySelectorAll('#tlist .ti')).map(function(row){
-            return {
-                call_id: row.querySelector('.cid').innerText,
-                event: row.querySelector('.ev').innerText,
-            };
-        })""")
+        rows = page.evaluate(
+            """() => Array.from(document.querySelectorAll('#tlist .ti'))"""
+            """.map(function(row){
+                return {
+                    call_id: row.querySelector('.cid').innerText,
+                    event: row.querySelector('.ev').innerText,
+                };
+            })"""
+        )
         assert len(rows) >= 3, (
             f"filter on {call_id!r} should show >=3 lifecycle rows, got {len(rows)}: {rows!r}; "
             f"tc had events={lifecycle['events']!r}"
@@ -671,7 +697,9 @@ class TestDashboardLive:
         idle_ntrans = page.locator("#nTrans").evaluate("el => el.getAttribute('stroke')")
         assert idle_l1 == "var(--mut)", f"idle l1 stroke expected var(--mut), got {idle_l1!r}"
         assert idle_l2 == "var(--mut)", f"idle l2 stroke expected var(--mut), got {idle_l2!r}"
-        assert idle_ntrans == "var(--bd)", f"idle nTrans stroke expected var(--bd), got {idle_ntrans!r}"
+        assert idle_ntrans == "var(--bd)", (
+            f"idle nTrans stroke expected var(--bd), got {idle_ntrans!r}"
+        )
 
         # Start generator
         _click_visible(page, "#btnStart")
@@ -681,11 +709,15 @@ class TestDashboardLive:
         topo_text = None
         while time.time() < deadline:
             topo_text = page.locator("#topoVal").inner_text()
-            if "idle" not in topo_text.lower() and "active" in topo_text.lower() or "calls" in topo_text.lower():
+            if (
+                "idle" not in topo_text.lower()
+                and "active" in topo_text.lower()
+                or "calls" in topo_text.lower()
+            ):
                 break
             time.sleep(0.5)
         assert "idle" not in (topo_text or "idle"), (
-            f"topoVal still idle after 25s — generator traffic never arrived"
+            "topoVal still idle after 25s — generator traffic never arrived"
         )
 
         # --- Phase 2: confirm JS paintLinks/paintNodes have applied colors ---
@@ -833,7 +865,8 @@ class TestSliderToRestLoop:
                 break
             time.sleep(0.5)
         assert saw_target == 5, (
-            f"slider → PUT /load/config did not reach generator REST: got target_concurrency={saw_target}"
+            f"slider → PUT /load/config did not reach generator REST: "
+            f"got target_concurrency={saw_target}"
         )
 
         # Gauge target text also updates (reads pool_status_update WS).
@@ -847,12 +880,15 @@ class TestSliderToRestLoop:
             time.sleep(0.5)
 
         # Restore original
-        _put_config(demo_stack["gen"], {
-            "target_concurrency": orig_target,
-            "call_rate": orig.get("call_rate", 3.0),
-            "enabled_call_types": _SIMPLE_CALL_TYPES,
-            "topology": "simple",
-        })
+        _put_config(
+            demo_stack["gen"],
+            {
+                "target_concurrency": orig_target,
+                "call_rate": orig.get("call_rate", 3.0),
+                "enabled_call_types": _SIMPLE_CALL_TYPES,
+                "topology": "simple",
+            },
+        )
         _click_visible(page, "#btnStop")
 
         assert gauge_ok, (
@@ -885,7 +921,9 @@ class TestCallTypeToggleUI:
             assert not el.evaluate("el => el.disabled"), (
                 f"T-type #tog_{t} should NOT be disabled in simple topology"
             )
-            parent_opacity = page.locator(f"#tog_{t}").evaluate("el => el.parentElement.style.opacity")
+            parent_opacity = page.locator(f"#tog_{t}").evaluate(
+                "el => el.parentElement.style.opacity"
+            )
             assert parent_opacity != "0.35", (
                 f"T-type #tog_{t} label opacity unexpectedly disabled: {parent_opacity}"
             )
@@ -906,13 +944,16 @@ class TestCallTypeToggleUI:
     def test_server_rejects_fraud_types_in_simple_topology(self, demo_stack):
         """PUT /load/config with F-types on simple topology → HTTP 400."""
         import json as _json
+
         _reset_gen(demo_stack["gen"])
-        body = _json.dumps({
-            "target_concurrency": 10,
-            "call_rate": 3.0,
-            "enabled_call_types": ["T1", "T2", "F1", "F2"],
-            "topology": "simple",
-        }).encode()
+        body = _json.dumps(
+            {
+                "target_concurrency": 10,
+                "call_rate": 3.0,
+                "enabled_call_types": ["T1", "T2", "F1", "F2"],
+                "topology": "simple",
+            }
+        ).encode()
         req = urlrequest.Request(
             f"{demo_stack['gen']}/load/config",
             data=body,
@@ -922,14 +963,14 @@ class TestCallTypeToggleUI:
         with pytest.raises(urlrequest.HTTPError) as excinfo:
             urlrequest.urlopen(req, timeout=5)
         assert excinfo.value.code == 400, (
-            f"expected HTTP 400, got {excinfo.value.code}; "
-            f"body={excinfo.value.read()}"
+            f"expected HTTP 400, got {excinfo.value.code}; body={excinfo.value.read()}"
         )
 
 
 # ===========================================================================
 # HY4 新增测试 —— 填补三轮 review 发现的覆盖缺口
 # ===========================================================================
+
 
 class TestBindingConstraint:
     """HY4 R3-P0-1 — binding_constraint 翻转 REST E2E.
@@ -951,11 +992,14 @@ class TestBindingConstraint:
         0.1 × 10.4 = 1.04 < 10 → rate-bound.
         """
         _reset_gen(demo_stack["gen"])
-        _put_config(demo_stack["gen"], {
-            "target_concurrency": 10,
-            "call_rate": 0.1,
-            "enabled_call_types": self._VALID_TYPES,
-        })
+        _put_config(
+            demo_stack["gen"],
+            {
+                "target_concurrency": 10,
+                "call_rate": 0.1,
+                "enabled_call_types": self._VALID_TYPES,
+            },
+        )
         s = _gen_status(demo_stack["gen"])
         assert s["binding_constraint"] == "rate", (
             f"expected 'rate' for {{target=10, rate=0.1}} "
@@ -968,11 +1012,14 @@ class TestBindingConstraint:
         2.0 × 10.4 = 20.8 >= 10 → concurrency-bound.
         """
         _reset_gen(demo_stack["gen"])
-        _put_config(demo_stack["gen"], {
-            "target_concurrency": 10,
-            "call_rate": 2.0,
-            "enabled_call_types": self._VALID_TYPES,
-        })
+        _put_config(
+            demo_stack["gen"],
+            {
+                "target_concurrency": 10,
+                "call_rate": 2.0,
+                "enabled_call_types": self._VALID_TYPES,
+            },
+        )
         s = _gen_status(demo_stack["gen"])
         assert s["binding_constraint"] == "concurrency", (
             f"expected 'concurrency' for {{target=10, rate=2.0}} "
@@ -989,12 +1036,15 @@ class TestBindingConstraintUI:
         assert "binding:" in initial
         assert "concurrency" in initial, f"default should be concurrency-bound: '{initial}'"
 
-        _put_config(demo_stack["gen"], {
-            "target_concurrency": 10,
-            "call_rate": 0.1,
-            "enabled_call_types": _SIMPLE_CALL_TYPES,
-            "topology": "simple",
-        })
+        _put_config(
+            demo_stack["gen"],
+            {
+                "target_concurrency": 10,
+                "call_rate": 0.1,
+                "enabled_call_types": _SIMPLE_CALL_TYPES,
+                "topology": "simple",
+            },
+        )
         deadline = time.time() + 8
         saw_rate = False
         while time.time() < deadline:
@@ -1108,7 +1158,11 @@ class TestWsOfflineReconnect:
         page.wait_for_timeout(3500)
 
         status_txt = page.locator("#aSt").inner_text()
-        assert "unreachable" in status_txt.lower() or "disconnected" in status_txt.lower() or "closed" in status_txt.lower(), (
+        assert (
+            "unreachable" in status_txt.lower()
+            or "disconnected" in status_txt.lower()
+            or "closed" in status_txt.lower()
+        ), (
             f"#aSt did not reflect offline state, got: '{status_txt}' "
             f"(expected 'unreachable' or similar)"
         )
@@ -1151,8 +1205,8 @@ class TestSimpleSvgVisual:
         _open_console(page, demo_stack)
         rect = page.locator("#topoSimple").bounding_box()
         assert rect is not None, "#topoSimple has no bounding_box — likely display:none"
-        assert rect["width"] > 0, f"#topoSimple width=0 (CSS display:none cascade?)"
-        assert rect["height"] > 0, f"#topoSimple height=0"
+        assert rect["width"] > 0, "#topoSimple width=0 (CSS display:none cascade?)"
+        assert rect["height"] > 0, "#topoSimple height=0"
 
     def test_simple_topo_nodes_have_dimensions(self, page, demo_stack):
         """All 3 simple-mode SVG nodes have rect_w > 0."""
@@ -1181,6 +1235,7 @@ class TestSimpleSvgVisual:
 # Chart header stability — CSS .chart-h .v { min-width: 92px; flex-shrink: 0 }
 # ---------------------------------------------------------------------------
 
+
 class TestChartHStability:
     """Chart header .v width stays constant regardless of text content.
 
@@ -1199,8 +1254,9 @@ class TestChartHStability:
         for vid in self._VAR_VALUES:
             rect = page.locator(f"#{vid}").bounding_box()
             assert rect is not None, f"#{vid} not in DOM"
-            assert rect["width"] >= 92.0, \
+            assert rect["width"] >= 92.0, (
                 f"#{vid} width={rect['width']:.1f}px < 92px min-width (card jump bug!)"
+            )
 
     def test_chart_h_parent_width_stable_across_value_change(self, page, demo_stack):
         """topoVal text change must NOT shift the parent .chart-h width.
@@ -1224,13 +1280,20 @@ class TestChartHStability:
 
         # Configure + start generator via REST (inline, no helper)
         import json as _json
-        body = _json.dumps({
-            "target_concurrency": 5,
-            "call_rate": 1.0,
-            "enabled_call_types": ["T1","T2","T3","T4","T5","T6"],
-        }).encode()
-        req = urlrequest.Request(f"{demo_stack['gen']}/load/config", data=body,
-                                  headers={"Content-Type": "application/json"}, method="PUT")
+
+        body = _json.dumps(
+            {
+                "target_concurrency": 5,
+                "call_rate": 1.0,
+                "enabled_call_types": ["T1", "T2", "T3", "T4", "T5", "T6"],
+            }
+        ).encode()
+        req = urlrequest.Request(
+            f"{demo_stack['gen']}/load/config",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
         urlrequest.urlopen(req, timeout=5).read()
         req2 = urlrequest.Request(f"{demo_stack['gen']}/load/start", data=b"", method="POST")
         urlrequest.urlopen(req2, timeout=5).read()
@@ -1244,7 +1307,7 @@ class TestChartHStability:
                 changed = True
                 break
             time.sleep(0.5)
-        assert changed, f"topoVal never left 'idle' — generator not producing calls?"
+        assert changed, "topoVal never left 'idle' — generator not producing calls?"
 
         # Capture again
         active_parent_w = page.evaluate("""() => {
@@ -1254,8 +1317,11 @@ class TestChartHStability:
         }""")
 
         delta = abs(active_parent_w - idle_parent_w)
-        assert delta < 1.0, \
-            f"chart-h width shifted by {delta:.1f}px (idle={idle_parent_w:.1f}px, active={active_parent_w:.1f}px) — card jump bug!"
+        assert delta < 1.0, (
+            f"chart-h width shifted by {delta:.1f}px "
+            f"(idle={idle_parent_w:.1f}px, active={active_parent_w:.1f}px) "
+            f"— card jump bug!"
+        )
 
         # Cleanup
         _reset_gen(demo_stack["gen"])

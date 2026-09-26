@@ -78,9 +78,7 @@ def test_recv_request_emits_call_started_with_trunk_call_id(rules_file: Path) ->
     app, loop, captured = _app_with_running_loop()
     trunk_call_id = "unit-trunk-call-id@127.0.0.1"
     request = MagicMock()
-    request.getHFBody.side_effect = lambda header: (
-        trunk_call_id if header == "call-id" else ""
-    )
+    request.getHFBody.side_effect = lambda header: trunk_call_id if header == "call-id" else ""
 
     try:
         store = RuleSetStore(rules_file)

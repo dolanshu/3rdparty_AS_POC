@@ -2,6 +2,7 @@
 
 Uses FastAPI's TestClient; no actual sippy or network needed.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +15,9 @@ from tools.call_load_generator import (
     PoolConfig,
     build_generator_app,
 )
+
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Build a full app backed by a real CallPool but with a FakeUac
@@ -81,9 +85,14 @@ def test_get_status_keys(client):
     assert resp.status_code == 200
     body = resp.json()
     expected_keys = {
-        "active_calls", "target_concurrency", "call_rate",
-        "binding_constraint", "enabled_call_types", "rate_budget_remaining",
-        "topology", "ingress_port",
+        "active_calls",
+        "target_concurrency",
+        "call_rate",
+        "binding_constraint",
+        "enabled_call_types",
+        "rate_budget_remaining",
+        "topology",
+        "ingress_port",
     }
     assert expected_keys <= set(body.keys())
     assert body["target_concurrency"] == 3
@@ -97,11 +106,14 @@ def test_get_status_keys(client):
 
 
 def test_put_config_valid(client):
-    resp = client.put("/load/config", json={
-        "target_concurrency": 15,
-        "call_rate": 3.0,
-        "enabled_call_types": ["T1", "T2", "T5", "F1", "F2"],
-    })
+    resp = client.put(
+        "/load/config",
+        json={
+            "target_concurrency": 15,
+            "call_rate": 3.0,
+            "enabled_call_types": ["T1", "T2", "T5", "F1", "F2"],
+        },
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "configured"
@@ -109,31 +121,40 @@ def test_put_config_valid(client):
 
 
 def test_put_config_rejects_out_of_range(client):
-    resp = client.put("/load/config", json={
-        "target_concurrency": 0,  # invalid
-        "call_rate": 3.0,
-        "enabled_call_types": ["T1"],
-    })
+    resp = client.put(
+        "/load/config",
+        json={
+            "target_concurrency": 0,  # invalid
+            "call_rate": 3.0,
+            "enabled_call_types": ["T1"],
+        },
+    )
     assert resp.status_code == 422
 
 
 def test_put_config_rejects_f_types_in_simple_topology(client):
-    resp = client.put("/load/config", json={
-        "target_concurrency": 10,
-        "call_rate": 3.0,
-        "enabled_call_types": ["T1", "F1"],
-        "topology": "simple",
-    })
+    resp = client.put(
+        "/load/config",
+        json={
+            "target_concurrency": 10,
+            "call_rate": 3.0,
+            "enabled_call_types": ["T1", "F1"],
+            "topology": "simple",
+        },
+    )
     assert resp.status_code == 400
     assert "not valid for topology" in resp.json()["detail"]
 
 
 def test_put_config_rejects_unknown_call_type(client):
-    resp = client.put("/load/config", json={
-        "target_concurrency": 10,
-        "call_rate": 3.0,
-        "enabled_call_types": ["T1", "INVALID_TYPE"],
-    })
+    resp = client.put(
+        "/load/config",
+        json={
+            "target_concurrency": 10,
+            "call_rate": 3.0,
+            "enabled_call_types": ["T1", "INVALID_TYPE"],
+        },
+    )
     # PoolConfig raises ValueError → our handler returns 400 Bad Request
     assert resp.status_code == 400
     assert "Unknown call types" in resp.json()["detail"]

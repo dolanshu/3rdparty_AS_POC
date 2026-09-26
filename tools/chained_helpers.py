@@ -17,10 +17,10 @@
 from __future__ import annotations
 
 import re
-import time
 from pathlib import Path
 from typing import Any
 
+from capture_call import free_udp_port, rewrite_next_hop_ports
 from sippy.Core.EventDispatcher import ED2
 from sippy.Time.Timeout import Timeout
 
@@ -30,7 +30,6 @@ from as_app.bootstrap import AsSettings
 from as_app.main import AsStack
 from as_app.observability.metrics import MetricsRegistry
 from as_app.observability.tracing import SipMessageRecorder, TraceRecorder
-from capture_call import free_udp_port, rewrite_next_hop_ports
 from ims_mock.chained_stack import ChainedImsStack
 from s_sbc_mock.uac import CallOutcome, CallScenario
 

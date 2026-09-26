@@ -32,6 +32,8 @@ Legend: **ready** — exists and is usable · **skeleton** — exists, content p
 | `docs/specs/index.md` | ready | Normative references |
 | `docs/specs/message-samples/` | ready | Real SIP messages on the trunk, generated with `make capture` and gitignored (only the folder `README.md` is tracked); the `office-to-mobile` call is 14 files, the translated outbound INVITE included. The anti-fraud AS's own calls are narrated live by `make demo-fraud`, and the iFC-chained topology (`ims_mock`, ADR-0014) by `make demo-chained` |
 | `tools/README.md` | ready | Probe, rule viewer, capture helper and the call capture tool |
+| `.github/workflows/ci.yml` | ready | The five-layer gate (lint → type → unit → integration → e2e); only `main` triggers it |
+| `docs/ci-merge-phase3-blockers.md` | ready | **Open work** — what will go red when `phase3` lands on `main`, with the fix order |
 
 ## Deployment and operations
 

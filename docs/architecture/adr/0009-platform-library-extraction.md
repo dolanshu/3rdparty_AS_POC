@@ -10,7 +10,8 @@
   (decision 7 — the chain is P10's input) · `docs/architecture/hld.md` sections 8 and 10 ·
   `docs/architecture/lld.md` section 2.3, section 9.1, section 9.6, section 10.5,
   section 11 ·
-  `AGENT.md` sections 4.1, 4.3, 10, 12, 14 rule 3
+  `AGENT.md` sections 4.1, 4.3, 10, 12, 14 rule 3 ·
+  **`docs/architecture/future/sip-engine-seam.md`** (proposed next seam — not part of P10)
 
 ## Context
 
@@ -576,6 +577,11 @@ this scope and no more.
   distance (D8).
 - **P11 receives interfaces, not implementations** (decision 5). It adds TLS and Redis behind
   seams that already exist, which is what makes its "second implementation" claim meaningful.
+- **The controller seam is not yet stack-neutral.** `PolicyDecision.outbound_event` is still a
+  sippy `CCEventTry`, and `BaseAsStack` still binds to `ED2.loop()`. A proposed follow-on —
+  documented in `docs/architecture/future/sip-engine-seam.md`, not scheduled — would add a
+  `B2buaEngine` adapter layer so stack swaps become platform-only after a one-time app
+  migration.
 - **The facades are permanent** (decision 2). `tools/` and `tests/` keep importing
   `as_app.sip_adapter` and `as_app.observability`, so the re-export modules stay for the
   repository's lifetime, not just for the migration.

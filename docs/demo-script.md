@@ -4,11 +4,12 @@ Duration: 5–10 minutes (10–14 with the anti-fraud section, §5a, and the cha
 Audience: architecture reviewers and operator-side reviewers. Rehearse it before showing it;
 if the script and `make demo` disagree, both are wrong (`AGENT.md` section 10).
 
-**Status:** the whole script runs. Sections 1–7 are the Phase 1 path (M0–M4): the stack probe,
+**Status:** the whole script runs. Sections 1–6 are the Phase 1 path (M0–M4): the stack probe,
 the rule data, a real translated call, the failure branches and the operations console — every
 one of them rehearsed for M4. Sections 5a and 5b are the Phase 2 additions: §5a is
-`make demo-fraud`, the anti-fraud AS, rehearsed for P8; §5b is `make demo-chained`, the two AS
-instances in series, rehearsed for P9. The runs that recorded the evidence are in
+`make demo-fraud`, the anti-fraud AS, rehearsed for P8; §5b is `make demo-chained`, the
+iFC-orchestrated chain of P9b (ADR-0014) — not the obsolete trunk-to-trunk P9 chain.
+Section 7 is Phase 3 (P12/P13 live load). The runs that recorded the evidence are in
 `docs/acceptance/report.md`.
 
 ## 0. Setup (before the audience arrives)
@@ -24,12 +25,12 @@ make lint && make test
 
 ## 1. What this is (60 seconds)
 
-> "This is a third-party Application Server: a B2BUA that sits outside the operator's IMS
-> network and is reached over a SIP trunk from the operator's Service-SBC. The S-SBC, the
-> S-CSCF and the core are mocked locally, and every peer address is configuration — the
-> same code can be pointed at a real S-SBC by changing configuration only. It is a B2BUA
-> and only a B2BUA: it terminates the incoming INVITE, translates the number, and
-> originates a new INVITE back. Signalling only — no media."
+> "This is a third-party Application Server — the **only B2BUA** in the path. The operator
+> S-CSCF and S-SBC are not B2BUAs; locally the mock S-SBC forwards the trunk INVITE on
+> port 15060 and receives the translated INVITE back on 15061. The AS listens as a **UAS**
+> on 5060, translates the number, and originates a new INVITE as a **UAC** with a fresh
+> Call-ID towards the top Route the S-SBC inserted — back through the S-SBC into the IMS,
+> not directly to the core. Signalling only — no media."
 
 Point at the diagram in `README.md` and at `docs/architecture/hld.md` section 1.
 
@@ -106,21 +107,24 @@ make demo-fraud        # two calls through the anti-fraud AS: one allowed, one r
 
 > "Phase 2 adds a second, independently runnable AS process at the same trunk boundary. This
 > one does not translate anything: it inspects the **calling** party and returns a verdict.
-> A caller the screening data allows is relayed towards the core unchanged; a caller on the
+> A caller the screening data allows is relayed, unchanged, to the top `Route` the S-SBC
+> inserted — back through the S-SBC; a caller on the
 > block list is answered `608 Rejected` (RFC 8688) by the AS itself — no second leg, no media
 > announcement, and no `Call-Info`. The `608` is what a generic `403` or `603` cannot say: an
 > automated anti-fraud engine made the decision."
 
 What the reviewer should see, in the transcript `make demo-fraud` prints:
 
-1. The topology line `emulated S-CSCF --UDP--> anti-fraud AS (608 Rejected) --UDP--> emulated
-   core network` and the screening file in use (`config/caller_screening.yaml`).
+1. The topology line `S-SBC forward --UDP--> anti-fraud AS (608 or relay) --UDP--> S-SBC
+   return (top Route)` — an allowed call is relayed **back through the S-SBC**, not to any
+   "core" — and the screening file in use (`config/caller_screening.yaml`).
 2. The fixed verdict order: `allow list -> block list -> call-rate window -> reputation`.
 3. Call 1 (`+86216180001`): `verdict: allow`, `signal: none`, `final status: 200`,
-   `core INVITE delta 1` — the allowed call really reached the emulated core.
+   `return INVITE delta 1` — the allowed call really left the AS towards the S-SBC return
+   side.
 4. Call 2 (`+8613400000001`): `verdict: reject`, `signal: block_list`,
    `list entry: BL-0001`, `final status: 608`, `second leg: none ... (RFC 8688, no
-   Call-Info)`, `core INVITE delta 0` — the rejected call never reached the core, because the
+   Call-Info)`, `return INVITE delta 0` — the rejected call never left the AS, because the
    reject path is UAS behaviour and originates no second leg.
 
 Point out that each demo allocates its own ephemeral ports, so this section and `make demo`
@@ -131,38 +135,23 @@ is as repeatable as `make demo`.
 ## 5b. The chain — two AS instances in series (2 minutes)
 
 ```bash
-make demo-chained      # SBC -> AS-1 anti-fraud -> AS-2 number translation -> core, wired by config
+make demo-chained      # iFC chain via ims_mock (ADR-0014)
 ```
 
-> "The two AS instances chain by configuration alone: AS-1's next hop is pointed at AS-2's
-> listen address and AS-2's rule set selects the core. No iFC emulation in the mock, no code
-> shared between the two AS instances, and no new port or environment variable — it is the same
-> `next_hops` catalogue that changed. Two B2BUAs in series mean a call carries **three**
-> `Call-ID`s, one per leg, so each instance writes its own trace and there is no cross-AS
-> correlation by `Call-ID`; the end-to-end `P-Charging-Vector` ICID survives the whole chain
-> but nothing is keyed on it. The demo is a guard: it asserts all of that — including the
-> reject's silence as an absence — and exits non-zero if it does not hold."
+> "The two AS instances never talk directly. An iFC orchestrator in `src/ims_mock/` applies
+> iFC #1 to AS-1, then iFC #2 when AS-1's outbound INVITE is 透传 back through the S-SBC return
+> side. AS-2's allow path reaches a terminating UAS through P-CSCF — not through the S-SBC.
+> Four AS-leg `Call-ID` values on the allow path; ICID is preserved. The demo is a guard."
 
-What the reviewer should see, in the transcript `make demo-chained` prints:
+What the reviewer should see:
 
-1. The topology line `emulated S-CSCF --UDP--> AS-1 anti-fraud --UDP--> AS-2 number
-   translation --UDP--> emulated core` and the wiring line `AS-1 next hop = AS-2 listen
-   address; AS-2 next hop = the rule set`.
-2. Call 1 (`+86216180001` → `+8613800138000`): `AS-1 verdict: allow`, `AS-1 signal: none`,
-   AS-2's matched rule `R-MOB-CM-40`, `core called number: 013800138000`, `final status: 200`,
-   `released: True` — the allowed call really traversed both B2BUAs and was translated at AS-2.
-3. The three per-leg `Call-ID`s and their derivation: `S-CSCF Call-ID` `dc6cbf77…e621`,
-   `AS-2 trunk Call-ID` `dc6cbf77…e621-b2b_1`, `core Call-ID` `dc6cbf77…e621-b2b_1-b2b_1`,
-   with `distinct Call-IDs: 3` and `Call-ID per leg: True (each transition is
-   outbound_call_id of the previous one)`.
-4. The preserved ICID: `S-CSCF ICID`, `AS-2 ICID` and `core ICID` all read
-   `poc-chained-allow`, with `ICID preserved: True`.
-5. Call 2 (`+8613400000001`): `AS-1 verdict: reject`, `final status: 608 (608 Rejected, no
-   second leg)`, `AS-2 calls seen: 0` and `core INVITEs seen: 0` — the reject short-circuits
-   before AS-2 and the core, and the absence is the assertion.
-6. The five `OK` verdict lines: `allowed call completed through two B2BUAs`, `608 reject
-   short-circuited before AS-2`, `Call-ID regenerated on every leg`, `three distinct Call-IDs
-   across the chain` and `ICID preserved across every leg`.
+1. Topology line mentioning `S-CSCF/iFC` and `P-CSCF -> terminating UAS`.
+2. Call 1: `AS-1 verdict: allow`, `AS-2 rule: R-MOB-CM-40`, `terminating called: 013800138000`,
+   `final status: 200`.
+3. Four AS-leg `Call-ID`s with `distinct Call-IDs: 4` and `Call-ID per leg: True`.
+4. `ICID preserved: True`.
+5. Call 2: `608`, `AS-2 calls seen: 0`, `terminating INVITEs: 0`.
+6. Five `OK` verdict lines including `four distinct AS-leg Call-IDs`.
 
 Ports and Call-IDs are ephemeral and vary per run. `make demo-chained` writes nothing, so it is
 as repeatable as `make demo`.
@@ -181,12 +170,122 @@ make console   # terminal 3: console on 127.0.0.1:8081, reading the AS API at :8
 Open `http://127.0.0.1:8081`. The call placed by `make mock` is visible in the live flow.
 Status bar with peer state and version, live message flow with direction colours, Call-ID
 filter, payload viewer, the matched rule highlighted, the statistics dashboard and the SVG
-topology. No third-party front-end libraries, so it works offline.
+topology. No CDN and no build step, so it works offline; the only third-party asset is the
+locally vendored Chart.js bundle permitted by ADR-0011.
 
 `make demo` (section 4) runs its own AS and mock on ephemeral ports, so those calls do not
 appear in a console pointed at the long-running AS — use `make dev` + `make mock` here.
 
-## 7. Closing line
+## 7. Phase 3 — Live-load dashboard (3 minutes)
+
+**Duration.** 3 minutes for the simple variant, 5–6 with the full chained topology.
+**Preparation.** Start the mock S-SBC (whose return side answers the AS's outbound INVITE),
+translation AS (or full chain), load generator and enhanced console — see
+`docs/demo-steps.md` Part 3 for the exact commands.
+
+### 7a. Start the stack (2–3 minutes before the audience arrives)
+
+Four terminals + browser:
+
+```bash
+make mock-return                                     # terminal 0: mock S-SBC return side on :5061
+# terminal 1: translation AS on :5060, API on :8080
+# SBC_PEER_* is only the fallback for a trunk INVITE with no Route; the hop itself
+# comes from the rule catalogue (127.0.0.1:5061 in config/routing_rules.yaml)
+SBC_PEER_ADDRESS=127.0.0.1 SBC_PEER_PORT=5061 \
+  uv run python -m as_app.main
+make gen                                             # terminal 2: load generator on :8765
+uv run python -m console.main --port 8081 \
+  --load-api-url http://127.0.0.1:8765             # terminal 3: enhanced console
+```
+
+Full chain variant (5 terminals): start anti-fraud AS on :5062 as AS-1, then the rest.
+
+Open **http://127.0.0.1:8081**. Wait until both WS indicators show **live** (green).
+
+### 7b. Idle state (30 seconds)
+
+> "This is the enhanced Dashboard view. Everything is wired up but idle — no calls yet.
+> The event WebSocket connects to the AS, the load WebSocket connects to the generator.
+> The charts are driven purely from WebSocket events, not polling."
+
+Point at the four panels: line chart (flat at 0), pie chart (all zero), gauge (0/10),
+topology (4 nodes, thin grey lines).
+
+### 7c. Start the load (1 minute)
+
+Click **Start** in the Load Generator panel. Or:
+
+```bash
+curl -X POST http://127.0.0.1:8765/load/start
+```
+
+> "Watch what happens. The generator is an **external tool** — it doesn't import any AS
+> code. It drives the AS with real SIP INVITEs, just like a real S-CSCF would. The generator
+> sees the AS as a black box; the AS sees the generator as a black box. That boundary is
+> deliberate."
+
+**Point at each panel as it changes:**
+
+- **Line chart** ramps up. "This is a rolling 30-second window. Every tick, every 500 ms,
+  the console pushes the current active-call count. If you look closely, you can see the
+  generator's leaky-bucket fill rate — it takes about one second to reach the plateau."
+- **Gauge** moves. "10 target, so the needle sits at 10/10. The gauge is driven by
+  `pool_status_update` events from the generator, so the UI never drifts from what the
+  generator thinks."
+- **Topology** lines thicken. "Line thickness is proportional to active calls on that
+  hop. Green means all good — calls are completing normally."
+- **Trace panel** fills. "Every call shows up here, keyed by Call-ID. You can filter for
+  a specific one."
+- **Status bar**: `active` counter rises, `calls` total increments.
+
+### 7d. Adjust the load (30 seconds)
+
+> "The generator is interactive — you can change the target concurrency **at runtime**
+> without restarting anything."
+
+Drag the Target slider to 20, then to 50, then back to 10.
+
+> "See how the charts chase the new target? The line chart rises when we increase, drops
+> when we decrease. The generator drains gracefully — in-flight calls complete normally."
+
+### 7e. Fraud scenario — full chain only (1 minute)
+
+> "Now let's turn on some fraud call types. The anti-fraud AS will start rejecting calls
+> with SIP 608."
+
+Toggle on F1–F4 in the Call Types panel.
+
+> "Watch the pie chart — red slices appear for rejected_608. The topology link l1 might
+> shift toward orange. These are **real** 608s from the anti-fraud AS, not simulated. The
+> AS answers from the UAS side (RFC 8688) so the call never leaves the AS towards the
+> S-SBC return side."
+
+### 7f. Vendored Chart.js (30 seconds)
+
+> "One last thing. Open browser DevTools → Network tab. Reload the page. You'll see exactly
+> one script file — `chart.umd.min.js` — served from our own `/static/` endpoint. **No CDN,
+> no npm, no build step.** Chart.js 4.4.8 UMD, MIT licensed, committed directly to the
+> repository (ADR-0011)."
+
+Show the About view for the attribution line.
+
+### 7g. Stop the load (30 seconds)
+
+Click **Stop**.
+
+> "When we stop, the generator stops placing **new** calls, but in-flight calls run to
+> completion. The line chart drains over 5–10 seconds as those calls finish. Active
+> counter goes to zero. Back to idle."
+
+### 7h. What this proves
+
+> "Phase 1 proved the AS works for one call. Phase 2 proved it chains and rejects. Phase 3
+> proves it holds **N concurrent calls under load** — a real external tool driving real SIP,
+> visualised live. And everything you see on this page is driven by WebSocket events from
+> the AS and the generator. No polling. No batch jobs."
+
+## 8. Closing line
 
 > "Everything that is deliberately missing — TLS, Digest, media, real HA, charging — is
 > registered in `docs/production-gaps.md` with what production would require. Nothing is

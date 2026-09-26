@@ -11,25 +11,28 @@ Local processes (`make dev` / `make mock` / `make console`) all use the loopback
    +--------------------------------------------------- docker host --------------------+
    |                                                                                    |
    |  s-sbc-mock                       as                            console            |
-   |  UAC 127.0.0.1:15060/udp  =====>  127.0.0.1:5060/udp  <==== HTTP 127.0.0.1:8081    |
-   |  UAS 127.0.0.1:15061/udp  <====  (originates back to the UAS port)                 |
+   |  forward 127.0.0.1:15060/udp ===> 127.0.0.1:5060/udp  <==== HTTP 127.0.0.1:8081   |
+   |  return 127.0.0.1:15061/udp <====  (outbound INVITE via top Route)                 |
    |                                                                                    |
    +------------------------------------------------------------------------------------+
 ```
 
 The **anti-fraud AS** (P8, ADR-0007) is a second, independently runnable AS on the same host
 with its own ports, its own data file and its own console feed. It receives the trunk on
-`127.0.0.1:5062/udp`; a call it **allows** is relayed to the next hop (`FRAUD_SBC_PEER_*`),
+`127.0.0.1:5062/udp`; a call it **allows** is relayed back through the S-SBC (top `Route`
+on the trunk INVITE; `FRAUD_SBC_PEER_*` is the fallback when no `Route` is present),
 and a call it **rejects** is answered by the AS itself and never leaves it:
 
 ```text
    s-sbc-mock-fraud                        anti-fraud-as
-   UAC 127.0.0.1:15063/udp  ===========>   127.0.0.1:5062/udp  --allow-->  next hop
-   UAS 127.0.0.1:15062/udp  <===========   (a reject is answered here: 608 Rejected)
+   forward 127.0.0.1:15063/udp ==========> 127.0.0.1:5062/udp  --allow-->  next hop
+   return 127.0.0.1:15062/udp <===========  (a reject is answered here: 608 Rejected)
 ```
 
-P8 demonstrates the two AS instances **independently**; the chained
-`SBC -> anti-fraud -> number translation -> core` topology is P9's.
+P8 demonstrates the two AS instances **independently**. The chained topology is **P9b /
+ADR-0014**, not P8's: AS instances never address each other — the S-CSCF iFC orchestrator in
+`src/ims_mock/` triggers AS-1 and AS-2 in turn over the S-SBC trunk, and the terminating
+side is `S-CSCF → P-CSCF → terminating UAS`, never the S-SBC return port.
 
 `docker compose` puts the services on a private trunk network with **fixed** addresses
 (`172.28.0.0/24`, declared in `deploy/docker-compose.yml`), so the address each side
@@ -40,12 +43,12 @@ never reach another container over `127.0.0.1`:
    +--------------------------- compose network as-poc-trunk (172.28.0.0/24) ------------+
    |                                                                                    |
    |  s-sbc-mock                       as                            console            |
-   |  UAC 172.28.0.3:15060/udp =====>  172.28.0.2:5060/udp  <==== HTTP as:8080           |
-   |  UAS 172.28.0.3:15061/udp <====   (originates back to 172.28.0.3:15061)            |
+   |  forward 172.28.0.3:15060/udp ==> 172.28.0.2:5060/udp  <==== HTTP as:8080          |
+   |  return 172.28.0.3:15061/udp <==  (outbound INVITE via top Route)                   |
    |                                                                                    |
    |  s-sbc-mock-fraud                 anti-fraud-as                                    |
-   |  UAC 172.28.0.5:15063/udp =====>  172.28.0.4:5062/udp  <==== HTTP anti-fraud-as:8082|
-   |  UAS 172.28.0.5:15062/udp <====   (relays an allowed call back; a reject stops here)|
+   |  forward 172.28.0.5:15063/udp ==> 172.28.0.4:5062/udp  <==== HTTP anti-fraud-as:8082|
+   |  return 172.28.0.5:15062/udp <==  (relays an allowed call back; a reject stops here)|
    |                                                                                    |
    +------------------------------------------------------------------------------------+
 ```
@@ -62,10 +65,10 @@ stack reads a dedicated rule set whose catalogue points at the mock:
 | `as` | `as` | TCP `8080` (internal API) | `8080` | `INTERNAL_API_ADDRESS` / `INTERNAL_API_PORT` |
 | `anti-fraud-as` | `anti-fraud-as` | UDP `5062` (trunk) | `5062` | `FRAUD_SIP_LISTEN_ADDRESS` / `FRAUD_SIP_LISTEN_PORT` |
 | `anti-fraud-as` | `anti-fraud-as` | TCP `8082` (internal API) | `8082` | `FRAUD_INTERNAL_API_ADDRESS` / `FRAUD_INTERNAL_API_PORT` |
-| `s-sbc-mock` | `s-sbc-mock` | UDP `15060` (UAC, emulated S-CSCF trigger) | `15060` | `--listen-port - 1` in `MockConfig` |
-| `s-sbc-mock` | `s-sbc-mock` | UDP `15061` (UAS, emulated core network) | `15061` | `--listen-port` |
-| `s-sbc-mock-fraud` | `s-sbc-mock-fraud` | UDP `15063` (UAC, emulated S-CSCF trigger) | `15063` | `--trunk-port` |
-| `s-sbc-mock-fraud` | `s-sbc-mock-fraud` | UDP `15062` (UAS, emulated core network) | `15062` | `--listen-port` |
+| `s-sbc-mock` | `s-sbc-mock` | UDP `15060` (forward: inbound INVITE + Route into AS trunk) | `15060` | `--listen-port - 1` in `MockConfig` |
+| `s-sbc-mock` | `s-sbc-mock` | UDP `15061` (return: answers AS outbound INVITE toward IMS) | `15061` | `--listen-port` |
+| `s-sbc-mock-fraud` | `s-sbc-mock-fraud` | UDP `15063` (forward: inbound INVITE + Route) | `15063` | `--trunk-port` |
+| `s-sbc-mock-fraud` | `s-sbc-mock-fraud` | UDP `15062` (return: answers outbound INVITE) | `15062` | `--listen-port` |
 | `console` | `console` | TCP `8081` | `8081` | `--port` |
 
 The two AS instances must not share a listen port: `anti-fraud-as` uses `5062`/`8082`
@@ -175,19 +178,23 @@ the active rule set — no code change (`AGENT.md` section 8).
 
 **The rule set carries the trunk addresses.** The AS originates the second leg to the hop the
 *rule set* selects: the routing engine resolves `action.next_hops` against the `next_hops`
-catalogue in the rules file. `SBC_PEER_ADDRESS`/`SBC_PEER_PORT` describe the peer for the
-startup self-check and for logging; they do not rewrite that catalogue. Two rule sets ship
-with the POC:
+catalogue in the rules file. When the inbound trunk INVITE carries a top `Route`, that
+`Route` target — the S-SBC return side — is the wire destination of the outbound leg; the
+selected catalogue hop still decides the hop name and the failover order.
+`SBC_PEER_ADDRESS`/`SBC_PEER_PORT` are the fallback peer used when the trunk INVITE carries
+no `Route`, and they describe the peer for the startup self-check and for logging; they do
+not rewrite that catalogue. Two rule sets ship with the POC:
 
 | Rule set | Next hops | Used by |
 | --- | --- | --- |
-| `config/routing_rules.yaml` | `127.0.0.1:15061` … `15066` | local runs (`make dev` / `make mock`, the tests, `make demo`) |
+| `config/routing_rules.yaml` | `127.0.0.1:5061` — all six hops | local runs (`make dev` / `make mock` / `make mock-return`, the tests, `make demo`) |
 | `config/routing_rules.compose.yaml` | `172.28.0.3:15061` … `15066` | the compose stack (`RULES_FILE` in `deploy/docker-compose.yml`) |
 
-They are the same 17 rules with the same priorities, hop names, ports and translation
-behaviour; only the catalogue addresses differ. `config/routing_rules.yaml` is the source of
-truth for the rule data and the compose file is its deployment variant — keep them in step
-(the duplication is registered in `docs/production-gaps.md`).
+They are the same rules with the same priorities, hop names and translation behaviour — 18
+declared, 17 enabled (`R-DEFAULT-99` ships disabled) — and only the catalogue addresses and
+ports differ. `config/routing_rules.yaml` is the source of truth for the rule data and the
+compose file is its deployment variant — keep them in step (the duplication is registered in
+`docs/production-gaps.md`).
 
 Compose service configuration (the values are in `deploy/docker-compose.yml`):
 

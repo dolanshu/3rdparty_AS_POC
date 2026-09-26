@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from as_platform.call_controller import (
     LEG_NEXT_HOP,
@@ -52,10 +52,11 @@ from as_platform.call_controller import (
 )
 from as_platform.hop import NextHop
 from as_platform.observability.logging import LogDirection, get_logger, log_event
+from anti_fraud_as.route_header import parse_top_route_target
 from as_platform.observability.metrics import CallDisposition, MetricsRegistry
 from as_platform.observability.tracing import TraceRecorder
 from as_platform.sip_adapter import outbound_call_id
-from sippy.CCEvents import CCEventTry
+from sippy.CCEvents import CCEventFail, CCEventTry
 from sippy.SipCallId import SipCallId
 
 from anti_fraud_as.caller_state import CallerStateStore
@@ -80,9 +81,9 @@ SIP_608_TOKEN = "sip.608"
 #: Separator between feature tags in a ``Feature-Caps`` value (RFC 6809).
 _FEATURE_CAPS_SEPARATOR = re.compile(r"[;,]\s*")
 
-#: Name of the single next hop this AS relays towards. The hop is configured by its
-#: address and port only (``FRAUD_SBC_PEER_*``), so the name is internal: the peer-status
-#: key and the no-answer warning render the address and port, never this label.
+#: Name of the single next hop this AS relays towards. ``FRAUD_SBC_PEER_*`` supplies the
+#: fallback wire destination when the trunk carries no ``Route``; when ``Route`` is present
+#: the top entry wins (RFC 3261), same as the number-translation AS.
 _NEXT_HOP_NAME = "fraud_sbc_peer"
 
 
@@ -183,6 +184,7 @@ class FraudCallController(BaseCallController):
         tracer: TraceRecorder | None = None,
         global_config: dict[str, Any] | None = None,
         next_hop: tuple[str, int] | None = None,
+        app: Any | None = None,
     ) -> None:
         """Create a call controller.
 
@@ -193,12 +195,102 @@ class FraudCallController(BaseCallController):
             tracer: Trace recorder; the process-wide one is used when omitted.
             global_config: sippy global configuration; empty when exercised without a stack.
             next_hop: ``(address, port)`` the allowed INVITE is relayed to.
+            app: FastAPI application for event emission (P12); ``None`` backward-compat.
         """
         super().__init__(
             metrics=metrics, tracer=tracer, global_config=global_config, next_hop=next_hop
         )
         self.screening_data = screening_data
         self.caller_state = caller_state
+        self._emit_app = app
+
+    def recv_request(self, request: Any, transaction: Any) -> Any:
+        """Terminate the trunk INVITE, then emit ``call_started`` with the real Call-ID."""
+        result = super().recv_request(request, transaction)
+        if self._emit_app is not None:
+            self._emit_p12("call_started", {"direction": "trunk_in"})
+        return result
+
+    # ------------------------------------------------------------------
+    # P12 per-call event emission (no as_platform changes — AS-local only)
+    # ------------------------------------------------------------------
+
+    _SOURCE: ClassVar[str] = "as_anti_fraud"
+
+    def _emit_p12(self, event: str, attributes: dict[str, Any]) -> None:
+        """Emit a per-call event via the internal_api WebSocket fanout.
+
+        Uses the uvicorn daemon thread's event loop (``app.state._loop``) for
+        thread-safe scheduling via ``run_coroutine_threadsafe``. No-op when
+        the daemon loop has not started yet.
+        """
+        import asyncio as _asyncio
+        import json as _json
+        import time as _time
+
+        if self._emit_app is None:
+            return
+        loop = getattr(self._emit_app.state, "_loop", None)
+        if loop is None:
+            return
+        event_dict = {
+            "timestamp": _time.time(),
+            "source": self._SOURCE,
+            "event": event,
+            "call_id": getattr(self, "call_id", "unknown"),
+            "attributes": attributes,
+        }
+        try:
+            msg = _json.dumps(event_dict, default=str)
+        except (TypeError, ValueError) as exc:
+            _LOGGER.warning(
+                "P12 emit serialization failed",
+                extra={"event": event, "call_id": event_dict["call_id"], "error": str(exc)},
+            )
+            return
+        try:
+            try:
+                running = _asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is loop:
+                loop.create_task(self._emit_app.state.broadcast(msg))
+            else:
+                _asyncio.run_coroutine_threadsafe(self._emit_app.state.broadcast(msg), loop)
+        except (RuntimeError, AttributeError):
+            pass  # asyncio bridge not ready — drop silently
+
+    # --- P12 apply_call_policy / record_disposition overrides ---------------
+
+    def apply_call_policy(self, event: Any) -> PolicyDecision:
+        """Override to emit call_allowed / call_rejected_608 after decide()."""
+        decision = super().apply_call_policy(event)
+        if decision.action is PolicyAction.RELAY:
+            self._emit_p12(
+                "call_allowed",
+                {"verdict": "allow"},
+            )
+        elif decision.action is PolicyAction.REJECT:
+            self._emit_p12(
+                "call_rejected_608",
+                {
+                    "verdict": "reject",
+                    "error_code": decision.error.code.code if decision.error else "",
+                    "screen_source": decision.attributes.get("screen_source", ""),
+                },
+            )
+        return decision
+
+    def _record_disposition(self, event: Any) -> None:
+        """Override to emit call_ended with reason classification."""
+        super()._record_disposition(event)
+        if isinstance(event, CCEventFail):
+            reason = "fail"
+        elif self.uaA is not None and bool(self.uaA.isConnected()):
+            reason = "bye"
+        else:
+            reason = "cancel"
+        self._emit_p12("call_ended", {"reason": reason})
 
     # --- the application hook -----------------------------------------------
 
@@ -300,9 +392,22 @@ class FraudCallController(BaseCallController):
             action=PolicyAction.RELAY,
             outbound_event=outbound_event,
             next_hops=[hop],
-            relay_log_message="invite relayed towards the next hop",
+            relay_log_message="invite relayed towards the S-SBC (top Route)",
             relay_log_fields={"verdict": ScreeningVerdict.ALLOW.value},
         )
+
+    def _originate_towards(self, hop: NextHop) -> None:
+        """Send the outbound INVITE to the top Route target when the trunk carried one.
+
+        ``FRAUD_SBC_PEER_*`` names the fallback hop when no ``Route`` is present; loose
+        routing uses the trunk ``Route`` set the S-SBC inserted to choose the wire
+        destination on the allow path.
+        """
+        route_target = parse_top_route_target(self._trunk_request)
+        if route_target is not None:
+            address, port = route_target
+            hop = hop.model_copy(update={"address": address, "port": port})
+        super()._originate_towards(hop)
 
     def _reject(
         self,
@@ -457,6 +562,7 @@ class FraudCallMap(BaseCallMap):
         allowed_peers: tuple[str, ...] = (),
         metrics: MetricsRegistry | None = None,
         tracer: TraceRecorder | None = None,
+        app: Any | None = None,
     ) -> None:
         """Create the trunk call map.
 
@@ -467,10 +573,12 @@ class FraudCallMap(BaseCallMap):
             allowed_peers: Source addresses accepted on the trunk.
             metrics: Counter registry; the process-wide one is used when omitted.
             tracer: Trace recorder; the process-wide one is used when omitted.
+            app: FastAPI app for P12 event emission; ``None`` backward-compat.
         """
         super().__init__(global_config, allowed_peers=allowed_peers, metrics=metrics, tracer=tracer)
         self.screening_data = screening_data
         self.caller_state = caller_state
+        self.app = app
 
     def _build_controller(self, next_hop: tuple[str, int] | None) -> FraudCallController:
         """Create a call controller bound to this process configuration.
@@ -488,4 +596,5 @@ class FraudCallMap(BaseCallMap):
             tracer=self.tracer,
             global_config=self.global_config,
             next_hop=next_hop,
+            app=self.app,
         )

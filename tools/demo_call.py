@@ -16,7 +16,7 @@
 """Place one real trunk call and narrate what the AS did with it.
 
 This is the ``make demo`` entry point (``AGENT.md`` section 4.4). It runs a real call over
-loopback UDP between the emulated S-CSCF, the AS and the emulated core network, and prints
+loopback UDP between the mock S-SBC (forward and return), the AS (B2BUA), and prints
 the routing decision, the Request-URI before and after number translation, the message
 flow and the final outcome. Nothing is written to the repository: the demo is a
 repeatable, read-only transcript a reviewer can run while reading the code.
@@ -174,7 +174,7 @@ def narrate(run: CallRun, *, rules_file: Path, as_port: int, scenario: CallScena
     )
 
     print("3rd-party AS POC - trunk call demo")
-    print("topology   : emulated S-CSCF --UDP--> AS (B2BUA) --UDP--> emulated core network")
+    print("topology   : S-SBC forward --UDP--> AS (B2BUA) --UDP--> S-SBC return (top Route)")
     print(f"ports      : as 127.0.0.1:{as_port}, trunk {run.trunk_port}, core {run.core_port}")
     resolved_rules = Path(rules_file).expanduser().resolve()
     try:

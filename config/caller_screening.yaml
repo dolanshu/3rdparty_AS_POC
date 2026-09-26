@@ -10,8 +10,8 @@
 # `reputation.reject_penalty`, which then decays back towards `default_score` with the
 # configured half-life. An entry may carry a `number` (exact) or a `prefix`, never both.
 #
-# Nothing here holds a peer address: the next hop is FRAUD_SBC_PEER_* in the environment, so
-# there is no second copy of an address to drift from.
+# Nothing here holds a peer address: the allow-path wire destination comes from the trunk
+# Route header (RFC 3261); FRAUD_SBC_PEER_* is only the fallback when Route is absent.
 
 version: 1
 name: sample-office-screening

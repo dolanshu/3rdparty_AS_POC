@@ -33,20 +33,27 @@ Endpoints (ADR-0002)::
     GET /api/v1/screening            — block/allow lists and window/reputation parameters
     GET /api/v1/traces               — most recent calls with their trace events
     GET /api/v1/traces/{call_id}     — one call, Call-ID keyed
+    GET /api/v1/traces/{call_id}/messages — verbatim SIP for trunk + outbound legs
     WS  /ws/events                   — live event feed for the console
 """
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Final
 
 from as_platform.internal_api import InternalApiServer as _InternalApiServer
 from as_platform.internal_api import create_internal_api_app as _create_internal_api_app
 from as_platform.internal_api import health_payload as _health_payload
-from as_platform.internal_api import metrics_payload, trace_payload, traces_payload
+from as_platform.internal_api import (
+    messages_payload,
+    metrics_payload,
+    trace_payload,
+    traces_payload,
+)
 from as_platform.observability.metrics import MetricsRegistry
-from as_platform.observability.tracing import TraceRecorder
-from fastapi import FastAPI
+from as_platform.observability.tracing import SipMessageRecorder, TraceRecorder
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from anti_fraud_as.screening_data import ListMatch, ScreeningDataStore
 
@@ -56,6 +63,7 @@ __all__ = [
     "InternalApiServer",
     "create_internal_api_app",
     "health_payload",
+    "messages_payload",
     "metrics_payload",
     "screening_payload",
     "trace_payload",
@@ -75,6 +83,7 @@ INTERNAL_API_ROUTES: dict[str, str] = {
     "GET /api/v1/screening": "block/allow lists and window/reputation parameters (read-only)",
     "GET /api/v1/traces": "most recent calls with their trace events",
     "GET /api/v1/traces/{call_id}": "one call, Call-ID keyed",
+    "GET /api/v1/traces/{call_id}/messages": "verbatim SIP for trunk and outbound legs",
     "WS /ws/events": "live event feed for the console",
 }
 
@@ -222,6 +231,7 @@ def create_internal_api_app(
     screening_data_store: ScreeningDataStore,
     metrics: MetricsRegistry,
     tracer: TraceRecorder,
+    sip_recorder: SipMessageRecorder | None = None,
     started_at: float,
 ) -> FastAPI:
     """Create the FastAPI application for the anti-fraud internal API.
@@ -231,6 +241,7 @@ def create_internal_api_app(
         screening_data_store: Source of the active screening data, reported as readiness.
         metrics: Counter registry exposed on ``/api/v1/metrics``.
         tracer: Trace recorder exposed on ``/api/v1/traces``.
+        sip_recorder: Verbatim SIP recorder for ``/api/v1/traces/{call_id}/messages``.
         started_at: ``time.monotonic()`` value at server creation, for uptime.
 
     Returns:
@@ -242,22 +253,71 @@ def create_internal_api_app(
         metrics=metrics,
         tracer=tracer,
         started_at=started_at,
+        sip_recorder=sip_recorder,
     )
+
+
+class SimplePublisher:
+    """Asyncio-friendly WebSocket fanout for P12 event emission."""
+
+    def __init__(self) -> None:
+        self._connections: set[WebSocket] = set()
+
+    async def connect(self, ws: WebSocket) -> None:
+        """Accept and track one WebSocket connection."""
+        await ws.accept()
+        self._connections.add(ws)
+
+    def disconnect(self, ws: WebSocket) -> None:
+        """Remove one WebSocket from the fanout."""
+        self._connections.discard(ws)
+
+    async def broadcast(self, message: str) -> None:
+        """Send one message to every connected WebSocket."""
+        if not self._connections:
+            return
+        dead: list[WebSocket] = []
+        for ws in list(self._connections):
+            try:
+                await ws.send_text(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
+
+def _mount_p12_fanout(app: FastAPI, publisher: SimplePublisher) -> None:
+    """Attach the P12 event fanout and its WebSocket endpoint to ``app``."""
+    app.state.publisher = publisher
+    app.state.broadcast = publisher.broadcast  # type: ignore[attr-defined]
+
+    @app.websocket("/ws/p12/events")
+    async def p12_events(ws: WebSocket) -> None:
+        """Live P12 event feed (push fanout, not polling)."""
+        await publisher.connect(ws)
+        try:
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            publisher.disconnect(ws)
 
 
 class InternalApiServer(_InternalApiServer):
     """FastAPI/uvicorn internal API server running on a daemon thread.
 
-    The public constructor is this instance's: it takes the screening-data store the
-    anti-fraud AS serves and binds it to the shared server through the provider.
+    Overrides :meth:`start` to build the FastAPI app eagerly, mount the P12
+    broadcast fanout and expose the app on :attr:`app` before uvicorn starts —
+    so the call controller can reference ``app.state.broadcast`` from the sippy
+    thread (P12, REQ-F-042).
 
     Attributes:
         address: Local address the server binds.
         port: Local TCP port the server binds.
         version: Version reported by the health endpoint.
-        screening_data_store: Source of the active screening data, reported as readiness.
+        screening_data_store: Source of the active screening data.
         metrics: Counter registry exposed on ``/api/v1/metrics``.
         tracer: Trace recorder exposed on ``/api/v1/traces``.
+        app: The FastAPI application, available after construction.
     """
 
     def __init__(
@@ -269,6 +329,7 @@ class InternalApiServer(_InternalApiServer):
         screening_data_store: ScreeningDataStore,
         metrics: MetricsRegistry,
         tracer: TraceRecorder,
+        sip_recorder: SipMessageRecorder | None = None,
     ) -> None:
         """Create the internal API server.
 
@@ -279,8 +340,22 @@ class InternalApiServer(_InternalApiServer):
             screening_data_store: Source of the active screening data.
             metrics: Counter registry.
             tracer: Trace recorder.
+            sip_recorder: Verbatim SIP recorder for the messages route.
         """
         self.screening_data_store = screening_data_store
+        # Eagerly build the app + P12 fanout so call_map can access ``.app``
+        # before ``start()`` is called on the daemon thread.
+        import time as _time
+
+        self.app = create_internal_api_app(
+            version=version,
+            screening_data_store=screening_data_store,
+            metrics=metrics,
+            tracer=tracer,
+            sip_recorder=sip_recorder,
+            started_at=_time.monotonic(),
+        )
+        _mount_p12_fanout(self.app, SimplePublisher())
         super().__init__(
             address,
             port,
@@ -288,4 +363,32 @@ class InternalApiServer(_InternalApiServer):
             provider=_ScreeningPayloadProvider(screening_data_store),
             metrics=metrics,
             tracer=tracer,
+            sip_recorder=sip_recorder,
         )
+
+    def start(self) -> None:
+        """Bind the port and serve in the background on a daemon thread."""
+        import uvicorn
+
+        def _daemon_run() -> None:
+            import asyncio as _asyncio
+
+            loop = _asyncio.new_event_loop()
+            _asyncio.set_event_loop(loop)
+            self._loop = loop
+            self.app.state._loop = loop
+
+            config = uvicorn.Config(
+                self.app,
+                host=self.address,
+                port=self.port,
+                log_level="error",
+                access_log=False,
+            )
+            self._server = uvicorn.Server(config)
+            self._server.run()
+
+        self._thread = threading.Thread(
+            target=_daemon_run, name=self.provider.thread_name, daemon=True
+        )
+        self._thread.start()

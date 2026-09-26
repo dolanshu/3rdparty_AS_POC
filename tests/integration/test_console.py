@@ -192,49 +192,77 @@ def _terminate(process: subprocess.Popen) -> None:
 # ACC-M3-001: console page content (fast, in-process)
 # ---------------------------------------------------------------------------
 
-_EXTERNAL_SCRIPT = re.compile(r"<script[^>]*\bsrc\s*=", re.IGNORECASE)
+_SCRIPT_SRC = re.compile(r'<script[^>]*\bsrc\s*=\s*"([^"]+)"', re.IGNORECASE)
 _EXTERNAL_LINK = re.compile(r"<link[^>]*\bhref\s*=", re.IGNORECASE)
 
 
-def test_console_page_has_no_third_party_front_end_libraries() -> None:
-    """ACC-M3-001: no external ``<script src>`` or ``<link href>`` in the page.
+def test_console_page_has_only_vendored_static_scripts() -> None:
+    """ACC-P13-006: all ``<script src>`` point to ``/static/`` (vendored).
 
-    REQ-NF-010: the demo works offline with no third-party front-end libraries.
+    REQ-F-050 / ADR-0011: Chart.js is vendored under /static/. No CDN or
+    external references; no ``<link href>`` to external resources.
     """
-    assert not _EXTERNAL_SCRIPT.search(CONSOLE_PAGE), "external <script src> found"
-    assert not _EXTERNAL_LINK.search(CONSOLE_PAGE), "external <link href> found"
+    import re
+
+    scripts = re.findall(r'<script[^>]*\bsrc\s*=\s*"([^"]+)"', CONSOLE_PAGE, re.IGNORECASE)
+    assert scripts, "expected at least one <script src> (vendored Chart.js)"
+    for src in scripts:
+        assert src.startswith("/static/"), f"script not under /static/: {src}"
+    links = re.findall(r'<link[^>]*\bhref\s*=\s*"([^"]+)"', CONSOLE_PAGE, re.IGNORECASE)
+    assert not links, f"external <link href> found: {links}"
+
+
+def test_console_page_has_chartjs_canvases() -> None:
+    """REQ-F-045/046/047: three chart canvases — line, pie, gauge."""
+    assert "lineChart" in CONSOLE_PAGE, "line chart canvas missing (REQ-F-045)"
+    assert "pieChart" in CONSOLE_PAGE, "pie/doughnut chart canvas missing (REQ-F-046)"
+    assert "gaugeChart" in CONSOLE_PAGE, "capacity gauge canvas missing (REQ-F-047)"
+    assert "chart.umd.min.js" in CONSOLE_PAGE, "Chart.js UMD bundle not referenced"
 
 
 def test_console_page_contains_operations_ui_elements() -> None:
-    """ACC-M3-001: the page has the four AGENT.md 4.4 UI surfaces.
+    """ACC-M3-001 / ACC-P13-001..004: the enhanced console UI surfaces.
 
-    Checks for: dark theme colour, status bar (peer/version/uptime/calls),
-    left navigation (Call Trace / Rules / Configuration / Statistics / About),
-    live message flow with direction colour coding, rule-hit highlighting,
-    statistics bars, and an inline SVG topology.
+    P13 Dashboard layout: dark theme, status bar (instance/ver/uptime/calls/
+    active/target + WS indicators), left nav (Dashboard/Call Trace/Rules/
+    Screening/Statistics/About + load generator controls), centre panel
+    (line chart + gauge), right panel (pie chart + SVG topology with 4 nodes),
+    bottom trace panel. Direction colour coding preserved.
     """
     page = CONSOLE_PAGE
     # Dark operations-console theme.
     assert "#0d1117" in page, "dark background not found"
-    # Status bar: peer state, version, uptime, call counters.
-    for label in ("uptime", "calls", "peers", "ver"):
+    # Status bar: instance, version, uptime, calls, active, target.
+    for label in ("uptime", "calls", "ver", "instance", "active", "target"):
         assert label in page, f"status-bar item '{label}' not found"
-    # Left navigation with the M3 views plus the P8 Screening view.
-    for nav in ("Call Trace", "Rules", "Screening", "Configuration", "Statistics", "About"):
+    # Left navigation: Dashboard is the new default, plus the legacy views.
+    for nav in ("Dashboard", "Call Trace", "Rules", "Screening", "Statistics", "About"):
         assert nav in page, f"navigation item '{nav}' not found"
+    assert 'data-v="dashboard"' in page, "Dashboard navigation entry not found"
     # Live message flow: direction colour coding (inbound/outbound/internal).
     for var in ("--in", "--out", "--int"):
         assert var in page, f"direction colour variable '{var}' not found"
     # Rule-hit highlighting.
     assert "--rule" in page, "rule-hit colour not found"
-    assert "rule_id" in page, "rule_id rendering not found"
-    # Statistics: bar chart containers for dispositions and rule hits.
-    assert "dispC" in page, "statistics bar chart not found"
-    assert "rhC" in page, "rule hits chart not found"
-    # Inline SVG topology.
+    # Chart.js canvases (REQ-F-045/046/047).
+    assert "lineChart" in page, "line chart canvas missing (REQ-F-045)"
+    assert "pieChart" in page, "pie/doughnut chart canvas missing (REQ-F-046)"
+    assert "gaugeChart" in page, "capacity gauge canvas missing (REQ-F-047)"
+    # SVG topology with 4 nodes (REQ-F-048): S-SBC, Anti-fraud, Translation, S-SBC ret.
     assert "<svg" in page, "SVG topology not found"
-    assert "S-SBC" in page, "S-SBC node not found in topology"
-    assert "AS" in page, "AS node not found in topology"
+    assert "S-SBC" in page or "S-CSCF" in page, "S-SBC node not found in topology"
+    assert "Anti-fraud" in page, "Anti-fraud node not found in topology"
+    assert "Translation" in page, "Translation node not found in topology"
+    # Load generator controls (REQ-F-049).
+    assert "tgtSlider" in page, "target concurrency slider not found"
+    assert "rateSlider" in page, "call rate slider not found"
+    assert "btnStart" in page, "Start button not found"
+    assert "btnStop" in page, "Stop button not found"
+    # Live call trace panel.
+    assert "Live Call Trace" in page, "live call trace panel not found"
+    # P14: mode-aware topology (REQ-F-053).
+    assert "topoMode" in page, "topology mode badge missing (REQ-F-053)"
+    assert "topoChained" in page, "chained topology SVG missing (REQ-F-053)"
 
 
 def test_console_page_injects_as_api_url() -> None:
@@ -248,20 +276,22 @@ def test_console_page_injects_as_api_url() -> None:
 def test_console_page_carries_the_screening_and_instance_surfaces() -> None:
     """P8: the second AS surface is on the one shared page (LLD section 9.10).
 
-    The console is one page for both instances, so it needs the Screening view (the block and
-    allow lists plus the screening parameters), the verdict chart in Statistics, and the
-    instance identity in the status bar and the document title — the page must say which AS
-    it is displaying, and read that identity from ``/healthz`` rather than infer it from a
-    port.
+    The console is one page for both instances, so it needs the Screening view,
+    the statistics panel, and the instance identity in the status bar and the
+    document title — the page must say which AS it is displaying, and read that
+    identity from ``/healthz`` rather than infer it from a port.
     """
     page = CONSOLE_PAGE
     # The navigation entry and the Screening view it selects.
     assert 'data-v="screening"' in page, "Screening navigation entry not found"
-    for element in ("vw-screening", "scrC", "blT", "alT"):
-        assert element in page, f"screening view element '{element}' not found"
-    # Verdict chart in the statistics view.
-    assert "vcC" in page, "verdict chart container not found"
-    assert "Verdicts" in page, "verdict chart label not found"
+    assert "vw-screening" in page, "screening view container not found"
+    assert "scrCard" in page, "screening card container not found"
+    # Statistics panel — full metrics tables (disposition, errors, rules, peers).
+    assert "vw-statistics" in page, "statistics view container not found"
+    assert "statsCard" in page, "statistics card container not found"
+    assert "stat-section" in page, "statistics section markup not found"
+    assert "bindInd" in page, "binding constraint indicator not found"
+    assert "asSummary" in page, "AS summary card not found"
     # Instance identity: a status-bar chip and the document title both read /healthz.
     assert 'id="aInst"' in page, "instance status-bar chip not found"
     assert "hd.instance" in page, "the instance identity is not read from /healthz"
@@ -337,11 +367,11 @@ def test_internal_api_serves_health_metrics_rules_and_traces(
 def test_console_runs_as_separate_process_with_no_external_refs(
     rules_file: Path, repo_root: Path, tmp_path: Path
 ) -> None:
-    """ACC-M3-001: the console process serves the page; no third-party libraries.
+    """ACC-M3-001 / ACC-P13-006: console process serves the page; only vendored scripts.
 
     The console is a separate process (ADR-0002) that reaches the AS through its
-    internal API. The served page contains no external script or stylesheet
-    references (REQ-NF-010).
+    internal API. All ``<script src>`` point to ``/static/`` (vendored, ADR-0011);
+    no external ``<link href>`` references (REQ-NF-010).
     """
     api_port = _free_tcp_port()
     console_port = _free_tcp_port()
@@ -361,11 +391,24 @@ def test_console_runs_as_separate_process_with_no_external_refs(
             body = resp.read().decode()
         assert "<svg" in body, "SVG topology not in served page"
         assert "Call Trace" in body, "navigation not in served page"
-        assert not _EXTERNAL_SCRIPT.search(body), "external <script src> in served page"
+        # All <script src> must be vendored under /static/ (ADR-0011, REQ-F-050).
+        scripts = _SCRIPT_SRC.findall(body)
+        assert scripts, "expected at least one <script src> (vendored Chart.js)"
+        for src in scripts:
+            assert src.startswith("/static/"), f"script not under /static/: {src}"
         assert not _EXTERNAL_LINK.search(body), "external <link href> in served page"
         # The AS API URL must be injected, not left as a placeholder.
         assert "__AS_API_URL__" not in body, "AS API URL placeholder not replaced"
         assert as_api_url in body, "AS API URL not injected into served page"
+        # Vendored Chart.js serves correctly.
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{console_port}/static/chart.umd.min.js", timeout=5
+        ) as resp:
+            chart_js = resp.read()
+        assert len(chart_js) > 10000, "vendored Chart.js seems too small"
+        assert b"Chart.js" in chart_js or b"chart.js" in chart_js.lower(), (
+            "vendored Chart.js content not recognised"
+        )
     finally:
         if console_proc is not None:
             _terminate(console_proc)

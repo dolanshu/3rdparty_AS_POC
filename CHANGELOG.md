@@ -8,6 +8,138 @@ version node per milestone; the milestone tag is `v<version>-m<n>`.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-23 — P14 Phase 3 × P9b alignment
+
+### Added
+
+- **`ims_mock.external_runtime`** — multi-process chained demo: orchestrator + S-SBC +
+  P-CSCF + terminating UAS without in-process AS (`python -m ims_mock.external_runtime`).
+- **Load generator topology modes** — `--topology simple|fraud|chained`, `ingress_port` and
+  `topology` on `/load/status`; chained mode sends `Route` to S-SBC return (REQ-F-052).
+- **Console mode-aware Dashboard** — topology badge, chained SVG (5-hop iFC layout), dual
+  fraud/translation WebSocket streams and health when `--fraud-api-url` is set (REQ-F-053/054).
+- **Topology-aware call-type toggles** — T* disabled in fraud-only, F* disabled in simple
+  (REQ-F-055).
+- **ADR-0015** — Phase 3 live-load demo aligned with P9b.
+
+### Changed
+
+- **`scripts/phase3-demo.sh full`** — runs P9b iFC chain via `external_runtime`; both AS
+  instances peer to S-SBC return, not core directly.
+- **`ChainedOrchestrator`** — lazy subscriber sessions for external load generator.
+
+## [1.0.0] - 2026-09-22 — P13 Enhanced Console (Phase 3, v1.0 release)
+
+### Added
+
+- **P13 Enhanced Console** — the M3 console is upgraded to a full Dashboard as the new default
+  view, with a CSS Grid layout (nav | centre | right | bottom trace) and three live Chart.js
+  charts:
+
+  - **Rolling call-count line chart** (REQ-F-045): 30-second window, 500 ms ticks, driven by
+    AS `call_started` / `call_ended` events and generator `pool_status_update` events.
+  - **State distribution pie/doughnut chart** (REQ-F-046): active / completed / rejected_608 /
+    timeout, updated on every per-call AS event.
+  - **Capacity gauge** (REQ-F-047): semi-circular doughnut showing active / target concurrency,
+    driven by `pool_status_update`.
+
+- **Dynamic SVG topology** (REQ-F-048): 4 nodes (S-CSCF → Anti-fraud AS → Translation AS → core)
+  with 3 link lines whose thickness scales with active call count and whose colour indicates the
+  dominant state (green / red / orange).
+
+- **Load generator controls** (REQ-F-049): target-concurrency slider (1–50), call-rate slider
+  (0.1–10), Start / Stop buttons, and 10 call-type toggles (T1–T6, F1–F4). Controls call the
+  generator REST API (`POST /load/start|stop`, `PUT /load/config`) and update from
+  `pool_status_update` events to prevent UI drift.
+
+- **Vendored Chart.js UMD bundle** (REQ-F-050, ADR-0011): Chart.js 4.4.8 UMD (~16 KB, MIT
+  license) committed under `src/console/static/` with its license file. Served via a
+  `StaticFiles` mount at `/static/`. No CDN, no npm, no build step.
+
+- **ADR-0011 — Vendored charting library exception.** Documents the controlled exception to
+  `AGENT.md` §4.4's "no third-party front-end libraries" rule: exactly one charting library may
+  be vendored locally (Chart.js 4.x UMD, MIT, ~16 KB), requires an ADR, and no CDN / npm / build
+  step is allowed.
+
+### Changed
+
+- **`AGENT.md` §4.4** updated from "No third-party front-end libraries" to a controlled
+  exception: exactly one charting library may be vendored locally under the conditions of
+  ADR-0011.
+
+- **Console `create_app()`** now accepts a `load_api_url` parameter (env `LOAD_API_URL`, CLI
+  `--load-api-url`, default `http://127.0.0.1:8765`) and mounts `/static/` for vendored assets.
+
+- **`test_console_page_has_no_third_party_front_end_libraries`** replaced with
+  `test_console_page_has_only_vendored_static_scripts` (all `<script src>` must start with
+  `/static/`), plus a new `test_console_page_has_chartjs_canvases` test.
+
+### Removed
+
+- The old "Configuration" navigation entry (was a placeholder never fully implemented in the
+  single-page console). All configuration is done through the load generator controls and the
+  Rules / Screening views.
+
+## [0.10.0] - 2026-09-22 — P12 Call Load capability (Phase 3)
+
+### Added
+
+- **P12 Call Load backend** — an interactive load generator tool
+  (`tools/call_load_generator.py`) that drives the AS instances through real SIP
+  INVITEs at configurable concurrency (1–50) and call-rate (0.1–10/sec), with
+  a leaky-bucket pool + Little's Law bound-rate interaction (D6, REQ-F-038/039).
+  The generator supports all 10 Phase 1/2 call types (T1–T6, F1–F4) and four
+  duration classes (D1 fast 30%, D2 medium 50%, D3 long 15%, D4 timeout 5%).
+  REST control surface: `POST /load/start|stop`, `PUT /load/config`,
+  `GET /load/status` (REQ-F-040/041/044).
+
+- **Per-call event stream on the internal API WebSocket.** Both AS instances
+  (`as_app` and `anti_fraud_as`) now emit `call_started`, `call_routed`
+  / `call_allowed`, `call_rejected` / `call_rejected_608`, and `call_ended`
+  events — each keyed by Call-ID, enriched with the source AS and the decision
+  result. The AS's `InternalApiServer` subclass eagerly builds a FastAPI app
+  with `SimplePublisher` fanout at `/ws/p12/events`, and its `start()` daemon
+  thread captures its own `asyncio.new_event_loop()` into `app.state._loop`,
+  so `_emit_p12` uses `run_coroutine_threadsafe` from the sippy ED2 thread — no
+  silent event drop (REQ-F-042, REQ-NF-027).
+
+- **Genuine concurrent-load test suite.** P12 adds 7 integration tests that each
+  place ≥10 calls **back-to-back without yielding** — all 10 INVITEs sent before
+  any sippy `CCEvent*` fires, so the tests exercise real concurrent interleaving,
+  not sequential one-call-at-a-time (`REQ-NF-030`). The suite proves:
+
+  * 10 concurrent translation AS calls each complete independently with distinct
+    outbound Call-IDs (no B2BUA leg collision).
+  * 10 concurrent anti-fraud AS calls each complete on the allow path.
+  * 10 concurrent chained-topology calls (anti-fraud → translation → core) each
+    complete, and AS-1 / AS-2 trace Call-IDs are disjoint (no cross-contamination).
+  * 10 concurrent failover calls (primary hop on an unbound port) each
+    independently time out and fail over — the core receives exactly 10 INVITEs,
+    which is what proves per-call P8a timer independence (`REQ-F-043`).
+
+  Acceptance items `ACC-P12-001 … ACC-P12-011` in `docs/acceptance/criteria.md`;
+  evidence in `docs/acceptance/report.md`.
+
+### Changed
+
+- **No changes to `as_platform`** (`REQ-NF-027`). All event emissions are
+  AS-local overrides of `BaseCallController.apply_call_policy()` and
+  `BaseCallController._record_disposition()` — pure additive, no library
+  skeleton moves. The sibling library repository stays at `0.2.0`.
+
+### Fixed
+
+- **`_emit_p12` no longer silently drops events on the sippy thread.** The first
+  implementation used `asyncio.get_event_loop()` from the ED2 callback context,
+  which returned a non-running loop and threw `RuntimeError` — excepted away.
+  Each AS `InternalApiServer.start()` now runs `asyncio.new_event_loop()` on its
+  daemon thread and stores it on `app.state._loop`; the emit helper schedules
+  the fanout broadcast with `run_coroutine_threadsafe(coro, app.state._loop)`.
+- **`CallController.started_at`** (health uptime) was baked as the integer `0.0`;
+  now set with `time.monotonic()`.
+
+## [0.9.0] - 2026-09-21 — P11 platform verification (Phase 2)
+
 ### Added
 
 - **P11 platform verification** — the two pluggable seams now ship two implementations each,

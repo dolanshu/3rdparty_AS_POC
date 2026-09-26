@@ -12,15 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""UAS side of the mock: emulates the core network behind the S-SBC.
+"""Return side of the mock S-SBC: receives the AS-originated INVITE on the trunk.
 
-The AS originates a new INVITE back to the trunk; this side answers it the way a core
-network node would: ``100 Trying``, ``180 Ringing``, ``200 OK``, then ``BYE`` when the
-configured talk time is over. It is built on the same SIP stack as the AS (ADR-0001,
-ADR-0005), so nothing here invents protocol behaviour.
+The third-party AS is the only B2BUA: on the trunk leg it acts as **UAS**, on the outbound
+leg as **UAC** with a fresh ``Call-ID``. The translated INVITE is sent back to the
+operator S-SBC (top ``Route`` on the inbound INVITE), which relays it into the IMS — not
+directly to the core. This mock binds the S-SBC **return** UDP port (15061 in the shipped
+matrix) and answers the INVITE the way the POC needs for a completed call:
+``100 Trying``, ``180 Ringing``, ``200 OK``, then ``BYE``.
 
 ``100 Trying`` is not sent explicitly: sippy emits it when the INVITE is terminated
-(``UasStateIdle``), which is what a core node does as well.
+(``UasStateIdle``).
 """
 
 from __future__ import annotations
@@ -28,7 +30,10 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ims_mock.callbacks import ReturnPassthroughCallback
 
 from sippy.CCEvents import CCEventConnect, CCEventDisconnect, CCEventRing, CCEventTry
 from sippy.SipAddress import SipAddress
@@ -39,17 +44,17 @@ from sippy.SipURL import SipURL
 from sippy.Time.Timeout import Timeout
 from sippy.UA import UA
 
-__all__ = ["CoreUas", "ReceivedInvite"]
+__all__ = ["ReturnUas", "ReceivedInvite"]
 
 _LOGGER = logging.getLogger(__name__)
 
-#: User agent name the core side reports on the trunk.
+#: User agent name the S-SBC return side reports on the trunk.
 SIP_USER_AGENT_NAME = "3rd-party AS POC mock S-SBC"
 
 
 @dataclass(frozen=True)
 class ReceivedInvite:
-    """An INVITE that reached the core side of the mock.
+    """An INVITE that reached the return side of the mock.
 
     Attributes:
         call_id: SIP Call-ID of the call.
@@ -83,7 +88,7 @@ def _header_value(request: Any, name: str) -> str | None:
     return str(request.getHFBody(name)).strip()
 
 
-class CoreUas:
+class ReturnUas:
     """Answers the INVITE originated by the AS.
 
     Attributes:
@@ -104,6 +109,9 @@ class CoreUas:
         ring_seconds: float = 0.2,
         answer_seconds: float = 0.2,
         talk_seconds: float = 0.2,
+        passthrough: bool = False,
+        passthrough_callback: ReturnPassthroughCallback | None = None,
+        leg_label: str = "",
     ) -> None:
         """Create the UAS side of the mock.
 
@@ -113,12 +121,18 @@ class CoreUas:
             ring_seconds: Delay before ``180 Ringing``.
             answer_seconds: Delay before ``200 OK``.
             talk_seconds: Delay between ``200 OK`` and the ``BYE``.
+            passthrough: When ``True``, do not auto-answer; notify ``passthrough_callback``.
+            passthrough_callback: Orchestrator hook for 透传 (P9b, ADR-0014).
+            leg_label: ``as1`` / ``as2`` label passed to the callback.
         """
         self.listen_address = listen_address
         self.listen_port = listen_port
         self.ring_seconds = ring_seconds
         self.answer_seconds = answer_seconds
         self.talk_seconds = talk_seconds
+        self.passthrough = passthrough
+        self.passthrough_callback = passthrough_callback
+        self.leg_label = leg_label
         self.received_invites: list[ReceivedInvite] = []
         self.released_call_ids: list[str] = []
         self.global_config: dict[str, Any] = {}
@@ -156,13 +170,19 @@ class CoreUas:
         if request.getMethod() != "INVITE":
             return (request.genResponse(501, "Not Implemented"), None, None)
         self._record(request)
+        if self.passthrough and self.passthrough_callback is not None:
+            ua = UA(self.global_config, self._passthrough_on_event)
+            ua.local_ua = SIP_USER_AGENT_NAME
+            ua.lContact = self._contact()
+            self.passthrough_callback.on_return_invite(request, ua, self.leg_label)
+            return ua.recvRequest(request, transaction)
         ua = UA(self.global_config, self._on_event)
         ua.local_ua = SIP_USER_AGENT_NAME
         ua.lContact = self._contact()
         return ua.recvRequest(request, transaction)
 
     def _contact(self) -> Any:
-        """Build the Contact header of the core side.
+        """Build the Contact header of the return side.
 
         Returns:
             A ``SipContact`` pointing at the local address and port of this side.
@@ -195,7 +215,7 @@ class CoreUas:
         while not self.received_invites:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError(f"no INVITE reached the core side within {timeout_seconds}s")
+                raise TimeoutError(f"no INVITE reached the return side within {timeout_seconds}s")
             ED2.loop(timeout=min(0.05, remaining))
         return self.received_invites[-1]
 
@@ -220,11 +240,22 @@ class CoreUas:
             )
         )
         _LOGGER.info(
-            "core side received INVITE call_id=%s ruri=%s called=%s",
+            "return side received INVITE call_id=%s ruri=%s called=%s",
             call_id,
             request_uri,
             request.getRURI().username,
         )
+
+    def _passthrough_on_event(self, event: Any, ua: Any) -> None:
+        """Handle events on a return leg waiting for orchestrator-injected responses.
+
+        Args:
+            event: A sippy ``CCEvent``.
+            ua: The sippy UA the event came from.
+        """
+        if isinstance(event, CCEventDisconnect):
+            return
+        _LOGGER.debug("return passthrough ignored %s", type(event).__name__)
 
     def _on_event(self, event: Any, ua: Any) -> None:
         """Answer the call: ring, answer, then release it after the talk time.
@@ -239,7 +270,7 @@ class CoreUas:
         if isinstance(event, CCEventDisconnect):
             # The far end released the call; nothing left to do on this side.
             return
-        _LOGGER.debug("core side ignored %s", type(event).__name__)
+        _LOGGER.debug("return side ignored %s", type(event).__name__)
 
     def _ring(self, ua: Any) -> None:
         """Send ``180 Ringing`` and schedule the answer.

@@ -13,7 +13,7 @@ operator's Service-SBC.
 This is an **IMS/SIP** POC, **not** a 5G capability exposure (CAPIF/NEF) POC.
 
 **Stance: we implement the external AS.** We do not implement the S-SBC, the S-CSCF or
-any core network element. The S-SBC and the core network behind it are replaced by a
+any core network element. The operator boundary (S-SBC forward and return) is replaced by a
 local mock, and every peer address is configuration, so the same code can be pointed at
 a real S-SBC by changing configuration only.
 
@@ -22,15 +22,17 @@ a real S-SBC by changing configuration only.
  +-------------------------------+                          +----------------------+
  |  S-CSCF ---ISC--- S-SBC       | ======================== | 3rd-party AS (B2BUA)|
  +-------------------------------+        UDP / 5060        +----------------------+
-      (mocked: UAC + UAS side)                                  (this repository)
+      (mocked: forward + return)                                (this repository)
 ```
 
 Boundaries that define our position:
 
-- The S-SBC **impersonates an internal AS** towards the S-CSCF (iFC-triggered over ISC)
-  and **impersonates a core network node** towards us. We only ever see the trunk side.
+- S-CSCF and S-SBC are **not B2BUAs**. The **3rd-party AS is the only B2BUA**: it
+  terminates the trunk leg (UAS) and originates a new INVITE back through the S-SBC (UAC)
+  with a new Call-ID. The outbound destination is the top `Route` target from the inbound
+  INVITE (RFC 3261).
 - We are a **B2BUA, and only a B2BUA**: we terminate the incoming INVITE, apply number
-  translation and routing, then originate a new INVITE back to the S-SBC. A
+  translation and routing, then originate a new INVITE back to the S-SBC return side. A
   redirect-server mode (`302 Moved Temporarily`) is explicitly **not** implemented.
 - SDP bodies and SIP headers are **passed through verbatim**; only the Request-URI and
   the number format (E.164 <-> local format) are rewritten.
@@ -148,8 +150,10 @@ rendered images that cannot be reviewed in a diff.
   codes and log messages; the mapping is documented in the LLD and in the interface
   specification. No ad-hoc exceptions with bare strings.
 - **Structured logging.** Every log line carries `timestamp`, `level`, `module`,
-  `call_id`, `direction`, `peer`, and an event message. Call-ID threads the whole call
-  across both legs. The field set is documented in the LLD and never changed silently.
+  `call_id`, `direction`, `peer`, and an event message. Each B2BUA leg carries its own
+  `Call-ID` (the outbound leg appends `-b2b_1`), so a leg is correlated by the value that
+  instance saw on that leg; across two AS instances the `P-Charging-Vector` ICID is the
+  end-to-end key. The field set is documented in the LLD and never changed silently.
 - **File headers.** Every source file starts with the licence header and a short module
   responsibility statement. No anonymous modules.
 - **Domain naming.** Names express the telecom domain (`NumberTranslationService`,
@@ -176,8 +180,15 @@ The console is a product surface, not a debug page:
 - Centre panel: live message flow with direction and colour coding, Call-ID filter,
   payload viewer, and highlighting of the rule that matched.
 - Small inline **SVG topology view** showing S-SBC <-> AS with the current call path.
-- **No third-party front-end libraries**; plain HTML/CSS/JS only, so the demo works
-  offline.
+- **Vendored front-end libraries** (amended by ADR-0011 for P13):
+  - Default rule: no third-party front-end libraries — plain HTML/CSS/JS only.
+  - Exception: exactly **one** charting library may be vendored locally under
+    `src/console/static/` for the P13 Enhanced Console.
+  - Current vendored inventory: `chart.umd.min.js` (Chart.js 4.x, MIT license,
+    ~16 KB minified, UMD bundle) + `chart.umd.min.js.LICENSE.txt`.
+  - Adding a new library requires a new ADR and an update to this list.
+  - No CDN references, no npm, no build step. The bundle is committed to the
+    repository and served from `/static/`.
 
 ### 4.5 Architecture decision records
 
@@ -244,7 +255,9 @@ src/anti_fraud_as/            the second AS: caller screening, 608 Rejected (P8,
   screening_data.py           caller_screening.yaml model, validation, reload
   internal_api.py             routes and bindings over the library's internal-API shell
 src/console/                  FastAPI + plain HTML/CSS/JS (separate process)
-src/s_sbc_mock/               UAC (emulates S-CSCF trigger) + UAS (emulates core)
+src/s_sbc_mock/               UAC (S-SBC forward: trunk INVITE + Route) + UAS (S-SBC return:
+                              answers the AS outbound INVITE) — stands in for the operator
+                              boundary, not for the core
 deploy/                       docker-compose.yml + per-service Dockerfiles
 tools/                        capture, message generation and probe scripts
 tests/unit/ tests/integration/ tests/e2e/
@@ -288,8 +301,9 @@ Pinned; do not upgrade without asking.
 
 - Python **3.10** (the version sippy has been verified against on this machine)
 - **sippy 2.4.2** — RFC 3261 SIP stack and B2BUA framework (BSD-2-Clause)
-- Console: **FastAPI** + uvicorn + plain HTML/CSS/JS, **no Node toolchain, no build
-  step, no third-party front-end libraries**
+- Console: **FastAPI** + uvicorn + plain HTML/CSS/JS, **no Node toolchain, no build step**,
+  and no third-party front-end library **except the one locally vendored bundle permitted by
+  ADR-0011** (`chart.umd.min.js`). No CDN, no npm.
 - `uv` for environment and dependency management (`pyproject.toml` + `uv.lock`)
 - pytest · `ruff` (format + lint) · `mypy`
 - `docker compose` for the local demo stack (both AS instances, two mocks and the console)
@@ -328,7 +342,10 @@ All configuration via environment variables, declared in `.env.example`, parsed 
 Key knobs (finalised in M0, kept in sync with `README.md` and the deployment guide):
 
 - `SIP_LISTEN_ADDRESS`, `SIP_LISTEN_PORT` — where the AS receives the trunk
-- `SBC_PEER_ADDRESS`, `SBC_PEER_PORT` — next hop (mock or real S-SBC)
+- `SBC_PEER_ADDRESS`, `SBC_PEER_PORT` — fallback next hop (mock or real S-SBC return side),
+  used only when the trunk INVITE carries no top `Route`; also the peer reported by the
+  startup self-check. It never rewrites the rule catalogue, which is what selects the hop
+  on a routed call
 - `RULES_FILE` — path to the routing rules file
 - `ALLOWED_PEERS` — source addresses accepted on the trunk
 - `INTERNAL_API_ADDRESS/PORT` — how the console reaches the AS
@@ -342,8 +359,9 @@ describe the process, not the instance:
 - `FRAUD_SIP_LISTEN_ADDRESS`, `FRAUD_SIP_LISTEN_PORT` — where the anti-fraud AS receives the
   trunk (default port `5062`, deliberately not `5060`, so both AS instances can run on one
   host)
-- `FRAUD_SBC_PEER_ADDRESS`, `FRAUD_SBC_PEER_PORT` — next hop an **allowed** INVITE is
-  relayed to
+- `FRAUD_SBC_PEER_ADDRESS`, `FRAUD_SBC_PEER_PORT` — fallback next hop when the trunk
+  INVITE carries no `Route`; on the allow path the wire destination is the top `Route`
+  target (same as the number-translation AS)
 - `FRAUD_ALLOWED_PEERS` — source addresses accepted on the anti-fraud trunk
 - `FRAUD_SCREENING_FILE` — path to the declarative screening data file
 - `FRAUD_INTERNAL_API_ADDRESS`, `FRAUD_INTERNAL_API_PORT` — how the console reaches it
@@ -372,7 +390,7 @@ make fraud               # run the anti-fraud AS locally, on its own ports (P8)
 docker compose up        # as + anti-fraud-as + both mocks + console
 make demo                # one call through the number-translation AS, narrated
 make demo-fraud          # two calls through the anti-fraud AS: one allowed, one 608
-make demo-chained        # two B2BUAs in series (SBC -> anti-fraud -> number translation -> core)
+make demo-chained        # iFC chain via ims_mock (S-CSCF#1 -> S-SBC -> anti-fraud -> S-SBC -> S-CSCF#2 -> S-SBC -> translation -> S-SBC -> S-CSCF -> P-CSCF -> UAS)
 make lint                # ruff format --check + ruff check + mypy
 make test                # unit + integration + e2e
 ```

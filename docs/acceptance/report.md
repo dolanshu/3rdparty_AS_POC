@@ -1206,7 +1206,11 @@ now gitignored, reproduced with `make capture`, and only
   `done`), `docs/README.md`, `docs/architecture/hld.md`, `docs/architecture/lld.md`,
   ADR-0002, `docs/operations/deployment.md`, `docs/operations/runbook.md` and
   `docs/specs/message-samples/README.md`; the `SBC_PEER_PORT` default in `README.md`/`lld.md`
-  was corrected from `15061` to the real code default `5061`.
+  was reconciled with the code default `15061`. *(Corrected 2026-09-24: an earlier draft of
+  this line named `5061` as the code default. `5061` is the next-hop port carried by the rule
+  catalogue `config/routing_rules.yaml`; `SBC_PEER_PORT`'s code default is `15061`
+  (`src/as_app/bootstrap.py`), and the knob is only the fallback used when a trunk INVITE
+  carries no top `Route`.)*
 - **`AGENT.md` §4.7 "release notes template" — RESOLVED in M4.** The maintainer chose to drop
   the wording: the phrase was removed from §4.7, and the per-version `CHANGELOG.md` nodes are
   the release notes. No separate template file is required.
@@ -2456,6 +2460,13 @@ Call-ID) and `03-out-invite-core.txt` (same Call-ID plus `-b2b_1`).
 
 ## Phase 2 — P9 chained topology (2026-09-19)
 
+> **Historical record — the wiring below is superseded by P9b / ADR-0014 (2026-09-23).**
+> `FRAUD_SBC_PEER_* → AS-2` (AS-1 trunk-to-trunk into AS-2) no longer ships: AS instances
+> never talk to each other, and each is triggered by its own iFC from the S-CSCF
+> orchestrator in `src/ims_mock/`. A chained call therefore carries **four** AS-leg
+> `Call-ID`s (`X`, `X-b2b_1`, `Z`, `Z-b2b_1`), not the three recorded below — iFC #2 gives
+> AS-2 its own trunk `Call-ID`. Current evidence is in the **P9b** section of this report.
+
 Branch `phase2` (item **P9** in `docs/phase2-plan.md` §3; under the branch model of §4 P9 is
 worked directly on `phase2`). Acceptance items **ACC-P9-001 … ACC-P9-005** in
 `docs/acceptance/criteria.md`; their requirements are `REQ-F-025 … REQ-F-028` and
@@ -3333,3 +3344,295 @@ P10 the §16 item-1 wording "from a clean checkout" is really "from **two** sibl
 `path` dependency cannot resolve without the sibling, so that is the **accepted cost of
 `REQ-F-032`** (an explicit recorded exception, ADR-0009 decision 8), and this record does not
 present it as more than it is. Nothing is pushed and nothing is tagged (`AGENT.md` §13/§15).
+
+## Phase 3 — P12 Call Load (executed 2026-09-22) — evidence not recorded here
+
+`docs/acceptance/criteria.md` records P12 as executed on 2026-09-22 with `ACC-P12-001 … 011`.
+**No evidence section for it was written into this report** at the time; this placeholder
+exists so the omission is visible rather than silent. To close it, re-run the P12 gates and
+paste the four evidence kinds here:
+
+```bash
+uv run pytest tests/integration/test_concurrent_load.py -q
+uv run python tools/call_load_generator.py --target-concurrency 10 --call-rate 3.0
+```
+
+Do not mark the row accepted on the strength of `criteria.md` alone (`AGENT.md` §4.8).
+
+## Phase 3 — P13 Enhanced Console (2026-09-22)
+
+**Version.** `VERSION` = `1.0.0` (P13 is the v1.0 release milestone — Dashboard + load controls +
+charts + topology + vendored Chart.js completes the Phase 3 deliverable).
+
+**Scope.** P13 enhances the existing M3 console with a Dashboard view containing live charts, a
+dynamic SVG topology, and load generator controls. It consumes — but does not modify — the P12
+event stream and REST API. P13 does **not** touch AS source code (`src/as_app/`,
+`src/anti_fraud_as/`) or `as_platform` (REQ-NF-027 carries forward).
+
+### ACC-P13-001 — rolling live call-count line chart (REQ-F-045)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k "operations_ui or chartjs_canvases"
+tests/integration/test_console.py::test_console_page_has_chartjs_canvases PASSED
+tests/integration/test_console.py::test_console_page_contains_operations_ui_elements PASSED
+```
+
+The page contains `lineChart` canvas; `initCharts()` initialises a Chart.js line chart with 60
+data points (30 s at 500 ms ticks); a `setInterval` at 500 ms pushes `activeCalls` into the
+rolling window. Data is sourced from AS `call_started` / `call_ended` events and
+`pool_status_update` events.
+
+### ACC-P13-002 — call-state distribution pie/doughnut chart (REQ-F-046)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k chartjs_canvases
+tests/integration/test_console.py::test_console_page_has_chartjs_canvases PASSED
+```
+
+The `pieChart` canvas is present; the JS tracks call states (active / completed / rejected_608 /
+timeout) and updates the pie on every per-call event.
+
+### ACC-P13-003 — capacity gauge (REQ-F-047)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k chartjs_canvases
+tests/integration/test_console.py::test_console_page_has_chartjs_canvases PASSED
+```
+
+The `gaugeChart` canvas renders a semi-circular doughnut gauge showing `active / target`
+concurrency, driven by `pool_status_update` events from the generator WebSocket.
+
+### ACC-P13-004 — dynamic SVG topology (REQ-F-048)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k "operations_ui or static_scripts"
+tests/integration/test_console.py::test_console_page_has_only_vendored_static_scripts PASSED
+tests/integration/test_console.py::test_console_page_contains_operations_ui_elements PASSED
+```
+
+The inline SVG topology has 4 nodes: **S-SBC**, **Anti-fraud**, **Translation**, **S-SBC ret**,
+connected by 3 link lines (`l1`, `l2`, `l3`). At v1.0.0 this was **one fixed diagram** — the
+four nodes were always drawn regardless of which AS was actually running, so it is a display
+simplification, not the wire path. P14 (ACC-P14-003) made it mode-aware: `simple` dims the
+Anti-fraud node, `fraud` dims Translation, `chained` switches to the iFC layout. The shipped
+chain (ADR-0014) never puts two AS nodes in a direct SIP hop. Link `stroke-width` scales with active call count;
+link `stroke` colour changes with dominant state (green = active/completed, red = 608 rejections,
+orange = timeouts).
+
+### ACC-P13-005 — load generator controls (REQ-F-049)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k operations_ui
+tests/integration/test_console.py::test_console_page_contains_operations_ui_elements PASSED
+```
+
+Left nav includes load generator controls:
+- Target concurrency slider (`tgtSlider`, min=1, max=50)
+- Call rate slider (`rateSlider`, min=0.1, max=10, step=0.1)
+- Start / Stop buttons (`btnStart`, `btnStop`)
+- Call-type toggles (10 types: T1–T6, F1–F4) built by `buildToggles()`
+
+Controls call `ldStart()`, `ldStop()`, `ldConfig()` which POST/PUT to the generator REST API. UI
+state is updated from `pool_status_update` events to prevent drift.
+
+### ACC-P13-006 — vendored Chart.js UMD bundle (REQ-F-050)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k "vendored or separate_process"
+tests/integration/test_console.py::test_console_page_has_only_vendored_static_scripts PASSED
+tests/integration/test_console.py::test_console_runs_as_separate_process_with_no_external_refs PASSED
+```
+
+All `<script src>` on the page point to `/static/` (only `chart.umd.min.js`). The vendored
+bundle at `src/console/static/chart.umd.min.js` (~16 KB) and its MIT license
+(`chart.umd.min.js.LICENSE.txt`) are committed to the repository. The bundle serves correctly
+from the running console process (>10 KB, Chart.js content recognised). No CDN, no npm, no build
+step — consistent with ADR-0011 and `AGENT.md` §4.4 amendment.
+
+### ACC-P13-007 — no AS or as_platform modifications (REQ-NF-027)
+
+```text
+$ git diff --name-only main..HEAD -- src/console/ | sort
+src/console/main.py
+src/console/static/chart.umd.min.js
+src/console/static/chart.umd.min.js.LICENSE.txt
+
+$ cat ../as_platform/VERSION
+0.2.0
+```
+
+P13 changes are confined to `src/console/`, `tests/integration/test_console.py`, docs, and
+`AGENT.md`. `../as_platform` version stays `0.2.0`. No AS source code is modified.
+
+### ACC-P13-008 — legacy views preserved (REQ-F-012)
+
+```text
+$ uv run pytest tests/integration/test_console.py -v -k "screening or operations_ui"
+tests/integration/test_console.py::test_console_page_contains_operations_ui_elements PASSED
+tests/integration/test_console.py::test_console_page_carries_the_screening_and_instance_surfaces PASSED
+```
+
+All 6 navigation entries present: Dashboard (new default), Call Trace, Rules, Screening,
+Statistics, About. Legacy view containers (`vw-call-trace`, `vw-rules`, `vw-screening`,
+`vw-statistics`, `vw-about`) all exist on the page. Dashboard is the new default view but all
+M3/P8 functionality remains accessible.
+
+### ACC-P13-009 — full suite passes + ruff clean (REQ-NF-004)
+
+```text
+$ uv run pytest -q
+307 passed, 2 warnings in 55.16s
+
+$ uv run ruff check .
+All checks passed!
+```
+
+307 passed (was 306 before P13 — +1 from the vendored-static test replacing the old
+no-external-scripts test, net +0 due to test count consolidation, but +1 overall when including
+the new chartjs canvases test). Ruff lint clean.
+
+### Phase 3 gate summary
+
+| # | Item | Status |
+|---|------|--------|
+| 1 | Requirements (REQ-F-045…050) accepted | **Passed** — 6/6 REQs marked `accepted` |
+| 2 | ADR-0011 (vendored Chart.js) + AGENT.md §4.4 amendment | **Passed** — ADR written; rule updated to controlled-exception form |
+| 3 | Dashboard with 3 Chart.js charts (line, pie, gauge) | **Passed** — all 3 canvases present; initialised by `initCharts()` |
+| 4 | Dynamic SVG topology (4 nodes, 3 links, thickness + colour) | **Passed** — inline SVG with S-SBC / Anti-fraud / Translation / S-SBC ret (the fixed v1.0.0 diagram, drawn regardless of the running AS) |
+| 5 | Load generator controls (sliders, toggles, buttons) | **Passed** — target slider 1–50, rate slider 0.1–10, Start/Stop, 10 call-type toggles |
+| 6 | Vendored Chart.js (no CDN/npm/build) | **Passed** — UMD bundle + MIT license under `src/console/static/` |
+| 7 | Legacy views preserved (Call Trace, Rules, Screening, Statistics, About) | **Passed** — all 5 legacy views accessible via left nav |
+| 8 | Two WebSocket connections (AS events + generator events) | **Passed** — `connEv()` and `connLd()` with reconnect logic |
+| 9 | Version bumped to 1.0.0 | **Passed** — `VERSION`, `pyproject.toml`, and package `__init__.py` bumped |
+| 10 | Full test suite passes | **Passed** — 307 passed, 0 failed, 0 errors |
+| 11 | Ruff lint clean | **Passed** — `All checks passed!` |
+| 12 | No secrets or real traffic captures committed | **Passed** — private-key scan clean, no `.env`, `git status` shows only expected P13 files |
+
+**Honest declaration.** P13 is the v1.0 release. The Dashboard is the new default view and the
+primary user-facing surface for Phase 3 demo scenarios. Chart.js is vendored (ADR-0011 controlled
+exception) — there is **no CDN, no npm, no build step**, keeping the "one Python file + static
+assets" deployment model of the original M3 console. No AS source code is modified; the enhanced
+console is purely a consumer of the P12 event stream and REST API. Nothing is pushed and nothing
+is tagged (`AGENT.md` §13/§15).
+
+---
+
+## Phase 3 — P15 Call Trace message flow (executed 2026-09-24)
+
+Feature package: `docs/features/call-trace-message-flow/` · ADR-0016 · REQ-F-056/057 · REQ-NF-031.
+
+### Gate summary
+
+| ACC ID | Status |
+| --- | --- |
+| ACC-P15-001 | **accepted** |
+| ACC-P15-002 | **accepted** |
+
+### ACC-P15-001 — SVG sequence + event modal (Phase A)
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest \
+    tests/integration/test_call_trace_sequence.py \
+    tests/integration/test_console_call_trace_flow.py \
+    tests/e2e/test_console_dashboard.py::TestCallTraceSequence \
+    -v -k "not sip_payload"
+# 4 passed (sequence markers + 2 e2e without SIP test)
+```
+
+Observed: `#traceFlowSvg` renders ≥ 3 `.seq-step` for a completed translation call; arrow click opens `#traceDetailModal` with structured event fields from `GET /api/v1/traces/{call_id}`.
+
+### ACC-P15-002 — verbatim SIP in modal (Phase B)
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest \
+    tests/integration/test_call_trace_messages_api.py \
+    tests/e2e/test_console_dashboard.py::TestCallTraceSequence::test_call_trace_modal_shows_sip_payload \
+    -v
+# 3 passed
+```
+
+Observed: `GET /api/v1/traces/{call_id}/messages` returns `messages[].text` starting with `INVITE`; production AS uses `DualSipLogger` (bounded `SipMessageRecorder`, max 5000 messages). E2E modal `#traceDetailBody pre.trace-sip` contains a `Call-ID:` header line.
+
+**Honest declaration.** P15 closes the `#vw-call-trace` placeholder gap (`docs/phase3-gap-audit.md` §7). Phase B required `as_platform` internal API extension (messages route) — scoped to ADR-0016, not the P13 REQ-NF-027 console-only constraint. SIP text is demo/loopback capture only; not published as acceptance artifacts per `SECURITY.md`.
+
+---
+
+## Phase 3 — P14 Phase 3 × P9b alignment (executed 2026-09-23) — evidence not recorded here
+
+`docs/acceptance/criteria.md` records P14 as executed on 2026-09-23 with `ACC-P14-001 … 008`
+(generator `topology=chained`, multi-process `ims_mock` runtime, mode-aware console). **No
+evidence section for it was written into this report.** To close it, re-run
+`scripts/phase3-demo.sh full` and record the generator, console and `make demo-chained`
+output here, then the four evidence kinds per `AGENT.md` §4.8.
+
+---
+
+## P9b — chained topology rework (executed 2026-09-23)
+
+Reworked P9 from trunk-to-trunk (`FRAUD_SBC_PEER_* → AS-2`) to iFC-orchestrated chain per
+ADR-0014 and `docs/chained-topology-plan.md`. New module `src/ims_mock/`; AS binaries unchanged.
+
+### Gate summary
+
+| ACC ID | Status |
+| --- | --- |
+| ACC-P9b-001 | **accepted** |
+| ACC-P9b-002 | **accepted** |
+| ACC-P9b-003 | **accepted** |
+| ACC-P9b-004 | **accepted** |
+| ACC-P9b-005 | **accepted** |
+| ACC-P9b-006 | **accepted** (standalone demos verified before merge) |
+| ACC-P9b-007 | **accepted** |
+| ACC-P9b-008 | **accepted** |
+
+### ACC-P9b-001 / ACC-P9b-002 — integration
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest tests/integration/test_chained_topology.py -q
+3 passed in 2.10s
+```
+
+### ACC-P9b-003 — probe
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run python tools/chained_as_probe.py; echo $?
+distinct Call-IDs : 4
+Call-ID per leg   : True
+ICID preserved    : True
+608 reject short-circuited before AS-2     : OK
+0
+```
+
+### ACC-P9b-004 / ACC-P9b-007 — e2e
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest tests/e2e/test_chained_call_flows.py -q
+2 passed in 1.8s
+```
+
+### ACC-P9b-005 — demo
+
+```text
+$ NO_PROXY=127.0.0.1,localhost make demo-chained; echo $?
+four distinct AS-leg Call-IDs                : OK
+608 reject short-circuited before AS-2       : OK
+0
+```
+
+### ACC-P9b-008 — concurrent
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest tests/integration/test_concurrent_load.py -q -k chained
+2 passed in 5.1s
+```
+
+### ACC-P9b-006 — standalone regression
+
+`make demo` and `make demo-fraud` exit `0` (verified on the integration branch before merge).
+
+### Unit — orchestrator FSM
+
+```text
+$ NO_PROXY=127.0.0.1,localhost uv run pytest tests/unit/test_ims_orchestrator.py -q
+3 passed
+```

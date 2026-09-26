@@ -1,9 +1,10 @@
 # Routing rules for the third-party AS — compose-network variant of
 # `config/routing_rules.yaml`.
 #
-# This file is the deployment variant of the canonical sample rule set: the same 17 rules,
-# the same priorities, the same hop names, ports and translation behaviour. Only the
-# next-hop ADDRESSES differ. The canonical file points every hop at `127.0.0.1` so that a
+# This file is the deployment variant of the canonical sample rule set: the same rules
+# (18 declared, 17 enabled — `R-DEFAULT-99` ships disabled), the same priorities, the same
+# hop names and the same translation behaviour. Only the next-hop ADDRESSES and PORTS
+# differ. The canonical file points every hop at `127.0.0.1:5061` so that a
 # local run (`make demo`, `make mock`, the tests) works without a network; this variant
 # points them at the mock S-SBC's fixed address on the compose trunk network
 # (`172.28.0.3`, see `deploy/docker-compose.yml`), because every container has its own

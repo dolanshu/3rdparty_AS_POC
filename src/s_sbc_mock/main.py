@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Mock S-SBC process: UAC (S-CSCF trigger) and UAS (core network) in one process.
+"""Mock S-SBC process: forward side (inbound INVITE + Route) and return side in one process.
 
 Ports are configurable so that tests, CI and several local runs never collide
 (``AGENT.md`` section 11). Both sides are driven by the same blocking sippy event loop as
@@ -38,7 +38,7 @@ from sippy.SipTransactionManager import SipTransactionManager
 from sippy.Time.Timeout import Timeout
 
 from s_sbc_mock.uac import CallScenario, TrunkUac
-from s_sbc_mock.uas import CoreUas
+from s_sbc_mock.uas import ReturnUas
 
 __all__ = ["MockConfig", "SMockApplication", "SIP_USER_AGENT_NAME", "main"]
 
@@ -66,10 +66,10 @@ class MockConfig:
     """Runtime parameters of the mock S-SBC.
 
     Attributes:
-        listen_address: Address the UAS side binds.
-        listen_port: UDP port the UAS side binds.
-        as_address: Address of the AS.
-        as_port: UDP port of the AS.
+        listen_address: Address the S-SBC return side binds.
+        listen_port: UDP port the S-SBC return side binds (default 15061).
+        as_address: Address of the third-party AS trunk.
+        as_port: UDP port of the AS trunk (default 5060).
         scenarios: Calls the mock places on startup, one after the other.
         repeat: Place the scenarios again after the last one finished.
     """
@@ -104,8 +104,8 @@ class SMockApplication:
 
     Attributes:
         config: Runtime parameters.
-        uac: UAC side, emulating the S-CSCF trigger.
-        uas: UAS side, emulating the core network.
+        uac: Trunk-forward side, emulating the operator S-SBC towards the AS.
+        uas: Return side, emulating the S-SBC interface the AS sends the translated INVITE to.
         shutdown: Shutdown state written by the signal handlers.
     """
 
@@ -134,8 +134,10 @@ class SMockApplication:
             config.as_port,
             local_address=config.listen_address,
             local_port=uac_port,
+            route_return_address=config.listen_address,
+            route_return_port=config.listen_port,
         )
-        self.uas = CoreUas(
+        self.uas = ReturnUas(
             config.listen_address,
             config.listen_port,
             talk_seconds=config.scenarios[0].talk_seconds if config.scenarios else 0.2,
@@ -153,8 +155,8 @@ class SMockApplication:
         # to it: in the tests the AS and the mock share one interpreter, and each side
         # pins its own identity around the messages it generates instead.
         logger = self._sip_logger if self._sip_logger is not None else SipLogger("s-sbc-mock")
-        # The core side answers INVITEs, so it needs a request callback; the trunk side
-        # only receives responses and the BYE that belongs to a call it already knows
+        # The S-SBC return side answers INVITEs, so it needs a request callback; the trunk
+        # forward side only receives responses and the BYE that belongs to a call it already
         # about, which sippy routes to the registered consumer of that Call-ID.
         uas_config = self.uas.build_global_config(logger)
         uas_manager = SipTransactionManager(uas_config, self.uas.recv_request)

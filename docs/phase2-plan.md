@@ -548,12 +548,18 @@ staffing deviation or the fact that the gates it did not skip were actually run.
 configurable peers and ports and both green on `phase2`, so P9 needs **no iFC emulation**:
 pointing AS-1's next hop at AS-2's listen address is a `next_hops`-catalogue change (§3 P9).
 Two properties P9 inherits: the anti-fraud AS relays to a **single** next hop
-(`FRAUD_SBC_PEER_*`), and **two B2BUAs in series produce two Call-IDs** — the anti-fraud leg is
+(`FRAUD_SBC_PEER_*`), and **two B2BUAs in series produce one `Call-ID` per leg** — *P9 measured
+three under its trunk-to-trunk wiring; P9b / ADR-0014 measures four AS-leg values
+(`X`, `X-b2b_1`, `Z`, `Z-b2b_1`) — see `docs/chained-topology-plan.md` §3.2* — the anti-fraud leg is
 screened on the first Call-ID and the number-translation leg originates its own, so cross-AS
 correlation is still unsolved and remains P9's known issue (§3 P9). The reject path adds no
 retransmission population, so P9.5 inherits the P8a timer population unchanged.
 
 ### P9 — Chained demo
+
+> **P9b rework (2026-09-23).** The trunk-to-trunk wiring described below is **superseded** by
+> the iFC-orchestrated mock in `docs/chained-topology-plan.md` and ADR-0014. Implementation
+> follows that document.
 
 - **Goal.** `SBC → AS-1 (anti-fraud) → AS-2 (number translation) → core`, running and
   demonstrated.
@@ -561,7 +567,8 @@ retransmission population, so P9.5 inherits the P8a timer population unchanged.
   at AS-2's listen address is enough, which is a `next_hops` catalogue change.
 - **Deliberate output.** The friction this surfaces — what in the skeleton turned out to be
   number-translation specific — is the primary input to P10 and must be written down here.
-- **Known issue.** Two B2BUAs in series produce **two different Call-IDs**; cross-AS
+- **Known issue.** Two B2BUAs in series produce **one `Call-ID` per leg** *(P9 measured three;
+  P9b / ADR-0014 measures four AS-leg values)*; cross-AS
   correlation is a real problem, not a cosmetic one. *(This was false of the code when P9
   started — both AS instances reused the inbound `Call-ID` on their outbound leg, which the
   maintainer ruled a **Phase 1 defect**. The number-translation instance was fixed on `main`

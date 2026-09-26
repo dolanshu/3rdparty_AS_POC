@@ -26,6 +26,7 @@ the sockets and the test drives the loop explicitly through
 
 from __future__ import annotations
 
+import os
 import re
 import socket
 import time
@@ -35,6 +36,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+# Corporate http_proxy breaks loopback health checks and internal API polls (WSL/CI).
+_NO_PROXY = "127.0.0.1,localhost"
+os.environ.setdefault("NO_PROXY", _NO_PROXY)
+os.environ.setdefault("no_proxy", _NO_PROXY)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RULES_FILE = REPO_ROOT / "config" / "routing_rules.yaml"
@@ -143,34 +149,76 @@ class TrunkPair:
 
 
 @dataclass
-class ChainedPair(TrunkPair):
-    """Two AS instances in series plus the mock, wired on loopback UDP.
-
-    The chain of ``docs/architecture/lld.md`` section 10 is
-    ``emulated S-CSCF -> AS-1 (anti-fraud) -> AS-2 (number translation) -> emulated core``.
-    ``as_stack`` (inherited) is **AS-1**, the trunk entry and the anti-fraud instance;
-    :attr:`second_as` is **AS-2**, the number-translation instance. ``place_call``,
-    ``outcome_for`` and ``run_until`` are inherited unchanged: the mock is still the only
-    trunk peer, so the chain is transparent to them.
+class ChainedPair:
+    """Two AS instances in series with iFC orchestrator mock (ADR-0014).
 
     Attributes:
-        second_as: AS-2's signalling stack, already bound.
+        stack: The full :class:`~ims_mock.chained_stack.ChainedImsStack`.
     """
 
-    second_as: Any = None
+    stack: Any
+    _stopped: bool = field(default=False, repr=False)
+
+    @property
+    def as_stack(self) -> Any:
+        """AS-1 (anti-fraud)."""
+        return self.stack.as1
+
+    @property
+    def second_as(self) -> Any:
+        """AS-2 (number translation)."""
+        return self.stack.as2
+
+    @property
+    def as_messages(self) -> Any:
+        """SIP recorder for AS-1."""
+        return self.stack.as1_messages
+
+    @property
+    def as2_messages(self) -> Any:
+        """SIP recorder for AS-2."""
+        return self.stack.as2_messages
+
+    @property
+    def mock(self) -> Any:
+        """Backward-compatible accessor: namespace with ``uac`` and ``uas``."""
+        return _ChainedMockView(self.stack)
+
+    def place_call(self, scenario: Any) -> str:
+        """Place one subscriber call through the chain."""
+        return self.stack.place_call(scenario)
+
+    def outcome_for(self, call_id: str) -> Any:
+        """Return the subscriber-side outcome."""
+        return self.stack.outcome_for(call_id)
+
+    def run_until(
+        self, predicate: Callable[[], bool], timeout_seconds: float = CALL_TIMEOUT_SECONDS
+    ) -> bool:
+        """Drive the event loop until a condition holds."""
+        return self.stack.run_until(predicate, timeout_seconds)
 
     def stop(self) -> None:
-        """Release every port the pair holds, both AS instances included.
-
-        AS-2 shares the process-wide ``ED2`` loop with AS-1 and the mock, so a chain that
-        stopped only the inherited pair would leave AS-2's transactions and loop-owned
-        timers armed for later tests.
-        """
+        """Release every port the chain holds."""
         if self._stopped:
             return
-        if self.second_as is not None:
-            self.second_as.stop()
-        super().stop()
+        self.stack.stop()
+        self._stopped = True
+
+
+@dataclass
+class _ChainedMockView:
+    """Shim so tests can use ``pair.mock.uas`` for the terminating side."""
+
+    stack: Any
+
+    @property
+    def uac(self) -> Any:
+        return self.stack.mock_uac
+
+    @property
+    def uas(self) -> Any:
+        return self.stack.terminating
 
 
 def _free_udp_port() -> int:
@@ -244,6 +292,7 @@ def fraud_pair_factory(screening_file: Path):
         caller_state: Any = None,
         allowed_peers: list[str] | None = None,
         peer_port: int | None = None,
+        route_return_port: int | None = None,
     ) -> TrunkPair:
         """Bind one anti-fraud AS and one mock on ephemeral ports.
 
@@ -252,8 +301,11 @@ def fraud_pair_factory(screening_file: Path):
             caller_state: Process-level state store to inject; the stack builds its own
                 from the screening data when omitted.
             allowed_peers: Trunk peers accepted; defaults to loopback.
-            peer_port: Next hop the AS relays an allowed INVITE to. Defaults to the mock's
-                core port; pass an unbound port to exercise a peer that never answers.
+            peer_port: Fallback next hop when the trunk carries no ``Route``. Defaults to the
+                mock's return port.
+            route_return_port: Port in the mock INVITE's ``Route`` header; defaults to the
+                mock's return port. Pass an unbound port to exercise a peer that never
+                answers on the allow path.
 
         Returns:
             A bound :class:`TrunkPair`.
@@ -298,6 +350,8 @@ def fraud_pair_factory(screening_file: Path):
             uac_local_port=trunk_port,
         )
         mock.start()
+        if route_return_port is not None:
+            mock.uac.route_return_port = route_return_port
         pair = TrunkPair(stack, mock, as_port, core_port, trunk_port, messages)
         built.append(pair)
         return pair
@@ -324,15 +378,7 @@ def fraud_trunk_pair(fraud_pair_factory) -> TrunkPair:
 
 @pytest.fixture
 def chained_pair_factory(screening_file: Path, rules_file: Path, tmp_path: Path):
-    """Return a factory that binds both AS instances and the mock on loopback UDP.
-
-    The chain of ``docs/architecture/lld.md`` section 10 is wired **by configuration only**
-    (REQ-F-026): AS-1's configured next hop (``fraud_sbc_peer_*``) is set to AS-2's listen
-    address, and AS-2 selects its next hop from the routing catalogue. Both hops therefore
-    have to be built here — the peer knob on one side and the rewritten catalogue on the
-    other — and the two stacks each get their own ``MetricsRegistry`` / ``TraceRecorder``,
-    because both default to process-wide singletons and a shared recorder would mix the two
-    instances' traces (ADR-0008).
+    """Return a factory that binds both AS instances with the iFC orchestrator mock.
 
     Args:
         screening_file: Screening data AS-1 loads, editable by the test.
@@ -342,13 +388,12 @@ def chained_pair_factory(screening_file: Path, rules_file: Path, tmp_path: Path)
     Yields:
         A callable that binds one chain; every chain it built is stopped afterwards.
     """
-    from anti_fraud_as.bootstrap import FraudAsSettings
-    from anti_fraud_as.main import FraudAsStack
-    from as_app.bootstrap import AsSettings
-    from as_app.main import AsStack
-    from as_app.observability.metrics import MetricsRegistry
-    from as_app.observability.tracing import SipMessageRecorder, TraceRecorder
-    from s_sbc_mock.main import MockConfig, SMockApplication
+    import sys
+
+    tools_dir = REPO_ROOT / "tools"
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+    from chained_helpers import build_chained_stack
 
     built: list[ChainedPair] = []
 
@@ -357,7 +402,7 @@ def chained_pair_factory(screening_file: Path, rules_file: Path, tmp_path: Path)
         screening_path: Path | None = None,
         allowed_peers: list[str] | None = None,
     ) -> ChainedPair:
-        """Bind AS-1, AS-2 and one mock on ephemeral ports.
+        """Bind AS-1, AS-2 and the orchestrated chain on ephemeral ports.
 
         Args:
             screening_path: Screening data AS-1 loads; defaults to the fixture's copy.
@@ -366,60 +411,13 @@ def chained_pair_factory(screening_file: Path, rules_file: Path, tmp_path: Path)
         Returns:
             A bound :class:`ChainedPair`.
         """
-        as1_port, as2_port, core_port, trunk_port = (
-            _free_udp_port(),
-            _free_udp_port(),
-            _free_udp_port(),
-            _free_udp_port(),
+        stack = build_chained_stack(
+            screening_file=screening_path or screening_file,
+            rules_file=rules_file,
+            rules_dir=tmp_path,
+            allowed_peers=allowed_peers,
         )
-        # AS-2's next hop is a catalogue entry, so the shipped demo ports have to be
-        # rewritten onto the mock's core port; AS-1's next hop is the peer knob below.
-        second_rules = _rewrite_next_hops(rules_file, tmp_path, core_port)
-        as1_messages = SipMessageRecorder()
-        as1 = FraudAsStack(
-            FraudAsSettings(
-                _env_file=None,
-                fraud_sip_listen_address=TRUNK_ADDRESS,
-                fraud_sip_listen_port=as1_port,
-                fraud_sbc_peer_address=TRUNK_ADDRESS,
-                fraud_sbc_peer_port=as2_port,
-                fraud_allowed_peers=list(allowed_peers or [TRUNK_ADDRESS]),
-                fraud_screening_file=screening_path or screening_file,
-                log_payloads=False,
-            ),
-            metrics=MetricsRegistry(),
-            tracer=TraceRecorder(),
-            sip_logger=as1_messages,
-        )
-        as2 = AsStack(
-            AsSettings(
-                _env_file=None,
-                sip_listen_address=TRUNK_ADDRESS,
-                sip_listen_port=as2_port,
-                sbc_peer_address=TRUNK_ADDRESS,
-                sbc_peer_port=core_port,
-                allowed_peers=list(allowed_peers or [TRUNK_ADDRESS]),
-                rules_file=second_rules,
-                log_payloads=False,
-            ),
-            metrics=MetricsRegistry(),
-            tracer=TraceRecorder(),
-            sip_logger=SipMessageRecorder(),
-        )
-        mock = SMockApplication(
-            MockConfig(
-                listen_address=TRUNK_ADDRESS,
-                listen_port=core_port,
-                as_address=TRUNK_ADDRESS,
-                as_port=as1_port,
-            ),
-            sip_logger=SipMessageRecorder(),
-            uac_local_port=trunk_port,
-        )
-        as1.start()
-        as2.start()
-        mock.start()
-        pair = ChainedPair(as1, mock, as1_port, core_port, trunk_port, as1_messages, second_as=as2)
+        pair = ChainedPair(stack=stack)
         built.append(pair)
         return pair
 

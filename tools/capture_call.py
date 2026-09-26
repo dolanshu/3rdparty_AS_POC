@@ -24,8 +24,8 @@ call to disk, verbatim, using the naming convention of
     <sequence>-<direction>-<method-or-status>[-<qualifier>].txt
 
 ``direction`` is relative to the AS — ``in`` is S-SBC to AS, ``out`` is AS to S-SBC — and
-the qualifier names the leg: ``trunk`` for the leg towards the emulated S-CSCF, ``core``
-for the leg towards the emulated core network.
+the qualifier names the leg: ``trunk`` for the inbound leg from the S-SBC forward side,
+``core`` for the outbound leg toward the S-SBC return side (historical filename suffix).
 
 Ports are allocated dynamically unless they are given on the command line, so the capture
 never collides with a running process and never uses 5060 by accident
@@ -411,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"as port    : 127.0.0.1:{as_port}")
     print(f"core port  : 127.0.0.1:{core_port}  (AS next hop)")
-    print(f"trunk port : 127.0.0.1:{trunk_port}  (emulated S-CSCF)")
+    print(f"trunk port : 127.0.0.1:{trunk_port}  (S-SBC forward side)")
     written = run_capture(
         as_port=as_port,
         core_port=core_port,

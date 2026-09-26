@@ -39,7 +39,7 @@ arriving on the trunk. It rejects sources outside ``ALLOWED_PEERS`` with ``403``
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from as_platform.call_controller import (
     BaseCallController,
@@ -47,15 +47,16 @@ from as_platform.call_controller import (
     PolicyAction,
     PolicyDecision,
 )
-from sippy.CCEvents import CCEventTry
+from sippy.CCEvents import CCEventFail, CCEventTry
 from sippy.SipCallId import SipCallId
 
 from as_app.errors import AsError, AsErrorCode
 from as_app.observability.logging import LogDirection, get_logger, log_event
 from as_app.observability.metrics import CallDisposition, MetricsRegistry
 from as_app.observability.tracing import TraceRecorder
+from as_app.route_header import parse_top_route_target
 from as_app.routing.engine import Disposition, RoutingDecision, decide
-from as_app.routing.rules import RuleSetStore
+from as_app.routing.rules import NextHop, RuleSetStore
 from as_app.sip_adapter import extract_called_number, outbound_call_id
 
 __all__ = ["CallController", "TrunkCallMap"]
@@ -93,6 +94,7 @@ class CallController(BaseCallController):
         *,
         global_config: dict[str, Any] | None = None,
         next_hop: tuple[str, int] | None = None,
+        app: Any | None = None,
     ) -> None:
         """Create a call controller.
 
@@ -103,14 +105,130 @@ class CallController(BaseCallController):
             global_config: sippy global configuration; empty when the controller is
                 exercised without a stack (unit tests).
             next_hop: ``(address, port)`` of the next hop for the outbound INVITE.
+            app: FastAPI application for event emission (P12); ``None`` when running
+                without a console connection (backward-compatible default).
         """
         super().__init__(
             metrics=metrics, tracer=tracer, global_config=global_config, next_hop=next_hop
         )
         self.rule_set_store = rule_set_store
+        self._emit_app = app
         # The routing decision of this call, kept so the failover attempts and the
         # rejection vocabulary reproduce the decision that produced them.
         self._decision: RoutingDecision | None = None
+
+    def recv_request(self, request: Any, transaction: Any) -> Any:
+        """Terminate the trunk INVITE, then emit ``call_started`` with the real Call-ID."""
+        result = super().recv_request(request, transaction)
+        if self._emit_app is not None:
+            self._emit_p12("call_started", {"direction": "trunk_in"})
+        return result
+
+    # ------------------------------------------------------------------
+    # P12 per-call event emission (no as_platform changes — AS-local only)
+    # ------------------------------------------------------------------
+
+    _SOURCE: ClassVar[str] = "as_translation"
+
+    def _emit_p12(self, event: str, attributes: dict[str, Any]) -> None:
+        """Emit a per-call event via the internal_api WebSocket fanout.
+
+        Safe to call from any thread — uses the uvicorn daemon thread's event
+        loop (captured in ``app.state._loop``) and bridges via
+        ``run_coroutine_threadsafe``. No-op when :attr:`_emit_app` is ``None``
+        or the daemon loop has not started yet.
+        """
+        import asyncio as _asyncio
+        import json as _json
+        import time as _time
+
+        if self._emit_app is None:
+            return
+        loop = getattr(self._emit_app.state, "_loop", None)
+        if loop is None:
+            return  # daemon thread not ready yet — drop silently
+        event_dict = {
+            "timestamp": _time.time(),
+            "source": self._SOURCE,
+            "event": event,
+            "call_id": getattr(self, "call_id", "unknown"),
+            "attributes": attributes,
+        }
+        # JSON serialization errors are a real bug (non-serializable attribute);
+        # they should log, not pass silently. Asyncio scheduling errors
+        # (RuntimeError / AttributeError on the bridge path) are the intended
+        # silent-drop case.
+        try:
+            msg = _json.dumps(event_dict, default=str)
+        except (TypeError, ValueError) as exc:
+            _LOGGER.warning(
+                "P12 emit serialization failed",
+                extra={"event": event, "call_id": event_dict["call_id"], "error": str(exc)},
+            )
+            return
+        try:
+            try:
+                running = _asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is loop:
+                loop.create_task(self._emit_app.state.broadcast(msg))
+            else:
+                _asyncio.run_coroutine_threadsafe(
+                    self._emit_app.state.broadcast(msg), loop
+                )
+        except (RuntimeError, AttributeError):
+            pass  # asyncio bridge not ready — drop silently
+
+    def _originate_towards(self, hop: NextHop) -> None:
+        """Send the outbound INVITE to the top Route target when the trunk carried one.
+
+        The routing catalogue names the operator S-SBC hop; RFC 3261 loose routing uses
+        the trunk ``Route`` set the S-SBC inserted to choose the wire destination.
+        """
+        route_target = parse_top_route_target(self._trunk_request)
+        if route_target is not None:
+            address, port = route_target
+            hop = hop.model_copy(update={"address": address, "port": port})
+        super()._originate_towards(hop)
+
+    # --- P12 apply_call_policy / record_disposition overrides ---------------
+
+    def apply_call_policy(self, event: Any) -> PolicyDecision:
+        """Override to emit call_routed / call_rejected after decide()."""
+        decision = super().apply_call_policy(event)
+        if decision.action is PolicyAction.RELAY:
+            self._emit_p12(
+                "call_routed",
+                {
+                    "rule_id": self._decision.rule_id if self._decision else "",
+                    "next_hop": decision.next_hops[0].name if decision.next_hops else "",
+                    "translated_number": (
+                        self._decision.translated_number if self._decision else ""
+                    ),
+                },
+            )
+        elif decision.action is PolicyAction.REJECT:
+            self._emit_p12(
+                "call_rejected",
+                {
+                    "rule_id": decision.attributes.get("rule_id", ""),
+                    "error_code": decision.error.code.code if decision.error else "",
+                    "sip_status": decision.error.sip_status if decision.error else 0,
+                },
+            )
+        return decision
+
+    def _record_disposition(self, event: Any) -> None:
+        """Override to emit call_ended with reason classification."""
+        super()._record_disposition(event)
+        if isinstance(event, CCEventFail):
+            reason = "fail"
+        elif self.uaA is not None and bool(self.uaA.isConnected()):
+            reason = "bye"
+        else:
+            reason = "cancel"
+        self._emit_p12("call_ended", {"reason": reason})
 
     # --- the application hook -----------------------------------------------
 
@@ -202,7 +320,7 @@ class CallController(BaseCallController):
             # the hop of the attempt; the base resolves both, so the values here are the
             # first attempt's and the base overwrites them on a failover attempt.
             attributes={"called_number": translated, "next_hop": decision.next_hops[0].name},
-            relay_log_message="invite originated towards the next hop",
+            relay_log_message="invite originated towards the S-SBC (top Route)",
             relay_log_fields={
                 "called_number": translated,
                 "next_hop": decision.next_hops[0].name,
@@ -375,6 +493,7 @@ class TrunkCallMap(BaseCallMap):
         allowed_peers: tuple[str, ...] = (),
         metrics: MetricsRegistry | None = None,
         tracer: TraceRecorder | None = None,
+        app: Any | None = None,
     ) -> None:
         """Create the trunk call map.
 
@@ -384,9 +503,11 @@ class TrunkCallMap(BaseCallMap):
             allowed_peers: Source addresses accepted on the trunk.
             metrics: Counter registry; the process-wide one is used when omitted.
             tracer: Trace recorder; the process-wide one is used when omitted.
+            app: FastAPI app for P12 event emission; ``None`` backward-compat.
         """
         super().__init__(global_config, allowed_peers=allowed_peers, metrics=metrics, tracer=tracer)
         self.rule_set_store = rule_set_store
+        self.app = app
 
     def _build_controller(self, next_hop: tuple[str, int] | None) -> CallController:
         """Create a call controller bound to this process configuration.
@@ -403,4 +524,5 @@ class TrunkCallMap(BaseCallMap):
             self.tracer,
             global_config=self.global_config,
             next_hop=next_hop,
+            app=self.app,
         )

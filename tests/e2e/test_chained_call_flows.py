@@ -75,22 +75,18 @@ def render_trace(trace: CallTrace) -> str:
     return "\n".join(lines)
 
 
-def inter_as_call_id(pair: Any) -> str:
-    """Return the Call-ID AS-1 sent to AS-2, read off the wire.
+def as2_trunk_call_id(pair: Any) -> str:
+    """Return the Call-ID AS-2 saw on its trunk leg (iFC #2 trigger).
 
     Args:
         pair: The bound chained pair.
 
     Returns:
-        The Call-ID of the outbound INVITE AS-1 recorded.
+        The Call-ID of AS-2's inbound trunk INVITE.
     """
-    outbound = [
-        message
-        for message in pair.as_messages.messages
-        if message.direction == "out" and message.text.startswith("INVITE ")
-    ]
-    assert outbound, "AS-1 did not record an outbound INVITE"
-    return str(outbound[0].call_id)
+    call_ids = pair.second_as.tracer.known_call_ids()
+    assert len(call_ids) == 1, f"AS-2 should have one call, got {call_ids}"
+    return call_ids[0]
 
 
 def verdict_of(trace: CallTrace) -> str | None:
@@ -143,25 +139,26 @@ def test_the_complete_chained_call_runs_invite_to_bye(
     finished = pair.run_until(lambda: (pair.outcome_for(trunk_call_id) or outcome).released)
     outcome = pair.outcome_for(trunk_call_id) or outcome
 
-    second_call_id = inter_as_call_id(pair)
+    as2_trunk_id = as2_trunk_call_id(pair)
     as1_trace = pair.as_stack.tracer.trace_for(trunk_call_id)
-    as2_trace = pair.second_as.tracer.trace_for(second_call_id)
+    as2_trace = pair.second_as.tracer.trace_for(as2_trunk_id)
     with capsys.disabled():
         print("AS-1 (anti-fraud), keyed on the S-CSCF Call-ID")
         print(render_trace(as1_trace))
-        print("AS-2 (number translation), keyed on the Call-ID AS-1 sent")
+        print("AS-2 (number translation), keyed on its own trunk Call-ID (iFC #2)")
         print(render_trace(as2_trace))
 
     assert finished, f"the chained call {trunk_call_id} did not finish within the timeout"
     assert outcome.status == 200, f"the caller saw {outcome.status} instead of 200 OK"
     assert outcome.released is True
 
-    # The two per-instance traces are keyed on **different** Call-IDs: AS-2 saw the value
-    # AS-1 derived, not the S-CSCF's (REQ-NF-016, LLD section 10.2). Without the per-leg
-    # derivation the two traces would collapse onto one key and this would fail.
-    assert second_call_id == outbound_call_id(trunk_call_id)
-    assert second_call_id != trunk_call_id, (
-        "AS-1 reused the trunk Call-ID on its outbound leg, so the chain has one key"
+    # The two per-instance traces are keyed on **different** Call-IDs: iFC #2 uses a new trunk
+    # trigger, not the S-CSCF's original value (REQ-NF-016, ADR-0014).
+    assert as2_trunk_id != trunk_call_id, (
+        "iFC #2 must use a new trunk Call-ID, distinct from the S-CSCF leg"
+    )
+    assert as2_trunk_id != outbound_call_id(trunk_call_id), (
+        "AS-2 trunk Call-ID must not be AS-1's outbound derivation"
     )
 
     # Both instances drove the one call through its complete sequence.

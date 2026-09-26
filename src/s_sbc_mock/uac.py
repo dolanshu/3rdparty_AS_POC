@@ -12,14 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""UAC side of the mock: emulates the S-CSCF iFC trigger.
+"""Trunk-side of the mock S-SBC: forwards the operator INVITE towards the third-party AS.
 
-The S-CSCF does not call the AS directly in production — an iFC match routes the INVITE
-to the S-SBC, which forwards it over the trunk. This side of the mock originates that
-INVITE towards the AS with the ISC-flavoured context a triggered request carries
-(``P-Asserted-Identity``, ``P-Charging-Vector``) and then behaves like a normal UAC
-(ACK, CANCEL, BYE). Driven by :class:`CallScenario` data; built on sippy, the same stack
-as the AS (ADR-0005).
+Neither the S-CSCF nor the S-SBC is a B2BUA. In production an iFC match at the S-CSCF
+hands the session to the operator S-SBC, which forwards the INVITE over the SIP trunk to
+the third-party AS. The AS terminates that leg as a **UAS** on ``SIP_LISTEN_PORT`` (5060
+by default). This mock side plays that **forwarded trunk INVITE** only: it is not the AS
+and it is not the core network.
+
+The INVITE carries a ``Route`` set pointing back at the S-SBC return interface so the AS
+can originate the translated INVITE towards the same S-SBC (RFC 3261 top Route), not
+directly towards the IMS core. Driven by :class:`CallScenario` data; built on sippy
+(ADR-0005).
 """
 
 from __future__ import annotations
@@ -183,19 +187,27 @@ class TrunkUac:
         *,
         local_address: str = "127.0.0.1",
         local_port: int = 15060,
+        route_return_address: str | None = None,
+        route_return_port: int | None = None,
     ) -> None:
-        """Create the UAC side of the mock.
+        """Create the trunk-forwarding side of the mock S-SBC.
 
         Args:
-            as_address: Address of the AS.
-            as_port: UDP port of the AS.
-            local_address: Local address to send from.
-            local_port: Local UDP port to bind.
+            as_address: Address of the third-party AS trunk.
+            as_port: UDP port of the AS trunk (``SIP_LISTEN_PORT``, default 5060).
+            local_address: Local address the mock sends the forwarded INVITE from.
+            local_port: Local UDP port of that forward (mock default 15060).
+            route_return_address: Host in the ``Route`` set the S-SBC inserts; defaults to
+                ``route_return_address`` / ``listen_port`` of the mock UAS side.
+            route_return_port: Port in that ``Route`` set; defaults to the mock UAS listen
+                port (15061 in the shipped port matrix).
         """
         self.as_address = as_address
         self.as_port = as_port
         self.local_address = local_address
         self.local_port = local_port
+        self.route_return_address = route_return_address or local_address
+        self.route_return_port = route_return_port if route_return_port is not None else 15061
         self.outcomes: list[CallOutcome] = []
         self.global_config: dict[str, Any] = {}
 
@@ -271,6 +283,74 @@ class TrunkUac:
         )
         return call_id
 
+    def send_trunk_invite(
+        self,
+        scenario: CallScenario,
+        as_address: str,
+        as_port: int,
+        *,
+        name_suffix: str = "",
+    ) -> str:
+        """Place one orchestrator-driven trunk INVITE towards an arbitrary AS hop.
+
+        Used for iFC #1 and #2 in the chained topology (ADR-0014). Unlike
+        :meth:`place_call`, the next hop is explicit per call.
+
+        Args:
+            scenario: Call parameters and headers to send.
+            as_address: Target AS listen address.
+            as_port: Target AS listen port.
+            name_suffix: Appended to the scenario name in logs and ICID.
+
+        Returns:
+            The Call-ID of the placed call.
+
+        Raises:
+            RuntimeError: When this side is not bound to a transaction manager yet.
+        """
+        if self.global_config.get("_sip_tm") is None:
+            raise RuntimeError(
+                "TrunkUac is not bound: build_global_config() and the stack start are required"
+            )
+        event = CCEventTry(
+            (
+                None,
+                scenario.calling_number,
+                scenario.called_number,
+                MsgBody(content=scenario.sdp_offer),
+                None,
+                None,
+            )
+        )
+        event.extra_headers = self._isc_headers(scenario)
+        ua = UA(
+            self.global_config,
+            self._event_handler(scenario),
+            nh_address=(as_address, as_port),
+            nh_transport=SipConf.my_transport,
+        )
+        ua.lContact = SipContact(
+            address=SipAddress(
+                url=SipURL(
+                    host=self.local_address, port=self.local_port, transport=SipConf.my_transport
+                )
+            )
+        )
+        ua.local_ua = str(self.global_config.get("_sip_uaname", ""))
+        with _trunk_identity(self.global_config):
+            ua.recvEvent(event)
+        call_id = str(ua.cId)
+        outcome_name = f"{scenario.name}{name_suffix}" if name_suffix else scenario.name
+        self.outcomes.append(CallOutcome(scenario_name=outcome_name, call_id=call_id))
+        _LOGGER.info(
+            "trunk side sent orchestrated INVITE scenario=%s call_id=%s target=%s:%d",
+            outcome_name,
+            call_id,
+            as_address,
+            as_port,
+        )
+        return call_id
+
     def outcome_for(self, call_id: str) -> CallOutcome | None:
         """Return the observed outcome of one placed call.
 
@@ -310,6 +390,12 @@ class TrunkUac:
             The extra headers to append to the INVITE.
         """
         return (
+            SipHeader(
+                s=(
+                    "Route: "
+                    f"<sip:{self.route_return_address}:{self.route_return_port};lr>"
+                )
+            ),
             SipHeader(s=f"P-Asserted-Identity: <sip:{scenario.calling_number}@{IMS_DOMAIN}>"),
             SipHeader(
                 s=(

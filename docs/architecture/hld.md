@@ -14,17 +14,18 @@ code can be pointed at a real S-SBC by changing configuration only.
 
 ```mermaid
 graph LR
-    subgraph operator["operator IMS core (mocked)"]
+    subgraph operator["operator IMS (mocked)"]
         SCSCF["S-CSCF<br/>iFC trigger (ISC)"]
-        SSBC["Service-SBC<br/>trunk side"]
+        SSBC["Service-SBC<br/>not a B2BUA"]
     end
     subgraph ours["this repository"]
-        AS["3rd-party AS (B2BUA)"]
-        MOCK["mock S-SBC<br/>UAC + UAS"]
+        AS["3rd-party AS<br/>only B2BUA<br/>UAS trunk / UAC out"]
+        MOCK["mock S-SBC<br/>forward :15060<br/>return :15061"]
         CONSOLE["console<br/>separate process"]
     end
     SCSCF -- "ISC / iFC" --> SSBC
-    SSBC == "SIP trunk<br/>UDP" ==> AS
+    SSBC == "trunk INVITE<br/>Route→S-SBC<br/>UDP :5060" ==> AS
+    AS == "translated INVITE<br/>top Route<br/>UDP :15061" ==> SSBC
     AS -. "internal API<br/>HTTP + WebSocket" .-> CONSOLE
     MOCK -. "stands in for" .-> SSBC
 ```
@@ -37,19 +38,19 @@ Three processes. The AS and the console are separate on purpose (ADR-0002): sipp
 ```mermaid
 graph TB
     subgraph host["docker compose host"]
-        AS["as<br/>UDP 5060 (trunk)<br/>TCP 8080 (internal API)"]
-        MOCK["s-sbc-mock<br/>UDP 15060 (UAC)<br/>UDP 15061 (UAS)"]
+        AS["as<br/>UDP 5060 trunk UAS<br/>TCP 8080 internal API"]
+        MOCK["s-sbc-mock<br/>UDP 15060 forward<br/>UDP 15061 S-SBC return"]
         CONSOLE["console<br/>TCP 8081"]
     end
-    MOCK == "INVITE" ==> AS
-    AS == "translated INVITE" ==> MOCK
+    MOCK == "trunk INVITE<br/>Route→S-SBC" ==> AS
+    AS == "translated INVITE<br/>top Route" ==> MOCK
     CONSOLE -- "HTTP / WS" --> AS
 ```
 
 | Service | Process | Ports | Purpose |
 | --- | --- | --- | --- |
-| `as` | `python -m as_app.main` | `5060/udp` trunk, `8080/tcp` internal API | The B2BUA under design |
-| `s-sbc-mock` | `python -m s_sbc_mock.main` | `15060/udp` UAC side, `15061/udp` UAS side | Emulates the S-CSCF trigger and the core network |
+| `as` | `python -m as_app.main` | `5060/udp` trunk (UAS leg), `8080/tcp` internal API | The only B2BUA: UAS on the trunk, UAC on the outbound leg |
+| `s-sbc-mock` | `python -m s_sbc_mock.main` | `15060/udp` forward, `15061/udp` S-SBC return | Stands in for the operator S-SBC (not the core); forwards to the AS and receives the translated INVITE back |
 | `console` | `python -m console.main` | `8081/tcp` | Operations UI, reaches the AS over the internal API |
 
 Ports are configuration; see `docs/operations/deployment.md` for the full port matrix.
@@ -59,7 +60,7 @@ Ports are configuration; see `docs/operations/deployment.md` for the full port m
 | Interface | Direction | Protocol | Notes |
 | --- | --- | --- | --- |
 | SIP trunk | S-SBC → AS | SIP over UDP (RFC 3261) | Only interface that carries calls; source address verified against `ALLOWED_PEERS` |
-| SIP trunk | AS → next hop | SIP over UDP | New INVITE originated by the B2BUA towards `SBC_PEER_*` |
+| SIP trunk | AS → S-SBC return | SIP over UDP | New INVITE originated by the B2BUA to the top `Route` the S-SBC inserted (catalogue names the hop; wire port from `Route`) |
 | Internal API | console → AS | HTTP (REST) + WebSocket | `GET /healthz`, `/api/v1/metrics`, `/api/v1/rules`, `/api/v1/traces`, `WS /ws/events` |
 | Rules file | operator → AS | YAML file | `config/routing_rules.yaml`, read-only on the console, hot reloaded (ADR-0004) |
 
@@ -69,24 +70,24 @@ Ports are configuration; see `docs/operations/deployment.md` for the full port m
 
 ```mermaid
 sequenceDiagram
-    participant UAC as mock UAC (S-CSCF)
-    participant AS as 3rd-party AS
-    participant UAS as mock UAS (core)
-    UAC->>AS: INVITE sip:+8613800138000@as
+    participant FWD as mock S-SBC forward (:15060)
+    participant AS as 3rd-party AS (UAS then UAC)
+    participant RET as mock S-SBC return (:15061)
+    FWD->>AS: INVITE sip:+8613800138000@as<br/>Route: S-SBC;lr
     AS->>AS: translate +8613800138000 -> 013800138000 (R-MOB-CM-40)
-    AS->>UAS: INVITE sip:013800138000@s-sbc-mock
-    UAS-->>AS: 100 Trying
-    AS-->>UAC: 100 Trying
-    UAS-->>AS: 180 Ringing
-    AS-->>UAC: 180 Ringing
-    UAS-->>AS: 200 OK
-    AS-->>UAC: 200 OK
-    UAC->>AS: ACK
-    AS->>UAS: ACK
-    UAC->>AS: BYE
-    AS->>UAS: BYE
-    UAS-->>AS: 200 OK
-    AS-->>UAC: 200 OK
+    AS->>RET: INVITE sip:013800138000@S-SBC (top Route, new Call-ID)
+    RET-->>AS: 100 Trying
+    AS-->>FWD: 100 Trying
+    RET-->>AS: 180 Ringing
+    AS-->>FWD: 180 Ringing
+    RET-->>AS: 200 OK
+    AS-->>FWD: 200 OK
+    FWD->>AS: ACK
+    AS->>RET: ACK
+    FWD->>AS: BYE
+    AS->>RET: BYE
+    RET-->>AS: 200 OK
+    AS-->>FWD: 200 OK
 ```
 
 ### 4.2 Error branches
@@ -123,12 +124,19 @@ sequenceDiagram
 | --- | --- |
 | 0001 | Use sippy as the SIP stack and B2BUA framework |
 | 0002 | Run the console as a separate process, talking over an internal API |
-| 0003 | UDP only |
+| 0003 | UDP only — **superseded for the library's pluggable transport seam by ADR-0010**; the POC trunk itself is still UDP |
 | 0004 | Declarative YAML routing rules with reload |
 | 0005 | Mock the S-SBC on the same stack as the AS |
 | 0006 | Signalling only, no media |
 | 0007 | Anti-fraud AS: use case, `608 Rejected` semantics and cross-call state ownership |
-| 0008 | Chained AS topology: configuration-only chaining and `Call-ID` preservation across two B2BUAs |
+| 0008 | Chained AS topology — **historical**: every B2BUA leg gets its own `Call-ID`; decision 1 (trunk-to-trunk via `FRAUD_SBC_PEER_*`) is **superseded by ADR-0014** |
+| 0009 | Platform library extraction; consumed through a `path` source |
+| 0010 | P11 verification: `TlsTransport`, `RedisStateStore`, capacity harness |
+| 0011 | Vendored Chart.js for the console |
+| 0012 | Load generator is an external process (SIP in, WebSocket out) |
+| 0013 | Two generator controls coupled by Little's Law |
+| 0014 | iFC-orchestrated chained topology (`src/ims_mock/`) — **the chain that ships** |
+| 0015 | Phase 3 × P9b demo alignment (generator topology modes, mode-aware console) |
 
 ## 8. The second AS instance — anti-fraud (P8)
 
@@ -163,10 +171,13 @@ graph LR
 ```
 
 The two AS instances are **independent**: neither imports the other, each has its own
-configuration, data file, ports and lifecycle. The chained topology
-(`SBC → anti-fraud AS → number-translation AS → core`) is P9's, not P8's; D6 builds it
-before the platform work precisely to expose the friction between the two instances
-(section 9).
+configuration, data file, ports and lifecycle. The chained topology is P9's, not P8's; D6
+builds it before the platform work precisely to expose the friction between the two
+instances (section 9). **There is no AS-to-AS SIP hop in that chain**: each AS is triggered
+by its own iFC from S-CSCF over the S-SBC trunk and returns its outbound INVITE to the S-SBC
+return side, so the shape is
+`S-CSCF(iFC#1) → S-SBC → AS-1 → S-SBC → S-CSCF(iFC#2) → S-SBC → AS-2 → S-SBC → S-CSCF → P-CSCF → UAS`,
+never `SBC → anti-fraud AS → number-translation AS → core`.
 
 ### 8.2 Deployment view
 
@@ -182,8 +193,8 @@ graph TB
     subgraph host["docker compose host"]
         AS["as<br/>UDP 5060 (trunk)<br/>TCP 8080 (internal API)"]
         FRAUD["anti-fraud-as<br/>UDP 5062 (trunk)<br/>TCP 8082 (internal API)"]
-        MOCK["s-sbc-mock<br/>UDP 15060 (UAC)<br/>UDP 15061 (UAS)"]
-        MOCKF["s-sbc-mock-fraud<br/>UDP 15063 (UAC)<br/>UDP 15062 (UAS)"]
+        MOCK["s-sbc-mock<br/>UDP 15060 (forward)<br/>UDP 15061 (return)"]
+        MOCKF["s-sbc-mock-fraud<br/>UDP 15063 (forward)<br/>UDP 15062 (return)"]
         CONSOLE["console<br/>TCP 8081"]
     end
     MOCK == "INVITE" ==> AS
@@ -198,8 +209,8 @@ graph TB
 | --- | --- | --- | --- |
 | `as` | `python -m as_app.main` | `5060/udp` trunk, `8080/tcp` internal API | Number translation and routing (Phase 1) |
 | `anti-fraud-as` | `python -m anti_fraud_as.main` | `5062/udp` trunk, `8082/tcp` internal API | Caller screening: allow or `608 Rejected` (P8) |
-| `s-sbc-mock` | `python -m s_sbc_mock.main` | `15060/udp` UAC side, `15061/udp` UAS side | Emulates the S-CSCF trigger and the core network for `as` |
-| `s-sbc-mock-fraud` | `python -m s_sbc_mock.main` | `15063/udp` UAC side, `15062/udp` UAS side | Same mock, dedicated to `anti-fraud-as` |
+| `s-sbc-mock` | `python -m s_sbc_mock.main` | `15060/udp` forward, `15061/udp` return | Emulates the S-SBC boundary for `as` (inbound INVITE + Route; return leg toward IMS) |
+| `s-sbc-mock-fraud` | `python -m s_sbc_mock.main` | `15063/udp` forward, `15062/udp` return | Same mock, dedicated to `anti-fraud-as` |
 | `console` | `python -m console.main` | `8081/tcp` | Operations UI, reaches **either** AS over its internal API and reports which instance it is displaying |
 
 Every port is configuration and **no default silently points at a real network**. The
@@ -212,7 +223,7 @@ The full port matrix is in `docs/operations/deployment.md` section 2.
 | Interface | Direction | Protocol | Notes |
 | --- | --- | --- | --- |
 | SIP trunk (reject) | S-SBC → anti-fraud AS → S-SBC | SIP over UDP | The AS terminates the INVITE and answers it **from the UAS side only**: `608 Rejected`, no second leg, no `Call-Info` (ADR-0007). The answer is **unconditional** — it does not depend on the UAC's `Feature-Caps` declaration, which only bears on RFC 8688 section 3.4's announcement obligation and is recorded as `sip_608_declared` |
-| SIP trunk (allow) | S-SBC → anti-fraud AS → S-SBC | SIP over UDP | The AS relays the INVITE as a B2BUA: the Request-URI and the SDP body are kept and the **pass-through header set** is copied, **no header is added**, and the response is relayed back. `Feature-Caps` is **not** in that set, so the `sip.608` declaration does not cross the AS (ADR-0007 decision 6) |
+| SIP trunk (allow) | S-SBC → anti-fraud AS → S-SBC | SIP over UDP | The AS relays the INVITE as a B2BUA: the Request-URI and the SDP body are kept and the **pass-through header set** is copied, **no header is added**, and the outbound INVITE is sent to the **top `Route`** the S-SBC inserted (RFC 3261). `Feature-Caps` is **not** in that set, so the `sip.608` declaration does not cross the AS (ADR-0007 decision 6) |
 | Calling identity | inside the INVITE | `P-Asserted-Identity` | The screening input: the AS inspects the *calling* party, not the called number (D4) |
 | Internal API | console → anti-fraud AS | HTTP (REST) + WebSocket | `GET /healthz` (answers the stable **instance identity** the console renders), `/api/v1/metrics`, `/api/v1/screening`, `/api/v1/traces`, `WS /ws/events` |
 | Screening data file | operator → anti-fraud AS | YAML file | `config/caller_screening.yaml`: block/allow lists, reputation seed, window parameters. Read-only; validated on load and hot reloaded like the routing rules (ADR-0004 pattern) |
@@ -228,33 +239,33 @@ with nothing added to the wire.
 
 ```mermaid
 sequenceDiagram
-    participant UAC as mock UAC (S-SBC)
+    participant FWD as S-SBC forward
     participant FAS as anti-fraud AS
-    participant UAS as mock UAS (core)
-    UAC->>FAS: INVITE (From/P-Asserted-Identity = caller)
+    participant RET as S-SBC return
+    FWD->>FAS: INVITE + Route (P-Asserted-Identity = caller)
     FAS->>FAS: screen(caller) -> allow (reputation, window, lists)
     Note over FAS: no header added, Request-URI unchanged
-    FAS->>UAS: INVITE (relayed verbatim)
-    UAS-->>FAS: 100 Trying
-    FAS-->>UAC: 100 Trying
-    UAS-->>FAS: 180 Ringing
-    FAS-->>UAC: 180 Ringing
-    UAS-->>FAS: 200 OK
-    FAS-->>UAC: 200 OK
-    UAC->>FAS: ACK
-    FAS->>UAS: ACK
-    UAC->>FAS: BYE
-    FAS->>UAS: BYE
-    UAS-->>FAS: 200 OK
-    FAS-->>UAC: 200 OK
+    FAS->>RET: INVITE (relayed, top Route target)
+    RET-->>FAS: 100 Trying
+    FAS-->>FWD: 100 Trying
+    RET-->>FAS: 180 Ringing
+    FAS-->>FWD: 180 Ringing
+    RET-->>FAS: 200 OK
+    FAS-->>FWD: 200 OK
+    FWD->>FAS: ACK
+    FAS->>RET: ACK
+    FWD->>FAS: BYE
+    FAS->>RET: BYE
+    RET-->>FAS: 200 OK
+    FAS-->>FWD: 200 OK
 ```
 
 **Reject path — UAS-only answer, no second leg.** The AS terminates the INVITE and answers
-it from the answering leg. No `INVITE` is ever originated towards the core, so the core side
+it from the answering leg. No outbound `INVITE` is ever originated, so the S-SBC return side
 of the mock sees nothing.
 
 ```text
-UAC (S-SBC)                         anti-fraud AS                         core
+S-SBC forward                       anti-fraud AS                    S-SBC return
     |                                    |                                 |
     |--- INVITE ------------------------>|                                 |
     |                                    | screen(caller) -> reject        |
@@ -266,7 +277,7 @@ UAC (S-SBC)                         anti-fraud AS                         core
     |                                    |   no Call-Info, no media         |
     |--- ACK --------------------------->|                                 |
     |                                    |                                 |
-    |          (no INVITE is ever sent towards the core side)              |
+    |          (no INVITE is ever sent towards the return side)            |
 ```
 
 The reject is emitted exactly as the two-leg path emits its `404`/`603`: a `CCEventFail`
@@ -284,168 +295,165 @@ distinction has to be visible, every screened INVITE carries the declaration sta
 
 ## 9. The chained topology (P9)
 
-`docs/phase2-plan.md` D6 puts the two AS instances **in series** before the platform work:
-`SBC → AS-1 (anti-fraud) → AS-2 (number translation) → core`. This section adds the chained
-deployment view, the interface view and the key flows. It extends the views above rather
-than replacing them: the two instances, their consoles and their independent demos are
-unchanged (section 8), and the chain is wired **by configuration only** — no code change, no
-iFC emulation in the mock, and neither AS imports the other (ADR-0008 decision 1).
+`docs/phase2-plan.md` D6 puts the two AS instances **in series** before the platform work.
+The **intended** chain is not trunk-to-trunk between AS instances: **AS never talks to AS
+directly**. Each hop is an iFC trigger from **S-CSCF**, delivered over the **S-SBC trunk** to
+a 3rd-party AS; each allowed AS returns its outbound INVITE to the **top `Route`** on the
+S-SBC **return** side inside the IMS; **S-CSCF** then runs the next iFC. Toward the called
+party the session leaves the IMS through **P-CSCF** into the 5G core — **not** through the
+S-SBC, which is only the operator boundary to external ASs.
 
-### 9.1 System context
+> **Implemented (P9b, ADR-0014).** `make demo-chained`, `src/ims_mock/` and
+> `tools/chained_helpers.py` implement the topology below. ADR-0008 decision 1 is historical;
+> see `docs/architecture/adr/0014-chained-ifc-orchestrator.md`.
 
-The S-CSCF trigger reaches AS-1, whose **allowed** INVITE is relayed to AS-2 instead of back
-to the core; AS-2 translates the number and originates the call towards the core. A `608`
-reject at AS-1 ends the call there.
-
-```mermaid
-graph LR
-    subgraph operator["operator IMS core (mocked)"]
-        SSBC["Service-SBC / S-CSCF trigger<br/>mock UAC"]
-        CORE["core network<br/>mock UAS"]
-    end
-    subgraph ours["this repository"]
-        FRAUD["AS-1 anti-fraud (B2BUA / UAS)<br/>screening verdict"]
-        AS["AS-2 number translation (B2BUA)<br/>translate + route"]
-        CONSOLE["console<br/>separate process"]
-    end
-    SSBC == "SIP trunk<br/>UDP" ==> FRAUD
-    FRAUD == "allowed INVITE<br/>UDP" ==> AS
-    AS == "translated INVITE<br/>UDP" ==> CORE
-    FRAUD -. "608 reject ends the call here" .-> SSBC
-    FRAUD -. "internal API" .-> CONSOLE
-    AS -. "internal API" .-> CONSOLE
-```
-
-The chain adds **no** new node type and no new process kind: it is the two existing B2BUAs
-connected trunk-to-trunk, with the mock playing the S-CSCF on one side and the core on the
-other.
-
-### 9.2 Deployment view
-
-In production the chain is the **three processes** of sections 2 and 8.2 wired in series — the
-anti-fraud AS, the number-translation AS and the mock that plays either end — plus the
-console. Each AS's next hop is pointed at the next instance, and **no new port is needed**:
-`5060` and `5062` already differ precisely so both instances run on one host
-(`docs/phase2-plan.md` section 6, "Port collision"). The demo runs the same chain on
-dynamically allocated ports (ADR-0008 decision 6).
+### 9.1 System context (logical)
 
 ```mermaid
 graph TB
-    subgraph host["one host"]
-        MOCK["s-sbc-mock<br/>UDP 15060 (UAC)<br/>UDP 15061 (UAS)"]
-        FRAUD["anti-fraud-as (AS-1)<br/>UDP 5062 (trunk)<br/>TCP 8082 (internal API)"]
-        AS["as (AS-2)<br/>UDP 5060 (trunk)<br/>TCP 8080 (internal API)"]
-        CONSOLE["console<br/>TCP 8081"]
+    subgraph ims["operator IMS"]
+        SCSCF["S-CSCF<br/>iFC chain"]
+        SSBC["S-SBC<br/>forward + return<br/>(external AS boundary only)"]
+        PCSCF["P-CSCF"]
     end
-    MOCK == "INVITE" ==> FRAUD
-    FRAUD == "allowed INVITE" ==> AS
-    AS == "translated INVITE" ==> MOCK
-    CONSOLE -- "HTTP / WS" --> FRAUD
-    CONSOLE -- "HTTP / WS" --> AS
+
+    subgraph external["3rd-party AS (this repository)"]
+        AS1["AS-1 anti-fraud<br/>B2BUA"]
+        AS2["AS-2 number translation<br/>B2BUA"]
+    end
+
+    subgraph out["outside IMS"]
+        CORE["5G core / called party UAS"]
+    end
+
+    SCSCF -- "iFC #1" --> SSBC
+    SSBC -- "trunk INVITE + Route" --> AS1
+    AS1 -- "outbound INVITE<br/>(top Route)" --> SSBC
+    SSBC -- "INVITE 透传" --> SCSCF
+
+    SCSCF -- "iFC #2" --> SSBC
+    SSBC -- "trunk INVITE + Route" --> AS2
+    AS2 -- "outbound INVITE<br/>(top Route)" --> SSBC
+    SSBC -- "INVITE 透传" --> SCSCF
+
+    SCSCF --> PCSCF
+    PCSCF --> CORE
+
+    AS1 -. "608 reject: UAS-only,<br/>no outbound" .-> SSBC
 ```
 
-| Service | Process | Ports | Role in the chain |
-| --- | --- | --- | --- |
-| `anti-fraud-as` (AS-1) | `python -m anti_fraud_as.main` | `5062/udp`, `8082/tcp` | Screens the caller; relays an **allowed** INVITE to AS-2, or answers `608 Rejected` itself |
-| `as` (AS-2) | `python -m as_app.main` | `5060/udp`, `8080/tcp` | Receives the relayed INVITE, translates the number and routes to the core |
-| `s-sbc-mock` | `python -m s_sbc_mock.main` | `15060/udp` UAC, `15061/udp` UAS | S-CSCF trigger on one side and the core on the other |
+**S-SBC scope.** The S-SBC sits **only** on the path between the IMS and external 3rd-party
+ASs. It is **not** on the path to the called subscriber: that leg is **S-CSCF → P-CSCF → 5G
+core** (out of IMS). Neither AS imports the other; the only coupling is **iFC order** in
+S-CSCF and the shared **ICID** in `P-Charging-Vector` on the wire.
 
-The wiring is configuration only: the mock's target and `FRAUD_SBC_PEER_*` point AS-1 at
-AS-2, and AS-2's routing catalogue selects the core (ADR-0008 decision 1).
+### 9.2 Allow path — signalling order
 
-### 9.3 Interface view
-
-The chain reuses the existing interfaces of section 3 and section 8.3. What is new is the
-**trunk-to-trunk** interface between AS-1 and AS-2, and the two next-hop mechanisms behind it:
-
-| Interface | Direction | Protocol | Notes |
-| --- | --- | --- | --- |
-| SIP trunk (allow) | S-SBC → AS-1 → AS-2 | SIP over UDP | AS-1 relays the **allowed** INVITE to its single configured next hop (`FRAUD_SBC_PEER_*` → `nh_addr`); no header added (ADR-0007) |
-| Inter-AS next hop (translate) | AS-2 → core | SIP over UDP | AS-2 selects the next hop from its **routing catalogue** (`action.next_hops`), not from a peer knob (ADR-0008 decision 1) |
-| Reject | S-SBC → AS-1 → S-SBC | SIP over UDP | `608 Rejected`, UAS-only, no second leg, so the call never reaches AS-2 (ADR-0007, REQ-F-027) |
-
-**Every leg carries its own dialog `Call-ID`.** A chained call therefore shows **three**
-distinct values instead of one: the S-CSCF leg's, the inter-AS leg's (AS-1's outbound leg,
-derived by `outbound_call_id()` in `src/as_app/sip_adapter.py`) and the core leg's (AS-2's
-outbound leg, derived from the value AS-2 received). `Call-ID` is not a pass-through header
-— it crosses inside the call-control event, and **each controller derives it for the leg it
-originates** (`docs/architecture/lld.md` section 2.3, ADR-0008 decision 2). Two consequences
-follow, and both are stated rather than discovered:
-
-- **Cross-AS correlation is not solved** on `Call-ID`, and cannot be: each instance writes
-  its own trace and console feed keyed by the value *it* saw on its trunk leg, so a chained
-  call is **three independent per-instance traces**, which is what `REQ-NF-016` registers as
-  a POC gap. **The standard end-to-end key is nevertheless on the wire**: the
-  `P-Charging-Vector`'s ICID is in `PASSTHROUGH_HEADERS` (section 3), both instances copy it
-  verbatim, and the probe measures it surviving every hop — but **no observability surface is
-  keyed on it**, and the mock's ICID is a per-scenario literal rather than a per-call
-  identity. Re-keying the traces on the ICID is a change to both instances' observability
-  contract and is P10's material, not P9's (ADR-0008 decision 4).
-- **The demo makes the distinct values visible** by printing the `Call-ID` each hop saw,
-  rather than presenting a correlation that does not exist (`REQ-F-028`, ADR-0008 decision 4).
-
-### 9.4 Key message flows
-
-**Allow path — through both B2BUAs.** AS-1 screens the caller, relays the unchanged INVITE to
-AS-2; AS-2 translates and routes to the core.
+Each AS interaction is a **separate iFC trigger** with its own trunk INVITE. On the allow path
+the AS originates an outbound INVITE toward the top `Route`; the S-SBC **return** side
+**透传** that INVITE to **S-CSCF** (there is no separate “back to IMS” hop — the S-SBC is
+already inside the IMS). Only after S-CSCF receives that INVITE does **iFC #2** fire and
+deliver a **new** trunk INVITE to AS-2 through the S-SBC **forward** side.
 
 ```mermaid
 sequenceDiagram
-    participant UAC as mock UAC (S-CSCF)
-    participant FRAUD as AS-1 anti-fraud
-    participant AS as AS-2 number translation
-    participant UAS as mock UAS (core)
-    UAC->>FRAUD: INVITE (P-Asserted-Identity = caller)
-    FRAUD->>FRAUD: screen(caller) -> allow
-    FRAUD->>AS: INVITE (relayed, no header added)
-    AS->>AS: translate +8613800138000 -> 013800138000 (R-MOB-CM-40)
-    AS->>UAS: INVITE sip:013800138000@core
-    UAS-->>AS: 100 Trying
-    AS-->>FRAUD: 100 Trying
-    FRAUD-->>UAC: 100 Trying
-    UAS-->>AS: 180 Ringing
-    AS-->>FRAUD: 180 Ringing
-    FRAUD-->>UAC: 180 Ringing
-    UAS-->>AS: 200 OK
-    AS-->>FRAUD: 200 OK
-    FRAUD-->>UAC: 200 OK
-    UAC->>FRAUD: ACK
-    FRAUD->>AS: ACK
-    AS->>UAS: ACK
-    UAC->>FRAUD: BYE
-    FRAUD->>AS: BYE
-    AS->>UAS: BYE
-    UAS-->>AS: 200 OK
-    AS-->>FRAUD: 200 OK
-    FRAUD-->>UAC: 200 OK
-```
+    participant SCSCF as S-CSCF (iFC)
+    participant SSBC as S-SBC
+    participant AS1 as AS-1 anti-fraud
+    participant AS2 as AS-2 translation
+    participant PCSCF as P-CSCF
+    participant UAS as called party UAS
 
-**Reject path — short-circuits the chain.** AS-1 answers `608 Rejected` on the trunk and
-originates no second leg, so **AS-2 and the core never receive the call**. The demo asserts
-this as an absence — zero calls seen by AS-2, zero INVITEs at the core — not merely as the
-status code (ADR-0008 decision 5).
+    Note over SCSCF,SSBC: iFC #1 — 3rd-party AS at S-SBC trunk
+    SCSCF->>SSBC: apply iFC #1
+    SSBC->>AS1: INVITE + Route (trunk)
+    AS1->>AS1: screen → allow
+    AS1->>SSBC: outbound INVITE (top Route, new Call-ID)
+    SSBC->>SCSCF: INVITE 透传
+
+    Note over SCSCF,SSBC: iFC #2 — second 3rd-party AS
+    SCSCF->>SSBC: apply iFC #2
+    SSBC->>AS2: INVITE + Route (new trunk dialog)
+    AS2->>AS2: translate Request-URI
+    AS2->>SSBC: outbound INVITE (top Route, new Call-ID)
+    SSBC->>SCSCF: INVITE 透传
+
+    Note over SCSCF,UAS: toward called party — not via S-SBC
+    SCSCF->>PCSCF: session toward subscriber
+    PCSCF->>UAS: INVITE
+    Note over AS1,UAS: 100 / 180 / 200 / ACK / BYE on the<br/>established B2BUA legs and the<br/>terminating side (omitted here)
+```
 
 ```text
-UAC (S-CSCF)              AS-1 anti-fraud            AS-2 number translation        core
-    |                          |                              |                        |
-    |--- INVITE -------------->|                              |                        |
-    |                          | screen(caller) -> reject     |                        |
-    |<-- 100 Trying -----------|                              |                        |
-    |<-- 608 Rejected ---------|                              |                        |
-    |--- ACK ----------------->|                              |                        |
-    |                          |                              |                        |
-    |              (no INVITE reaches AS-2 or the core; the chain ends here)           |
+  S-CSCF          S-SBC           AS-1          S-CSCF          S-SBC           AS-2          S-CSCF        P-CSCF       5G/UAS
+  (iFC#1)    (IMS, forward)  (external)      (iFC#2)    (IMS, forward)  (external)                    (out of IMS)
+     |             |              |              |             |              |              |            |            |
+     |-- trigger ->|              |              |             |              |              |            |            |
+     |             |-- INVITE+Route>|              |             |              |              |            |            |
+     |             |              | allow        |             |              |              |            |            |
+     |             |<- INVITE(out)|              |             |              |              |            |            |
+     |<- 透传 INVITE|              |              |             |              |              |            |            |
+     |             |              |              |             |              |              |            |            |
+     |-- trigger -------------------------------->|             |              |              |            |            |
+     |             |              |              |-- trigger ->|              |              |            |            |
+     |             |              |              |             |-- INVITE+Route>|              |            |            |
+     |             |              |              |             |              | translate    |            |            |
+     |             |              |              |             |<- INVITE(out)|              |            |            |
+     |             |              |              |<- 透传 INVITE|              |              |            |            |
+     |             |              |              |             |              |              |            |            |
+     |-- toward called party (not via S-SBC) ------------------------------------------------------------------->| INVITE ->|
 ```
 
-### 9.5 What the chain does not change
+### 9.3 Reject path — AS-1 short-circuits the iFC chain
 
-The chain is **demonstration, not architecture**: it adds no module, no shared library and no
-interface between the two AS instances, and it is not the abstraction P10 has to build
-(ADR-0008 decision 7). The friction it exposes — that AS-1 relays to a configured peer while
-AS-2 routes by catalogue, and that **each self-written controller has to derive its own
-outbound dialog identity** (a step that was omitted twice, in two copies of the same code) —
-is P10's input and is recorded at the item's close (`docs/phase2-plan.md` section 3 P9,
-section 5.4).
+AS-1 answers `608 Rejected` on the trunk (UAS-only, no outbound INVITE). **iFC #2 never
+runs**; AS-2 and the terminating side see no INVITE.
+
+```mermaid
+sequenceDiagram
+    participant SCSCF as S-CSCF (iFC)
+    participant SSBC as S-SBC
+    participant AS1 as AS-1 anti-fraud
+
+    SCSCF->>SSBC: apply iFC #1
+    SSBC->>AS1: INVITE + Route (trunk)
+    AS1->>AS1: screen → reject
+    AS1-->>SSBC: 608 Rejected (no outbound INVITE)
+    SSBC-->>SCSCF: 608 透传
+    Note over SCSCF: iFC #2 not applied — AS-2 never triggered
+```
+
+### 9.4 Interface view
+
+| Interface | Direction | Protocol | Notes |
+| --- | --- | --- | --- |
+| iFC trigger #1 | S-CSCF → S-SBC → AS-1 | SIP over UDP | Trunk INVITE with `Route`; AS-1 screens **calling** party (section 8) |
+| AS-1 allow (outbound) | AS-1 → S-SBC return → S-CSCF | SIP over UDP | Outbound INVITE to top `Route`; **INVITE 透传** to S-CSCF — not a direct AS-1 → AS-2 hop |
+| iFC trigger #2 | S-CSCF → S-SBC → AS-2 | SIP over UDP | **New** trunk INVITE after iFC #1 completes; same `P-Charging-Vector` ICID |
+| AS-2 allow (outbound) | AS-2 → S-SBC return → S-CSCF | SIP over UDP | Translated outbound INVITE to top `Route`; INVITE 透传 to S-CSCF |
+| Toward called party | S-CSCF → P-CSCF → 5G core | SIP (IMS) | **Does not traverse S-SBC** — S-SBC is external-AS boundary only |
+| Reject | S-SBC → AS-1 → S-SBC → S-CSCF | SIP over UDP | `608 Rejected`, UAS-only; chain stops (ADR-0007, REQ-F-027) |
+
+**`Call-ID` per leg.** A full allow chain carries **four** dialog identities on the AS legs:
+AS-1 trunk, AS-1 outbound, AS-2 trunk (new iFC trigger), AS-2 outbound — each B2BUA derives
+its outbound value (`outbound_call_id()`, `docs/architecture/lld.md` section 2.3). Cross-AS
+correlation on `Call-ID` remains impossible; the **ICID** in `P-Charging-Vector` is the
+end-to-end key both instances forward verbatim (`PASSTHROUGH_HEADERS`).
+
+### 9.5 Deployment view (target POC)
+
+Both AS processes and the console are unchanged from sections 8.2 and 2. What the chain adds
+is an **iFC orchestrator** in `src/ims_mock/` (alongside the existing S-SBC forward/return
+sides): it applies iFC #1 and #2 in order, never wiring `FRAUD_SBC_PEER_*` to AS-2. A minimal
+**P-CSCF relay** and **terminating UAS** complete the toward-called-party path (ADR-0014).
+
+### 9.6 What the chain does not change
+
+The chain is **demonstration, not architecture**: it adds no module between the two AS
+binaries and is not the abstraction P10 extracts (ADR-0008 decision 7). The friction it
+exposes — two different use-case controllers, distinct observability per instance, and the
+need for an IMS-side orchestrator rather than a peer knob — is input to later platform and
+mock work (`docs/phase2-plan.md` section 3 P9).
 
 ## 10. The platform library (P10)
 
@@ -495,7 +503,7 @@ two samples, which is both the reason the seams exist and the limit of what they
 section 10's guarantee *"clone → `uv sync` → `make demo`"* becomes **"clone both repositories
 side by side → `uv sync` → `make demo`"** (REQ-F-032, ADR-0009 decision 6). There is **no new
 environment variable, no new port and no new service**: the library is not deployed, and the
-port matrices of sections 8.2 and 9.2 are untouched.
+port matrices of sections 8.2 and 9.5 are untouched.
 
 | Checkout | Path | Role |
 | --- | --- | --- |
@@ -574,4 +582,171 @@ what the system does.
 - **A change to the library's API obliges this repository.** As the reference implementation,
   this repository follows the library in the same piece of work — it is the first user, not a
   consumer at a distance (ADR-0009, *Consequences*; D8).
+
+### 10.7 Future direction: stack-agnostic SIP engine (not scheduled)
+
+P10 moved the B2BUA relay shell into `as_platform`, but the shell still **implements** relay,
+failover and timers with sippy types (`UA`, `CCEvent*`, `ED2.loop()`). App controllers hook
+`decide()` only; they do not drive the relay. The remaining coupling is **`PolicyDecision.outbound_event:
+CCEventTry`** and a few app-side sippy imports — not the routing or screening logic.
+
+A proposed next seam — documented, not scheduled — is a **`B2buaEngine`** in `as_platform`:
+stack-neutral call-leg events in, `OutboundInviteSpec` out of `decide()`, and a
+`SippyAdapter` (then a second adapter) underneath. After a one-time app migration, **future
+stack swaps would be platform-only**; mock and tools could keep sippy on the wire. See
+**`docs/architecture/future/sip-engine-seam.md`**.
+
+## 11. Call Load capability (P12)
+
+Phase 3's first item. Demonstrates that the AS handles N concurrent SIP calls of mixed
+types, mixed durations, and independent lifecycles — not just single-call functional
+correctness. Phase 1/2 validated one call at a time; P12 is the first time we run N calls
+in parallel and show them progressing independently on an operations dashboard.
+
+### 12.1 System context
+
+The Phase 3 architecture adds **one new process** — the load generator — alongside the
+two AS processes already shown in section 8. The generator is a **standalone Python process**
+that talks to AS processes via SIP and observes via WebSocket event streams. It is
+neither an AS component nor an `as_platform` consumer (ADR-0012).
+
+```
+┌──────────────┐    SIP INVITE (UDP 5060)    ┌──────────────────────┐
+│              │ ──────────────────────────► │ translation AS        │
+│ load         │                            │ (one process, own     │
+│ generator    │   WebSocket /events         │  ED2 loop)            │
+│ (one process)│ ─────────────────────────► └──────────────────────┘
+│              │                                        
+│              │   SIP INVITE (UDP 5062)   ┌──────────────────────┐
+│              │ ────────────────────────► │ anti-fraud AS        │
+│              │                           │ (one process, own    │
+│              │                           │  ED2 loop)           │
+│              │                           └──────────────────────┘
+│              │
+│              │   WebSocket /pool (generator-side events)
+│              │ ───────────────────────────► console
+└──────────────┘                              (one process, FastAPI)
+```
+
+The generator addresses **each AS process directly and independently** — there is no
+`translation AS → anti-fraud AS` SIP hop. In `chained` mode the generator plays the
+subscriber UAC and hands the INVITE to the S-CSCF iFC orchestrator in `src/ims_mock/`, which
+triggers AS-1 and AS-2 in turn (ADR-0014); the two AS processes still never exchange SIP.
+
+Each AS process handles **per-AS concurrent isolation**: multiple CallController instances
+in the same process, each with its own `self.call_id`, its own dialog, its own timer.
+The generator does **not** exercise cross-AS concurrency — that is P9's domain, already
+proved. P12 exercises **within-AS** concurrency for the first time.
+
+### 12.2 Interface view
+
+Four interfaces, none modifying `as_platform`:
+
+| # | Interface | Between | Protocol | Purpose |
+|---|-----------|---------|----------|---------|
+| 1 | SIP INVITE/UDP | generator → AS | SIP/UDP | Generator sends real INVITEs to AS's configured SIP listen port; AS sends real 200 OK, BYE, 608 Rejected |
+| 2 | Per-call event stream | AS → console | WebSocket | Each AS emits `call_started`, `call_state_changed`, `call_ended`, `call_rejected_608` events on its existing internal API WebSocket (extended in-place, no library change) |
+| 3 | REST control surface | console → generator | HTTP/FastAPI | `POST /load/start`, `POST /load/stop`, `PUT /load/config` (`target_concurrency`, `call_rate`, `enabled_call_types`), `GET /load/status` |
+| 4 | Generator event feed | generator → console | WebSocket | Generator pushes `pool_status_update` (active/target concurrency, binding constraint) and generator-side per-call events |
+
+### 12.3 Call model — the 10 call types
+
+The generator sends INVITEs whose caller/called number combinations the AS's existing
+rules and anti-fraud configuration route into the following 10 types. The generator
+does **not** assert call types — it asserts the caller/called numbers it sends and
+observes the AS's decision via the event stream.
+
+**Translation AS types (T1–T6):**
+
+| Type | Called number pattern | Expected result | Routing |
+|------|----------------------|-----------------|---------|
+| T1 | `+86...` E.164 | Convert to `0...`, relay | allow-listed caller |
+| T2 | `0...` national | Keep format, relay | allow-listed caller |
+| T3 | `00...` international | Convert to `+...`, relay | allow-listed caller |
+| T4 | 4-digit short code | No matching rule → 404 | allow-listed caller |
+| T5 | reachable next hop | 200 OK | allow-listed caller |
+| T6 | unreachable next hop | 3 s timeout → AS fails | allow-listed caller |
+
+**Anti-fraud AS types (F1–F4):**
+
+| Type | Caller profile | Expected result |
+|------|---------------|-----------------|
+| F1 | allow-listed | relay → downstream AS |
+| F2 | block-listed | 608 Rejected |
+| F3 | high-rate window | 608 Rejected |
+| F4 | missing P-Asserted-Identity | fail-open → relay |
+
+The generator draws call types via weighted random selection with a per-type
+**enable/disable toggle** (console-controlled, REQ-F-040). Toggles filter the
+selection pool — disabled types are excluded.
+
+### 12.4 Duration model — the 4 classes
+
+Fixed weights (REQ-F-041):
+
+| Class | Weight | Far-end behavior |
+|-------|--------|-----------------|
+| D1 Fast | 30% | Mock S-CSCF answers 200 OK in ~1 s, sends BYE after **2 s** |
+| D2 Medium | 50% | Answers 200 OK in ~2 s, sends BYE after **8–15 s** (midpoint 11.5 s) |
+| D3 Long | 15% | Answers 200 OK in ~2 s, sends BYE after **20–30 s** (midpoint 25 s) |
+| D4 Timeout | 5% | **Never answers.** AS's 3 s no-answer timer tears down the call. |
+
+The weight-derived average duration (used for Little's Law coupling) is:
+
+```
+avg_duration = 0.30 × 2.5 + 0.50 × 11.5 + 0.15 × 25 + 0.05 × 3 = 9.5 seconds
+```
+
+This is a **design constant**, not a runtime measurement (ADR-0013).
+
+### 12.5 Two controls with Little's Law coupling
+
+The generator exposes two interactive controls (ADR-0013, REQ-F-039):
+
+| Control | Range | Mechanism | Binding when |
+|---------|-------|-----------|-------------|
+| **Target concurrency** | 1–50 | Closed-loop pool ceiling. Tick loop (every 500 ms) fills pool to this target. | Pool caps at target; rate throttle never reached |
+| **Call rate** | 0.1–10 calls/sec | Open-loop refill throttle. Even if pool is below target, no more than `rate` calls per second are launched. | Pool stabilises at `rate × avg_duration`, below target |
+
+**Binding constraint rule:**
+
+```
+if rate × 9.5 >= target_concurrency:
+    binding = "concurrency"   # 池子上限
+else:
+    binding = "rate"          # Call Rate 限速
+```
+
+The binding constraint is exposed in `/load/status` and every `pool_status_update`
+event. The console (P13) displays it so the reviewer understands the interaction.
+
+### 12.6 Quality attributes
+
+| Attribute | Source | Constraint |
+|-----------|--------|------------|
+| **AS library unchanged** | REQ-NF-027, D1 | P12 does not move anything into `as_platform`. Event stream emissions are AS-local internal_api extensions. |
+| **Generator is external** | REQ-NF-029, ADR-0012 | Generator does not import AS code. Talks SIP + observes events. `make demo` stays self-contained. |
+| **Concurrent isolation validated** | REQ-F-043, REQ-NF-030 | Tests launch ≥ 10 concurrent calls per AS process and assert each CallController completes independently, including P8a timer independence. |
+| **D10 benchmark boundary preserved** | D-P3-3, REQ-NF-025 | Console real-time numbers are demo artefacts, not published claims. No numbers in README/CHANGELOG. |
+| **Per-AS process model** | REQ-NF-028 | Each AS is its own process with its own sippy `ED2` loop. P9.5's shared-loop bottleneck does not apply. |
+| **No new dependencies** | REQ-NF-014 precedent | Generator uses Python stdlib + FastAPI (already a dependency — console is FastAPI). No new third-party package. |
+
+### 12.7 What P12 does NOT change
+
+Phase 3's design intent ("demonstrate what exists, not invent what doesn't") means
+P12 touches deliberately nothing that works:
+
+- **No SIP signalling changes.** No new headers, no message rewriting, no B2BUA behaviour change.
+- **No routing or translation rule changes.** Rules stay `config/rules.yaml`.
+- **No anti-fraud verdict engine changes.** Per-caller reputation decay, call-rate window,
+  block/allow lists — all unchanged.
+- **No chained topology wiring changes.** The chain stays as P9b / ADR-0014 left it: two
+  iFC-triggered trunk INVITEs driven by the `src/ims_mock/` orchestrator, with
+  `*_SBC_PEER_*` only as the fallback peer for a trunk INVITE that carries no `Route`.
+- **No sippy source modifications.** `AGENT.md section 6` forbids this.
+- **No HLD/LLD changes to sections 1–10.** P12 is additive — delta at the tail, never rewrite.
+- **No gap closure from the production gap register.** Phase 3 closes zero registered gaps
+  (phase3-plan.md §8).
+- **Generator is not launched by `make demo`.** `make demo` stays self-contained. P12 generator
+  is an **additional** process for interactive demos.
 

@@ -18,18 +18,22 @@ engagement for this repository.
 ## Position
 
 ```text
-        operator IMS core                    SIP trunk                  us
- +-------------------------------+                          +----------------------+
- |  S-CSCF ---ISC--- S-SBC       | ======================== | 3rd-party AS (B2BUA)|
- +-------------------------------+        UDP / 5060        +----------------------+
-      (mocked: UAC + UAS side)                                  (this repository)
+        operator IMS (mocked)                         SIP trunk              us
+ +-------------------------------+                                          +----------------------+
+ |  S-CSCF ---ISC--- S-SBC       |  forward INVITE (Route→S-SBC)  =======> | 3rd-party AS (B2BUA)|
+ |                               |  <======== translated INVITE ========= |  UAS trunk / UAC out |
+ +-------------------------------+              UDP / 5060                 +----------------------+
+      (mock: forward @15060, return @15061)                                 (this repository)
 ```
 
-- We implement the **external AS**. The S-SBC, the S-CSCF and the core network are
-  replaced by a local mock, and every peer address is configuration, so the same code can
-  be pointed at a real S-SBC by changing configuration only.
-- We are a **B2BUA and only a B2BUA**: terminate the incoming INVITE, translate the
-  number, originate a new INVITE back. Redirect mode (`302`) is **not** implemented.
+- We implement the **external AS** — the **only B2BUA** in the path. The operator S-CSCF
+  and S-SBC are **not** B2BUAs; the local mock plays both sides of the S-SBC (forward the
+  trunk INVITE on `:15060`, receive the AS-originated INVITE back on `:15061`).
+- On the trunk leg the AS is a **UAS** (`SIP_LISTEN_PORT`, default `5060`). On the outbound
+  leg it is a **UAC** with a new `Call-ID`, sending the translated INVITE to the **top
+  `Route`** the S-SBC inserted — back through the same S-SBC into the IMS, not directly to
+  the core.
+- Redirect mode (`302`) is **not** implemented.
 - The **anti-fraud AS** is a second, separate process: it inspects the **calling** party and
   either relays the INVITE unchanged or answers `608 Rejected` (RFC 8688). Its reject path is
   **UAS only** — it originates no second leg — which is the documented deviation from
@@ -53,7 +57,7 @@ make lint               # ruff format --check + ruff check + mypy
 make test               # unit + integration + e2e
 make demo               # places a real call and narrates the translation (see below)
 make demo-fraud         # screens two real calls: one allowed, one answered 608 Rejected
-make demo-chained       # chains both AS instances: SBC -> anti-fraud -> translation -> core
+make demo-chained       # iFC chain: S-CSCF#1 -> S-SBC -> anti-fraud -> S-SBC -> S-CSCF#2 -> S-SBC -> translation -> S-SBC -> S-CSCF -> P-CSCF -> UAS
 ```
 
 `uv sync` resolves the `as-platform` dependency from `../as_platform` (a `path` source with
@@ -132,8 +136,8 @@ translation : called number -> 013800138000
 next hops   : s-sbc-primary -> s-sbc-failover
 served by   : s-sbc-primary
 
-[3/5] next-hop side (after translation)
-core INVITE : INVITE sip:013800138000@127.0.0.1:45644 SIP/2.0
+[3/5] next-hop side (S-SBC return, after translation)
+next-hop INVITE : INVITE sip:013800138000@127.0.0.1:45644 SIP/2.0
 ```
 
 It writes nothing, so it is safe to run repeatedly; `make capture` is the variant that
@@ -166,29 +170,24 @@ The rejected call is answered by the AS itself and never reaches the core networ
 reject path is UAS behaviour and originates no second leg. Nothing is written to the
 repository; the standalone process is `make fraud`.
 
-**`make demo-chained` runs both AS instances in series.** It wires the anti-fraud AS's
-allowed-relay next hop to the number-translation AS's listen address and the number-translation
-AS's next hop to the emulated core, then places an allowed call through the whole chain and a
-blocked one that AS-1 answers `608`:
+**`make demo-chained` runs both AS instances via an iFC orchestrator mock (ADR-0014).** AS-1
+and AS-2 never talk directly; iFC #2 fires when AS-1's outbound INVITE is 透传 to the
+orchestrator. The terminating UAS is reached through P-CSCF, not the S-SBC return port:
 
 ```text
 [1/2] allowed call relayed through both AS instances
-AS-1 verdict      : allow
-AS-2 rule         : R-MOB-CM-40
-core called number: 013800138000
-final status      : 200
-S-CSCF Call-ID    : 4696dce542819a4c743c5acde2fb43cc
-AS-2 trunk Call-ID: 4696dce542819a4c743c5acde2fb43cc-b2b_1
-core Call-ID      : 4696dce542819a4c743c5acde2fb43cc-b2b_1-b2b_1
-distinct Call-IDs : 3
-ICID preserved    : True
+AS-1 verdict       : allow
+AS-2 rule          : R-MOB-CM-40
+terminating called : 013800138000
+distinct Call-IDs  : 4
+ICID preserved     : True
 [2/2] rejected call short-circuits at AS-1
-final status      : 608 (608 Rejected, no second leg)
-AS-2 calls seen   : 0 (the absence is the assertion)
+final status       : 608
+AS-2 calls seen    : 0
 ```
 
-Every leg derives its own dialog `Call-ID`, so the three values differ and cross-AS
-correlation on `Call-ID` is impossible — the `P-Charging-Vector` ICID is on the wire and is
+Every leg derives its own dialog `Call-ID`, so the four AS-leg values differ (`X`,
+`X-b2b_1`, `Z`, `Z-b2b_1`) and cross-AS correlation on `Call-ID` is impossible — the `P-Charging-Vector` ICID is on the wire and is
 preserved, but no observability surface is keyed on it (a registered gap). The demo is a
 guard: it exits non-zero if any of those properties fails. It writes nothing.
 
@@ -215,12 +214,12 @@ All configuration is environment based; copy `.env.example` to `.env` and adjust
 | Knob | Default | Purpose |
 | --- | --- | --- |
 | `SIP_LISTEN_ADDRESS` / `SIP_LISTEN_PORT` | `127.0.0.1` / `5060` | where the AS receives the trunk |
-| `SBC_PEER_ADDRESS` / `SBC_PEER_PORT` | `127.0.0.1` / `5061` | next hop (mock or real S-SBC); `.env.example` ships `15061` to match the local mock |
+| `SBC_PEER_ADDRESS` / `SBC_PEER_PORT` | `127.0.0.1` / `15061` | fallback next hop (mock or real S-SBC return side) when the trunk INVITE carries no top `Route`; also the peer the startup self-check reports. A routed call takes its wire destination from that `Route` and its hop from the rule catalogue (`127.0.0.1:5061` in `config/routing_rules.yaml`) |
 | `ALLOWED_PEERS` | `127.0.0.1` | source addresses accepted on the trunk |
 | `RULES_FILE` | `config/routing_rules.yaml` | routing rules |
 | `INTERNAL_API_ADDRESS` / `INTERNAL_API_PORT` | `127.0.0.1` / `8080` | how the console reaches the AS |
 | `FRAUD_SIP_LISTEN_ADDRESS` / `FRAUD_SIP_LISTEN_PORT` | `127.0.0.1` / `5062` | where the **anti-fraud AS** receives the trunk (5062, not 5060, so both instances run on one host) |
-| `FRAUD_SBC_PEER_ADDRESS` / `FRAUD_SBC_PEER_PORT` | `127.0.0.1` / `15061` | next hop an **allowed** INVITE is relayed to |
+| `FRAUD_SBC_PEER_ADDRESS` / `FRAUD_SBC_PEER_PORT` | `127.0.0.1` / `15062` | fallback next hop when the trunk has no `Route`; allow path uses top `Route` → S-SBC return |
 | `FRAUD_ALLOWED_PEERS` | `127.0.0.1` | source addresses accepted on the anti-fraud trunk |
 | `FRAUD_SCREENING_FILE` | `config/caller_screening.yaml` | screening data: block/allow lists, window and reputation parameters |
 | `FRAUD_INTERNAL_API_ADDRESS` / `FRAUD_INTERNAL_API_PORT` | `127.0.0.1` / `8082` | how the console reaches the anti-fraud AS |
@@ -260,7 +259,7 @@ src/anti_fraud_as/       the second AS: caller screening, 608 Rejected (ADR-0007
   screening_data.py      screening data model, validation, reload
   internal_api.py        routes and payloads over the library's internal-API shell
 src/console/             FastAPI + plain HTML/CSS/JS, separate process
-src/s_sbc_mock/          mock S-SBC: UAC (S-CSCF trigger) + UAS (core network)
+src/s_sbc_mock/          mock S-SBC: forward side (INVITE + Route) + return side
 tests/{unit,integration,e2e}/
 tools/                   sippy probe, 608 probe, rule viewer, capture helper, demos
 ```
@@ -278,7 +277,9 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 
 - No real IMS core (no S-CSCF, I-CSCF, HSS, MRF, real S-SBC).
 - No media: no RTP, no transcoding, no DTMF, no MRF.
-- No performance or capacity work, no benchmarking claims.
+- No published performance or capacity figures and no benchmarking claims. (A capacity
+  harness exists to find where the boundary is; it reports constraints, never a headline
+  number — `AGENT.md` §2.)
 - No production HA, multi-tenancy or auditing.
 - No charging (no CDRs, no RADIUS).
 - No production-grade transport on the trunk; demo stack is UDP-only. The platform library (`../as_platform`, ADR-0010) ships a pluggable `Transport` seam with `TlsTransport` behind it — TCP is still out of scope, SIP Digest is still out of scope.
@@ -292,7 +293,7 @@ Explicitly out of scope; each item is registered in `docs/production-gaps.md`:
 | `docs/requirements/functional-and-nonfunctional.md` | `REQ-F-*` / `REQ-NF-*` capability list |
 | `docs/architecture/hld.md` | context, deployment and interface views, message flows |
 | `docs/architecture/lld.md` | modules, data structures, state machines, error codes, log fields |
-| `docs/architecture/adr/` | ADR-0001 … ADR-0010: 0007 anti-fraud AS / `608 Rejected`, 0008 chained topology / per-leg `Call-ID`, 0009 platform library extraction / `path` consumption, 0010 P11 TLS + Redis + capacity harness verification |
+| `docs/architecture/adr/` | ADR-0001 … ADR-0014: 0008 chained topology (historical), 0014 iFC-orchestrated chain mock (P9b), 0009 platform library, 0010 P11 TLS + Redis + harness |
 | `../as_platform/` (the platform library) | the shared skeleton both AS instances build on, in its own repository checked out beside this one, with its own gate and its library-standard documents (API reference, integration guide, compatibility matrix) |
 | `docs/specs/index.md`, `docs/specs/message-samples/` | normative references and real message samples; the generated samples are gitignored, only the folder `README.md` is tracked |
 | `docs/operations/deployment.md` | topology, port matrix, health checks |
@@ -325,5 +326,6 @@ implemented, and `CHANGELOG.md` for the milestone history.
 
 Apache-2.0 (`LICENSE`). Third-party notices, including the BSD-2-Clause attribution for
 sippy, are in `NOTICE`.
+
 
 Maintained by Dolan Shu <dolan.d.shu@gmail.com>.

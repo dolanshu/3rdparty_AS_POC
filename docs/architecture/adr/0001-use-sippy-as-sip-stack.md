@@ -3,7 +3,9 @@
 - **Status:** Accepted
 - **Date:** 2026-09-15
 - **Deciders:** project maintainer
-- **Related:** §4.5 (ADR requirement), §6 (tech stack), `docs/specs/index.md`
+- **Related:** §4.5 (ADR requirement), §6 (tech stack), `docs/specs/index.md` · ADR-0009 (platform
+  extraction — sippy stays in the library for now) · **`docs/architecture/future/sip-engine-seam.md`**
+  (proposed future stack swap — not a reversal of this ADR)
 
 ## Context
 
@@ -67,3 +69,7 @@ are recorded because they are expensive to re-derive.
   a probe under `tools/` or `tests/` and run it. Documentation for the library is thin,
   so the source and real traffic are the references.
 - **Version pinned.** sippy stays at 2.4.2; upgrading is a decision for the maintainer.
+- **Future stack swap is a separate decision.** Replacing sippy would require a
+  `B2buaEngine` adapter seam in `as_platform` (see
+  `docs/architecture/future/sip-engine-seam.md`); it does not invalidate this ADR for the POC
+  and v1.x delivery track.

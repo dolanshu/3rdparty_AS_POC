@@ -14,8 +14,9 @@
 
 """Mock of the operator's Service-SBC as seen from the trunk.
 
-The mock stands in for the operator boundary: it impersonates an internal AS towards the
-S-CSCF and a core network node towards us. It is built on the same SIP stack as the AS
+The mock stands in for the operator S-SBC boundary: forward side sends INVITE into the AS
+trunk (with Route); return side answers the AS outbound INVITE toward IMS. It is built on
+the same SIP stack as the AS
 (ADR-0001 and ADR-0005) so both sides show identical protocol behaviour.
 
 Nothing in ``src/as_app`` may import from here; the AS has to run against a real S-SBC

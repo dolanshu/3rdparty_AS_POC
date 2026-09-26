@@ -248,7 +248,9 @@ connected.
 **Handover notes (read this before starting M2):**
 
 - **Ports used.** Nothing hardcodes `5060`. The AS uses `SIP_LISTEN_PORT` (default 5060),
-  `SBC_PEER_ADDRESS`/`SBC_PEER_PORT` for the next hop, `INTERNAL_API_PORT` for health and
+  `SBC_PEER_ADDRESS`/`SBC_PEER_PORT` as the fallback next hop for a trunk INVITE that carries
+  no top `Route` (a routed call takes its wire destination from that `Route`, and the hop
+  itself comes from the rule catalogue), and `INTERNAL_API_PORT` for health and
   counters. The mock uses `--listen-port` for its core (UAS) side and `--trunk-port` for
   its trunk (UAC) side, which defaults to `listen-port - 1` — that is why compose exposes
   `15060/udp` and `15061/udp`. Tests allocate every port dynamically
@@ -815,7 +817,11 @@ every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
   status, review-gate findings, the Phase 1 `Call-ID` defect that paused it, the fix that lifted
   the pause and the findings the fix left behind live in `docs/phase2-plan.md` §3 on `phase2`;
   the acceptance evidence is in `docs/acceptance/report.md`. Not merged into `main` and not
-  tagged.
+  tagged. **The trunk-to-trunk wiring delivered there is obsolete** — see P9b.
+
+- **P9b — chained topology rework. [Status: Done]** (2026-09-23). Reworked P9 from
+  `FRAUD_SBC_PEER_* → AS-2` to S-CSCF/iFC orchestration via `src/ims_mock/` (ADR-0014).
+  Plan: **`docs/chained-topology-plan.md`**; acceptance: `docs/acceptance/report.md` (P9b section).
 
 - **P10 — platform extraction. [Status: Done]** (2026-09-20, on `feat/platform-extraction`,
   merged into `phase2`; the library itself lives in its own repository and has never been pushed).
@@ -836,6 +842,37 @@ every Phase 2 conversation reads on entry and updates on exit (`AGENT.md` §15).
   `0.8.0 → 0.9.0`. Both repositories' gates are green — library `make check` 99 passed / 5
   skipped Redis, POC unit tests 210 passed. Not merged into `main`, not tagged; the library
   has no remote to push to.
+
+## Phase 3 (`phase3` branch)
+
+- **P12 — Call Load. [Status: Done]** (2026-09-22). Interactive load generator
+  (`tools/call_load_generator.py`), AS per-call WebSocket events, genuine concurrent-load
+  integration tests. Plan: `docs/phase3-plan.md`; acceptance: `docs/acceptance/criteria.md`
+  (ACC-P12-*). Version `0.10.0`.
+
+- **P13 — Enhanced Console. [Status: Done]** (2026-09-22). Dashboard with vendored Chart.js,
+  SVG topology, load controls. Acceptance: ACC-P13-*. Version `1.0.0`.
+
+- **P14 — Phase 3 × P9b alignment. [Status: Done]** (2026-09-23). Closes the gap
+  between v1.0.0 live-load demo and P9b iFC chain: `scripts/phase3-demo.sh full`,
+  generator `topology=chained`, console mode-aware UI (dual AS event streams, honest SVG).
+  Plan: **`docs/phase3-p9b-alignment-plan.md`**. Explicitly **excludes**
+  `tools/capacity_probe.py`. Target version `1.1.0`.
+
+## Future directions (not scheduled)
+
+These are architecture notes, not milestones. Nothing here is on the P1–P15 delivery track until
+a maintainer schedules it.
+
+- **SIP engine seam (`B2buaEngine`).** Today sippy types leak through `PolicyDecision.outbound_event`
+  (`CCEventTry`) and app controllers still construct sippy outbound events. The platform B2BUA
+  relay shell (~1000 lines in `as_platform/call_controller.py`) is implemented on sippy
+  throughout. A future step introduces a stack-neutral engine in `as_platform` with a
+  `SippyAdapter` (and later a second adapter), after a **one-time** app migration off sippy
+  types. Mock and tools can stay on sippy if the AS speaks RFC 3261 on the wire; integration
+  tests that drive `ED2.loop()` in-process would need a new harness. Full write-up:
+  **`docs/architecture/future/sip-engine-seam.md`**. Reserve **ADR-0017** when implementation is
+  scheduled.
 
 ## Conventions
 

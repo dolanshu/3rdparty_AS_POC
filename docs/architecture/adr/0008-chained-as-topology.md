@@ -1,6 +1,11 @@
 # ADR-0008: Chained AS topology — configuration-only chaining and a distinct Call-ID per B2BUA leg
 
-- **Status:** Accepted
+- **Status:** Accepted (**superseded** by ADR-0014 — kept as historical evidence). Decision 1
+  (trunk-to-trunk wiring via `FRAUD_SBC_PEER_* → AS-2`), decision 2's three-`Call-ID` chain
+  with an `AS-1 → AS-2` leg, and the corresponding wiring in *Consequences* are all
+  **withdrawn**: ADR-0014 ships an iFC-orchestrated chain with **four** AS-leg `Call-ID`s and
+  no AS-to-AS SIP path. Decisions 3–5 (per-leg regeneration, ICID preservation, reject
+  short-circuit) still hold.
 - **Date:** 2026-09-19
 - **Deciders:** project maintainer
 - **Related:** `docs/phase2-plan.md` section 2 (D6) and section 3 (P9), section 5.1, section 6

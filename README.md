@@ -138,6 +138,10 @@ non-default index changes the lock rule.
 
 ### Demo
 
+<p align="center">
+  <img src="docs/carousel.gif" alt="Console live-load dashboard walkthrough" width="760">
+</p>
+
 **`make demo` places a real call and narrates it.** It starts the AS and the emulated
 S-SBC on loopback, dials `+86216180001` → `+8613800138000`, and prints the routing
 decision, the Request-URI before and after number translation, every message on the wire

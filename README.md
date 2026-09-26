@@ -7,6 +7,11 @@ routing** for an enterprise, and an **anti-fraud screen** that inspects the call
 and answers unwanted calls with `608 Rejected` (RFC 8688).
 **Signalling only** — no media, no RTP.
 
+Two more standalone processes complete the picture: an **operations console** — a browser
+dashboard with live charts, a network topology view and a per-call trace (sequence diagram
+plus verbatim SIP) for either AS instance — and a **SIP load generator** that drives
+concurrent real calls over the trunk and exercises the stack under load.
+
 Read `AGENT.md` first: it defines the delivery standards, the layout and the rules of
 engagement for this repository.
 
@@ -42,6 +47,12 @@ engagement for this repository.
   format are rewritten, and only by the number-translation AS.
 - Routing rules and screening data are **declarative data** under `config/`, read-only on
   the console.
+- The **operations console** is a separate web process (no framework on the AS side): it
+  reads each instance's internal API and event stream and renders a live dashboard, a
+  topology diagram (simple or chained) and the per-call trace.
+- The **load generator** is an *external* tool — it never imports the AS or platform code,
+  it is just another SIP peer that places real INVITEs and watches the event streams
+  (`REQ-NF-029`). Rate, concurrency and the enabled call-type mix are set over its REST API.
 
 ## Quickstart
 
@@ -58,6 +69,9 @@ make test               # unit + integration + e2e
 make demo               # places a real call and narrates the translation (see below)
 make demo-fraud         # screens two real calls: one allowed, one answered 608 Rejected
 make demo-chained       # iFC chain: S-CSCF#1 -> S-SBC -> anti-fraud -> S-SBC -> S-CSCF#2 -> S-SBC -> translation -> S-SBC -> S-CSCF -> P-CSCF -> UAS
+
+make gen                # SIP load generator: REST/WebSocket control on http://127.0.0.1:8765
+make console            # operations dashboard on http://127.0.0.1:8081 (see live-load demo below)
 ```
 
 `uv sync` resolves the `as-platform` dependency from `../as_platform` (a `path` source with
@@ -191,6 +205,34 @@ Every leg derives its own dialog `Call-ID`, so the four AS-leg values differ (`X
 preserved, but no observability surface is keyed on it (a registered gap). The demo is a
 guard: it exits non-zero if any of those properties fails. It writes nothing.
 
+**The live-load dashboard puts the stack under real concurrent traffic.** The load
+generator places real SIP INVITEs at the AS while the console renders the event stream as
+live charts (counters, call outcomes, rate) and a dynamic topology diagram whose link
+width and node colour track active calls. Load controls on the page start/stop the pool
+and set the call rate (0.1–10.0/s), the concurrency ceiling and which call types (T1–T6,
+F1–F4) are generated. The simple variant is four local processes:
+
+```bash
+# Terminal A — S-SBC return side (UAS, answers 200 OK)
+make mock-return
+# Terminal B — translation AS (SIP 5060, internal API 8080)
+SBC_PEER_PORT=5061 make dev
+# Terminal C — load generator pointing at the AS (REST/WS on 8765)
+make gen
+# Terminal D — console, then open http://127.0.0.1:8081
+make console
+```
+
+The **chained** flavour (both AS instances plus the iFC orchestrator, five terminals) is
+scripted by `scripts/phase3-demo.sh full`. Full step-by-step for both flavours:
+`docs/demo-steps.md` Part 3.
+
+**The Call Trace view reconstructs a single call.** Selecting a call draws an SVG sequence
+diagram across the trunk, AS-internal and return legs from the recorded trace events;
+clicking an arrow opens the event detail and the verbatim SIP message, served by
+`/api/v1/traces/{call_id}/messages`. See ADR-0016 and the feature package
+`docs/features/call-trace-message-flow/`.
+
 The console renders **either** AS instance. Each process reports a stable instance identity
 on `/healthz` (`number-translation`, `anti-fraud`), which the page shows in its title, in the
 status bar and as the label of the AS node in the topology view — so it is never ambiguous
@@ -224,6 +266,14 @@ All configuration is environment based; copy `.env.example` to `.env` and adjust
 | `FRAUD_SCREENING_FILE` | `config/caller_screening.yaml` | screening data: block/allow lists, window and reputation parameters |
 | `FRAUD_INTERNAL_API_ADDRESS` / `FRAUD_INTERNAL_API_PORT` | `127.0.0.1` / `8082` | how the console reaches the anti-fraud AS |
 | `LOG_LEVEL`, `LOG_STRUCTURED`, `LOG_PAYLOADS` | `INFO` / `true` / `false` | logging (shared by both AS processes) |
+| `AS_INTERNAL_API_URL` / `FRAUD_INTERNAL_API_URL` | `http://127.0.0.1:8080` / `:8082` | which AS instance (and its event stream) the console connects to |
+| `LOAD_API_URL` | `http://127.0.0.1:8765` | how the console reaches the load generator |
+
+The **load generator** itself is configured by CLI flags (not `.env`): `--topology`
+(`simple` / `fraud` / `chained`), `--as-port`, `--http-port` (8765), `--local-port`
+(5099), and the initial `--call-rate` (3.0/s) and `--target-concurrency` (10); all four
+are changeable at runtime via `PUT /load/config`. The **console** binds port 8081 by
+default (`--port`).
 
 Switching from the mock to a real S-SBC is a change of `SBC_PEER_*`, `ALLOWED_PEERS` and the
 next-hop addresses in the active rule set: the AS originates the second leg to the hop the
@@ -258,11 +308,14 @@ src/anti_fraud_as/       the second AS: caller screening, 608 Rejected (ADR-0007
   caller_state.py        process-level call-rate window and reputation decay
   screening_data.py      screening data model, validation, reload
   internal_api.py        routes and payloads over the library's internal-API shell
-src/console/             FastAPI + plain HTML/CSS/JS, separate process — Dashboard,
-                         topology and per-call trace views
+src/console/             FastAPI + plain HTML/CSS/JS, separate process — live dashboard
+                         with charts, topology and per-call trace views
+  static/                vendored Chart.js (no CDN at runtime)
 src/s_sbc_mock/          mock S-SBC: forward side (INVITE + Route) + return side
 tests/{unit,integration,e2e}/
-tools/                   sippy probe, 608 probe, rule viewer, capture helper, demos
+tools/                   call load generator (SIP peer + REST/WS on 8765), sippy and
+                         608 probes, rule viewer, capture helper, demos
+scripts/                 orchestrated live-load demo (simple and chained flavours)
 ```
 
 Rules of the layout: `src/as_app` never imports from `src/s_sbc_mock`; routing decisions
